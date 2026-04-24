@@ -1,26 +1,72 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  /* Colors — Moonbeem brand tokens (design system reset) */
+  --color-moonbeem-navy: #011754;
+  --color-moonbeem-black: #121212;
+  --color-moonbeem-pink: #ffd4f9;
+  --color-moonbeem-ink: #ffffff;
+  --color-moonbeem-ink-muted: rgba(255, 255, 255, 0.7);
+  --color-moonbeem-ink-subtle: rgba(255, 255, 255, 0.45);
+  --color-moonbeem-border: rgba(255, 255, 255, 0.08);
+  --color-moonbeem-border-strong: rgba(255, 255, 255, 0.15);
+
+  /* Accent tokens kept for future tier badges / punch moments */
+  --color-moonbeem-violet: #7c3aed;
+  --color-moonbeem-violet-soft: #c4b5fd;
+  --color-moonbeem-magenta: #ff3da5;
+
+  /* Font families — sans is the default UI font; wordmark is reserved for the Moonbeem logotype */
+  --font-sans:
+    var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-wordmark:
+    var(--font-jost), ui-sans-serif, system-ui, sans-serif;
+
+  /* Display sizes */
+  --text-display-xl: 96px;
+  --text-display-xl--line-height: 0.95;
+  --text-display-lg: 72px;
+  --text-display-lg--line-height: 0.95;
+  --text-display-md: 56px;
+  --text-display-md--line-height: 1;
+  --text-display-sm: 40px;
+  --text-display-sm--line-height: 1.05;
+
+  /* Headings */
+  --text-heading-lg: 32px;
+  --text-heading-lg--line-height: 1.1;
+  --text-heading-md: 24px;
+  --text-heading-md--line-height: 1.2;
+  --text-heading-sm: 20px;
+  --text-heading-sm--line-height: 1.3;
+
+  /* Body + micro */
+  --text-body-lg: 18px;
+  --text-body-lg--line-height: 1.5;
+  --text-body: 16px;
+  --text-body--line-height: 1.5;
+  --text-body-sm: 14px;
+  --text-body-sm--line-height: 1.45;
+  --text-caption: 12px;
+  --text-caption--line-height: 1.4;
+  --text-micro: 10px;
+  --text-micro--line-height: 1.3;
+
+  /* Easing */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-moonbeem-black);
+  color: var(--color-moonbeem-ink);
+}
+
+::selection {
+  background-color: rgba(124, 58, 237, 0.3);
+  color: var(--color-moonbeem-ink);
 }
