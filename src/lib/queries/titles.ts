@@ -54,7 +54,8 @@ export async function getActiveOffersForTitle(
     rent: 2,
     buy: 3,
   };
-  return [...data].sort(
+  const offers = data as TitleOffer[];
+  return [...offers].sort(
     (a, b) => order[a.offer_type] - order[b.offer_type],
-  ) as TitleOffer[];
+  );
 }
