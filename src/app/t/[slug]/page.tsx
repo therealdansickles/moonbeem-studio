@@ -2,10 +2,15 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import {
+  getActiveFanEditsForTitle,
   getActiveOffersForTitle,
   getTitleBySlug,
   type TitleOffer,
 } from "@/lib/queries/titles";
+import TitleTabs from "@/components/TitleTabs";
+import FanEditsTab from "@/components/FanEditsTab";
+import VideosTab from "@/components/VideosTab";
+import StillsTab from "@/components/StillsTab";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -51,13 +56,33 @@ export default async function TitlePage({ params }: PageProps) {
   const { slug } = await params;
   const title = await getTitleBySlug(slug);
   if (!title) notFound();
-  const offers = await getActiveOffersForTitle(title.id);
+  const [offers, fanEdits] = await Promise.all([
+    getActiveOffersForTitle(title.id),
+    getActiveFanEditsForTitle(title.id),
+  ]);
 
   const metaParts = [
     title.director,
     title.year ? String(title.year) : null,
     title.runtime_min ? `${title.runtime_min} min` : null,
   ].filter((part): part is string => Boolean(part));
+
+  const aboutContent = (
+    <div className="flex flex-col items-center gap-8">
+      {title.synopsis && (
+        <p className="text-body text-moonbeem-ink leading-relaxed max-w-prose text-left">
+          {title.synopsis}
+        </p>
+      )}
+      {offers.length > 0 && (
+        <div className="flex flex-col gap-3 w-full max-w-sm">
+          {offers.map((offer) => (
+            <OfferButton key={offer.id} offer={offer} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="min-h-screen flex flex-col items-center gap-8 py-12 px-6 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]">
@@ -90,19 +115,12 @@ export default async function TitlePage({ params }: PageProps) {
         )}
       </div>
 
-      {title.synopsis && (
-        <p className="text-body text-moonbeem-ink leading-relaxed max-w-prose text-left">
-          {title.synopsis}
-        </p>
-      )}
-
-      {offers.length > 0 && (
-        <div className="flex flex-col gap-3 w-full max-w-sm">
-          {offers.map((offer) => (
-            <OfferButton key={offer.id} offer={offer} />
-          ))}
-        </div>
-      )}
+      <TitleTabs
+        aboutContent={aboutContent}
+        fanEditsContent={<FanEditsTab fanEdits={fanEdits} />}
+        videosContent={<VideosTab />}
+        stillsContent={<StillsTab />}
+      />
     </div>
   );
 }

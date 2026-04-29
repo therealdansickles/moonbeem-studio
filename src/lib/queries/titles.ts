@@ -59,3 +59,27 @@ export async function getActiveOffersForTitle(
     (a, b) => order[a.offer_type] - order[b.offer_type],
   );
 }
+
+export type FanEdit = {
+  id: string;
+  title_id: string;
+  platform: "tiktok" | "instagram" | "youtube" | "x";
+  embed_url: string;
+  caption: string | null;
+  creator_handle_displayed: string | null;
+  display_order: number;
+  is_active: boolean;
+};
+
+export async function getActiveFanEditsForTitle(
+  titleId: string,
+): Promise<FanEdit[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("fan_edits")
+    .select("*")
+    .eq("title_id", titleId)
+    .order("display_order", { ascending: true });
+  if (error || !data) return [];
+  return data as FanEdit[];
+}
