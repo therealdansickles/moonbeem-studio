@@ -60,6 +60,59 @@ export async function getActiveOffersForTitle(
   );
 }
 
+export type Clip = {
+  id: string;
+  title_id: string;
+  file_url: string | null;
+  thumbnail_url: string | null;
+  label: string | null;
+  duration_seconds: number | null;
+  file_size_bytes: number | null;
+  content_type: string | null;
+  display_order: number;
+};
+
+export type Still = {
+  id: string;
+  title_id: string;
+  file_url: string | null;
+  thumbnail_url: string | null;
+  alt_text: string | null;
+  photographer_credit: string | null;
+  width: number | null;
+  height: number | null;
+  file_size_bytes: number | null;
+  display_order: number;
+};
+
+export async function getActiveClipsForTitle(titleId: string): Promise<Clip[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("clips")
+    .select(
+      "id, title_id, file_url, thumbnail_url, label, duration_seconds, file_size_bytes, content_type, display_order",
+    )
+    .eq("title_id", titleId)
+    .order("display_order", { ascending: true });
+  if (error || !data) return [];
+  return data as Clip[];
+}
+
+export async function getActiveStillsForTitle(
+  titleId: string,
+): Promise<Still[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("stills")
+    .select(
+      "id, title_id, file_url, thumbnail_url, alt_text, photographer_credit, width, height, file_size_bytes, display_order",
+    )
+    .eq("title_id", titleId)
+    .order("display_order", { ascending: true });
+  if (error || !data) return [];
+  return data as Still[];
+}
+
 export type FanEdit = {
   id: string;
   title_id: string;

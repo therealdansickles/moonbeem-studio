@@ -22,3 +22,17 @@ export const getUser = cache(async () => {
   } = await supabase.auth.getUser();
   return user;
 });
+
+export const requireSuperAdmin = cache(async () => {
+  const session = await verifySession();
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("users")
+    .select("role")
+    .eq("id", session.userId)
+    .maybeSingle();
+  if (data?.role !== "super_admin") {
+    redirect("/");
+  }
+  return session;
+});

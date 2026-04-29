@@ -2,8 +2,10 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import {
+  getActiveClipsForTitle,
   getActiveFanEditsForTitle,
   getActiveOffersForTitle,
+  getActiveStillsForTitle,
   getTitleBySlug,
   type TitleOffer,
 } from "@/lib/queries/titles";
@@ -56,9 +58,11 @@ export default async function TitlePage({ params }: PageProps) {
   const { slug } = await params;
   const title = await getTitleBySlug(slug);
   if (!title) notFound();
-  const [offers, fanEdits] = await Promise.all([
+  const [offers, fanEdits, clips, stills] = await Promise.all([
     getActiveOffersForTitle(title.id),
     getActiveFanEditsForTitle(title.id),
+    getActiveClipsForTitle(title.id),
+    getActiveStillsForTitle(title.id),
   ]);
 
   const metaParts = [
@@ -118,8 +122,8 @@ export default async function TitlePage({ params }: PageProps) {
       <TitleTabs
         aboutContent={aboutContent}
         fanEditsContent={<FanEditsTab fanEdits={fanEdits} />}
-        videosContent={<VideosTab />}
-        stillsContent={<StillsTab />}
+        videosContent={<VideosTab clips={clips} />}
+        stillsContent={<StillsTab stills={stills} />}
       />
     </div>
   );
