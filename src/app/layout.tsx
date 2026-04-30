@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { inter, jost } from "./fonts";
+import TopNav from "@/components/TopNav";
 
 export const metadata: Metadata = {
   title: "Moonbeem",
@@ -18,7 +19,8 @@ export default function RootLayout({
       <body
         className={`${inter.variable} ${jost.variable} min-h-full flex flex-col font-sans antialiased`}
       >
-        {children}
+        <TopNav />
+        <main className="flex-1 flex flex-col">{children}</main>
       </body>
     </html>
   );

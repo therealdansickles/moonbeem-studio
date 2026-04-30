@@ -17,6 +17,32 @@ export type Title = {
   is_featured: boolean;
 };
 
+export type SearchResult = {
+  id: string;
+  slug: string;
+  title: string;
+  poster_url: string | null;
+  year: number | null;
+  distributor: string | null;
+  is_active: boolean;
+  is_featured: boolean;
+  rank: number;
+};
+
+export async function searchTitles(
+  query: string,
+  maxResults = 8,
+): Promise<SearchResult[]> {
+  if (!query || query.trim().length < 2) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("search_titles", {
+    query: query.trim(),
+    max_results: maxResults,
+  });
+  if (error || !data) return [];
+  return data as SearchResult[];
+}
+
 export async function getFeaturedTitles(): Promise<Title[]> {
   const supabase = await createClient();
   const { data, error } = await supabase

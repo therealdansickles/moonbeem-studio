@@ -10,10 +10,21 @@ export async function GET(request: Request) {
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.exchangeCodeForSession(code);
+  const { data: exchange, error } =
+    await supabase.auth.exchangeCodeForSession(code);
 
-  if (error) {
+  if (error || !exchange.user) {
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);
+  }
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("handle")
+    .eq("id", exchange.user.id)
+    .maybeSingle();
+
+  if (!profile?.handle) {
+    return NextResponse.redirect(`${origin}/onboarding/handle`);
   }
 
   return NextResponse.redirect(`${origin}/me`);
