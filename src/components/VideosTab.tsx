@@ -27,7 +27,7 @@ export default function VideosTab({ clips }: Props) {
     return (
       <div className="py-12 text-center">
         <p className="text-body text-moonbeem-ink-muted">
-          Coming soon. The clip library is uploading. 77 clips coming.
+          No clips available yet.
         </p>
       </div>
     );

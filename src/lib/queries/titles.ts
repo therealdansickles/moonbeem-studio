@@ -14,7 +14,20 @@ export type Title = {
   external_watch_url: string | null;
   theatrical_release_start: string | null;
   is_active: boolean;
+  is_featured: boolean;
 };
+
+export async function getFeaturedTitles(): Promise<Title[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("titles")
+    .select("*")
+    .eq("is_featured", true)
+    .eq("is_active", true)
+    .order("created_at", { ascending: true });
+  if (error || !data) return [];
+  return data as Title[];
+}
 
 export type TitleOffer = {
   id: string;

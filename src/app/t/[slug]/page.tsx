@@ -13,6 +13,7 @@ import TitleTabs from "@/components/TitleTabs";
 import FanEditsTab from "@/components/FanEditsTab";
 import VideosTab from "@/components/VideosTab";
 import StillsTab from "@/components/StillsTab";
+import RequestFanEditsCTA from "@/components/RequestFanEditsCTA";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -78,19 +79,22 @@ export default async function TitlePage({ params }: PageProps) {
           {title.synopsis}
         </p>
       )}
-      {offers.length > 0 && (
+      {title.is_active && offers.length > 0 && (
         <div className="flex flex-col gap-3 w-full max-w-sm">
           {offers.map((offer) => (
             <OfferButton key={offer.id} offer={offer} />
           ))}
         </div>
       )}
+      {clips.length === 0 && (
+        <RequestFanEditsCTA titleId={title.id} titleName={title.title} />
+      )}
     </div>
   );
 
   return (
     <div className="min-h-screen flex flex-col items-center gap-8 py-12 px-6 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]">
-      {title.poster_url && (
+      {title.poster_url ? (
         <div className="max-w-[440px] w-full rounded-lg overflow-hidden shadow-2xl">
           <Image
             src={title.poster_url}
@@ -100,6 +104,12 @@ export default async function TitlePage({ params }: PageProps) {
             className="w-full h-auto"
             priority
           />
+        </div>
+      ) : (
+        <div className="max-w-[440px] w-full aspect-[2/3] rounded-lg overflow-hidden shadow-2xl bg-gradient-to-br from-moonbeem-navy to-moonbeem-black flex items-center justify-center p-8">
+          <p className="font-wordmark text-display-sm text-moonbeem-ink-muted text-center">
+            {title.title}
+          </p>
         </div>
       )}
 
