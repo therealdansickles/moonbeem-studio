@@ -175,3 +175,60 @@ export async function getActiveFanEditsForTitle(
   if (error || !data) return [];
   return data as FanEdit[];
 }
+
+export type FanEditWithTitle = {
+  id: string;
+  title_id: string;
+  creator_handle: string;
+  platform: "tiktok" | "instagram" | "youtube" | "x";
+  embed_url: string;
+  title_slug: string;
+  title_name: string;
+  title_poster_url: string;
+  created_at: string;
+};
+
+type FanEditJoinRow = {
+  id: string;
+  title_id: string;
+  platform: "tiktok" | "instagram" | "youtube" | "x";
+  embed_url: string;
+  creator_handle_displayed: string | null;
+  created_at: string;
+  titles: {
+    slug: string;
+    title: string;
+    poster_url: string | null;
+    is_active: boolean;
+  } | null;
+};
+
+export async function getRecentFanEdits(
+  limit = 12,
+): Promise<FanEditWithTitle[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("fan_edits")
+    .select(
+      "id, title_id, platform, embed_url, creator_handle_displayed, created_at, titles!inner(slug, title, poster_url, is_active)",
+    )
+    .eq("is_active", true)
+    .eq("verification_status", "auto_verified")
+    .eq("titles.is_active", true)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error || !data) return [];
+  return (data as unknown as FanEditJoinRow[])
+    .filter((r) => r.titles && r.titles.poster_url)
+    .map((r) => ({
+      id: r.id,
+      title_id: r.title_id,
+      creator_handle: r.creator_handle_displayed ?? "anon",
+      platform: r.platform,
+      embed_url: r.embed_url,
+      title_slug: r.titles!.slug,
+      title_name: r.titles!.title,
+      title_poster_url: r.titles!.poster_url!,
+      created_at: r.created_at,
+    }));
+}

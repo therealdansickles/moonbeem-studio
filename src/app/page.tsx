@@ -1,8 +1,15 @@
-import { getFeaturedTitles } from "@/lib/queries/titles";
+import {
+  getFeaturedTitles,
+  getRecentFanEdits,
+} from "@/lib/queries/titles";
 import TitleCarousel from "@/components/TitleCarousel";
+import FanEditCarousel from "@/components/FanEditCarousel";
 
 export default async function Home() {
-  const featured = await getFeaturedTitles();
+  const [featured, recentFanEdits] = await Promise.all([
+    getFeaturedTitles(),
+    getRecentFanEdits(12),
+  ]);
 
   return (
     <div className="relative flex flex-col items-center bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)] flex-1">
@@ -12,9 +19,15 @@ export default async function Home() {
         </h1>
       </div>
 
-      <div className="w-full pb-20">
+      <div className="w-full pb-12">
         <TitleCarousel title="Featured" titles={featured} />
       </div>
+
+      {recentFanEdits.length > 0 && (
+        <div className="w-full pb-20">
+          <FanEditCarousel title="Recent Remixes" fanEdits={recentFanEdits} />
+        </div>
+      )}
     </div>
   );
 }
