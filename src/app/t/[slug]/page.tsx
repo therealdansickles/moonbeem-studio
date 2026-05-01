@@ -14,6 +14,7 @@ import FanEditsTab from "@/components/FanEditsTab";
 import VideosTab from "@/components/VideosTab";
 import StillsTab from "@/components/StillsTab";
 import RequestFanEditsCTA from "@/components/RequestFanEditsCTA";
+import AboutCredits from "@/components/AboutCredits";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -79,6 +80,7 @@ export default async function TitlePage({ params }: PageProps) {
           {title.synopsis}
         </p>
       )}
+      <AboutCredits title={title} />
       {title.is_active && offers.length > 0 && (
         <div className="flex flex-col gap-3 w-full max-w-sm">
           {offers.map((offer) => (

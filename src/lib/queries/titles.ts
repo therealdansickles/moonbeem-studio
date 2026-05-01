@@ -1,5 +1,19 @@
 import { createClient } from "@/lib/supabase/server";
 
+export type CastMember = {
+  name: string;
+  character?: string | null;
+  order?: number | null;
+  profile_path?: string | null;
+};
+
+export type CrewMember = {
+  name: string;
+  job: string;
+  department?: string | null;
+  profile_path?: string | null;
+};
+
 export type Title = {
   id: string;
   slug: string;
@@ -15,7 +29,89 @@ export type Title = {
   theatrical_release_start: string | null;
   is_active: boolean;
   is_featured: boolean;
+  cast_members: CastMember[] | null;
+  crew: CrewMember[] | null;
 };
+
+const WRITING_JOBS = new Set([
+  "Writer",
+  "Screenplay",
+  "Story",
+  "Author",
+  "Co-Writer",
+  "Novel",
+]);
+
+const COMPOSER_JOBS = new Set([
+  "Original Music Composer",
+  "Music",
+  "Composer",
+  "Music Composer",
+  "Score",
+]);
+
+const CINEMATOGRAPHER_JOBS = new Set([
+  "Director of Photography",
+  "Cinematography",
+]);
+
+const EDITOR_JOBS = new Set(["Editor"]);
+
+function uniqueNames(names: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const n of names) {
+    const key = n.trim();
+    if (!key) continue;
+    const k = key.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(key);
+  }
+  return out;
+}
+
+function namesByJob(
+  crew: CrewMember[] | null,
+  jobs: Set<string>,
+): string[] {
+  if (!crew) return [];
+  return uniqueNames(crew.filter((c) => jobs.has(c.job)).map((c) => c.name));
+}
+
+export function getDirectors(crew: CrewMember[] | null): string[] {
+  if (!crew) return [];
+  return uniqueNames(
+    crew.filter((c) => c.job === "Director").map((c) => c.name),
+  );
+}
+
+export function getWriters(crew: CrewMember[] | null): string[] {
+  return namesByJob(crew, WRITING_JOBS);
+}
+
+export function getCinematographers(crew: CrewMember[] | null): string[] {
+  return namesByJob(crew, CINEMATOGRAPHER_JOBS);
+}
+
+export function getEditors(crew: CrewMember[] | null): string[] {
+  return namesByJob(crew, EDITOR_JOBS);
+}
+
+export function getComposers(crew: CrewMember[] | null): string[] {
+  return namesByJob(crew, COMPOSER_JOBS);
+}
+
+export function getTopCast(
+  cast: CastMember[] | null,
+  limit = 5,
+): string[] {
+  if (!cast) return [];
+  const sorted = cast
+    .slice()
+    .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+  return uniqueNames(sorted.map((c) => c.name)).slice(0, limit);
+}
 
 export type SearchResult = {
   id: string;
@@ -41,6 +137,33 @@ export async function searchTitles(
   });
   if (error || !data) return [];
   return data as SearchResult[];
+}
+
+export type PersonSearchResult = {
+  id: string;
+  slug: string;
+  title: string;
+  poster_url: string | null;
+  year: number | null;
+  distributor: string | null;
+  is_active: boolean;
+  is_featured: boolean;
+  role_in_film: string | null;
+};
+
+export async function searchTitlesByPerson(
+  personName: string,
+  maxResults = 60,
+): Promise<PersonSearchResult[]> {
+  const trimmed = personName.trim();
+  if (!trimmed) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("search_titles_by_person", {
+    person_name: trimmed,
+    max_results: maxResults,
+  });
+  if (error || !data) return [];
+  return data as PersonSearchResult[];
 }
 
 export async function getFeaturedTitles(): Promise<Title[]> {
