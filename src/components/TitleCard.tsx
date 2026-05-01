@@ -20,7 +20,8 @@ export default function TitleCard({ title }: Props) {
           alt={`${title.title} poster`}
           fill
           sizes="(max-width: 768px) 50vw, 240px"
-          className="object-cover"
+          draggable={false}
+          className="select-none object-cover"
         />
       ) : (
         <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-moonbeem-navy to-moonbeem-black p-4 text-center">

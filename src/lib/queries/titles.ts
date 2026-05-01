@@ -180,8 +180,10 @@ export type FanEditWithTitle = {
   id: string;
   title_id: string;
   creator_handle: string;
+  creator_handle_displayed: string | null;
   platform: "tiktok" | "instagram" | "youtube" | "x";
   embed_url: string;
+  thumbnail_url: string | null;
   title_slug: string;
   title_name: string;
   title_poster_url: string;
@@ -193,6 +195,7 @@ type FanEditJoinRow = {
   title_id: string;
   platform: "tiktok" | "instagram" | "youtube" | "x";
   embed_url: string;
+  thumbnail_url: string | null;
   creator_handle_displayed: string | null;
   created_at: string;
   titles: {
@@ -210,7 +213,7 @@ export async function getRecentFanEdits(
   const { data, error } = await supabase
     .from("fan_edits")
     .select(
-      "id, title_id, platform, embed_url, creator_handle_displayed, created_at, titles!inner(slug, title, poster_url, is_active)",
+      "id, title_id, platform, embed_url, thumbnail_url, creator_handle_displayed, created_at, titles!inner(slug, title, poster_url, is_active)",
     )
     .eq("is_active", true)
     .eq("verification_status", "auto_verified")
@@ -224,8 +227,10 @@ export async function getRecentFanEdits(
       id: r.id,
       title_id: r.title_id,
       creator_handle: r.creator_handle_displayed ?? "anon",
+      creator_handle_displayed: r.creator_handle_displayed,
       platform: r.platform,
       embed_url: r.embed_url,
+      thumbnail_url: r.thumbnail_url,
       title_slug: r.titles!.slug,
       title_name: r.titles!.title,
       title_poster_url: r.titles!.poster_url!,

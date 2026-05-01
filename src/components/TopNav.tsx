@@ -10,7 +10,7 @@ export default async function TopNav() {
 
   return (
     <header className="sticky top-0 z-20 h-16 border-b border-white/5 bg-moonbeem-black/80 backdrop-blur-md">
-      <div className="mx-auto flex h-full max-w-7xl items-center gap-4 px-4 md:gap-6 md:px-6">
+      <div className="flex h-full w-full items-center gap-4 px-6 md:gap-6">
         <Link
           href="/"
           aria-label="Moonbeem home"
