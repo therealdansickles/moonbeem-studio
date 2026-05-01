@@ -76,6 +76,22 @@ export default function AccountMenu({
               {email}
             </p>
           </div>
+          {handle && (
+            <Link
+              href={`/c/${handle}`}
+              onClick={() => setOpen(false)}
+              className="block px-4 py-2 text-body-sm text-moonbeem-ink hover:bg-white/5 transition-colors"
+            >
+              View profile
+            </Link>
+          )}
+          <Link
+            href="/me/edit"
+            onClick={() => setOpen(false)}
+            className="block px-4 py-2 text-body-sm text-moonbeem-ink hover:bg-white/5 transition-colors"
+          >
+            Edit profile
+          </Link>
           <Link
             href="/me"
             onClick={() => setOpen(false)}
