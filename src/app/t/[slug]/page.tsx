@@ -71,65 +71,24 @@ export default async function TitlePage({ params }: PageProps) {
   ]);
 
   const supabase = await createClient();
-  const userResult = await supabase.auth.getUser();
-  const user = userResult.data.user;
-  console.log("[t/slug] auth.getUser", {
-    slug,
-    titleId: title.id,
-    userId: user?.id ?? null,
-    userError: userResult.error?.message ?? null,
-  });
-
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   let alreadyRequested = false;
   let requestedAt: string | null = null;
   if (user) {
-    console.log("[t/slug] entered user block", {
-      titleId: title.id,
-      userId: user.id,
-    });
-    try {
-      console.log("[t/slug] before maybeSingle");
-      const lookup = await supabase
-        .from("title_requests")
-        .select("requested_at")
-        .eq("title_id", title.id)
-        .eq("user_id", user.id)
-        .eq("request_type", "fan_edits")
-        .maybeSingle();
-      console.log("[t/slug] after maybeSingle", {
-        titleId: title.id,
-        userId: user.id,
-        hasData: lookup.data !== null && lookup.data !== undefined,
-        rowRaw: lookup.data,
-        errorCode: lookup.error?.code ?? null,
-        errorMessage: lookup.error?.message ?? null,
-        errorDetails: lookup.error?.details ?? null,
-        errorHint: lookup.error?.hint ?? null,
-        status: lookup.status,
-        statusText: lookup.statusText,
-      });
-      if (lookup.data) {
-        alreadyRequested = true;
-        requestedAt = lookup.data.requested_at as string;
-      }
-    } catch (err) {
-      const e = err as Error;
-      console.log("[t/slug] maybeSingle threw", {
-        titleId: title.id,
-        userId: user.id,
-        name: e?.name ?? null,
-        message: e?.message ?? null,
-        stack: e?.stack ?? null,
-      });
+    const { data: existingRequest } = await supabase
+      .from("title_requests")
+      .select("requested_at")
+      .eq("title_id", title.id)
+      .eq("user_id", user.id)
+      .eq("request_type", "fan_edits")
+      .maybeSingle();
+    if (existingRequest) {
+      alreadyRequested = true;
+      requestedAt = existingRequest.requested_at as string;
     }
-  } else {
-    console.log("[t/slug] skipped user block (user falsy)");
   }
-  console.log("[t/slug] CTA props", {
-    slug,
-    alreadyRequested,
-    requestedAt,
-  });
 
   const metaParts = [
     title.director,
