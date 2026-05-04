@@ -123,52 +123,61 @@ export default async function TitlePage({ params }: PageProps) {
     </div>
   );
 
+  const posterEl = title.poster_url ? (
+    <div className="w-full max-w-[440px] md:max-w-none rounded-lg overflow-hidden shadow-2xl">
+      <Image
+        src={title.poster_url}
+        alt={`${title.title} poster`}
+        width={600}
+        height={900}
+        className="w-full h-auto"
+        priority
+      />
+    </div>
+  ) : (
+    <div className="w-full max-w-[440px] md:max-w-none aspect-[2/3] rounded-lg overflow-hidden shadow-2xl bg-gradient-to-br from-moonbeem-navy to-moonbeem-black flex items-center justify-center p-8">
+      <p className="font-wordmark text-display-sm text-moonbeem-ink-muted text-center">
+        {title.title}
+      </p>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen flex flex-col items-center gap-8 py-12 px-6 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]">
+    <div className="min-h-screen py-12 px-6 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]">
       <Suspense fallback={null}>
         <RequestSubmittedToast />
       </Suspense>
-      {title.poster_url ? (
-        <div className="max-w-[440px] w-full rounded-lg overflow-hidden shadow-2xl">
-          <Image
-            src={title.poster_url}
-            alt={`${title.title} poster`}
-            width={600}
-            height={900}
-            className="w-full h-auto"
-            priority
+
+      <div className="mx-auto max-w-6xl flex flex-col items-center gap-8 md:flex-row md:items-start md:gap-10">
+        <div className="w-full max-w-[440px] md:w-[320px] md:max-w-none md:flex-shrink-0 md:sticky md:top-8">
+          {posterEl}
+        </div>
+
+        <div className="w-full md:flex-1 md:min-w-0 flex flex-col items-center gap-8 md:items-stretch">
+          <div className="flex flex-col items-center gap-3 max-w-prose text-center md:items-start md:text-left md:max-w-none">
+            <h1 className="font-wordmark font-bold text-display-lg text-moonbeem-pink m-0">
+              {title.title}
+            </h1>
+            {metaParts.length > 0 && (
+              <p className="text-body text-moonbeem-ink-muted m-0">
+                {metaParts.join(" · ")}
+              </p>
+            )}
+            {title.distributor && (
+              <p className="text-body-sm text-moonbeem-ink-subtle m-0">
+                Distributed by {title.distributor}
+              </p>
+            )}
+          </div>
+
+          <TitleTabs
+            aboutContent={aboutContent}
+            fanEditsContent={<FanEditsTab fanEdits={fanEdits} />}
+            videosContent={<VideosTab clips={clips} />}
+            stillsContent={<StillsTab stills={stills} />}
           />
         </div>
-      ) : (
-        <div className="max-w-[440px] w-full aspect-[2/3] rounded-lg overflow-hidden shadow-2xl bg-gradient-to-br from-moonbeem-navy to-moonbeem-black flex items-center justify-center p-8">
-          <p className="font-wordmark text-display-sm text-moonbeem-ink-muted text-center">
-            {title.title}
-          </p>
-        </div>
-      )}
-
-      <div className="flex flex-col items-center gap-3 max-w-prose text-center">
-        <h1 className="font-wordmark font-bold text-display-lg text-moonbeem-pink m-0">
-          {title.title}
-        </h1>
-        {metaParts.length > 0 && (
-          <p className="text-body text-moonbeem-ink-muted m-0">
-            {metaParts.join(" · ")}
-          </p>
-        )}
-        {title.distributor && (
-          <p className="text-body-sm text-moonbeem-ink-subtle m-0">
-            Distributed by {title.distributor}
-          </p>
-        )}
       </div>
-
-      <TitleTabs
-        aboutContent={aboutContent}
-        fanEditsContent={<FanEditsTab fanEdits={fanEdits} />}
-        videosContent={<VideosTab clips={clips} />}
-        stillsContent={<StillsTab stills={stills} />}
-      />
     </div>
   );
 }

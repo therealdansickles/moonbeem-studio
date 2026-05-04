@@ -86,3 +86,11 @@ body {
 .animate-fade-in {
   animation: fade-in 200ms var(--ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1)) both;
 }
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

@@ -127,8 +127,11 @@ export default function Top12Grid({ topTitles, isOwner }: Props) {
     }
   }
 
+  // 3 cols × 4 rows on mobile, 6 cols × 2 rows on desktop. Tighter
+  // gap on desktop to give each cell ~170px width inside the
+  // max-w-6xl profile container.
   const gridClass =
-    "grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4";
+    "grid grid-cols-3 md:grid-cols-6 gap-2 md:gap-3";
 
   // View-only path (or owner not in reorder mode): plain grid, server-rendered TitleCards.
   if (!isOwner) {
