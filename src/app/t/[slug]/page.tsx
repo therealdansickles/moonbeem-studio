@@ -83,23 +83,47 @@ export default async function TitlePage({ params }: PageProps) {
   let alreadyRequested = false;
   let requestedAt: string | null = null;
   if (user) {
-    const lookup = await supabase
-      .from("title_requests")
-      .select("requested_at")
-      .eq("title_id", title.id)
-      .eq("user_id", user.id)
-      .eq("request_type", "fan_edits")
-      .maybeSingle();
-    console.log("[t/slug] title_requests lookup", {
+    console.log("[t/slug] entered user block", {
       titleId: title.id,
       userId: user.id,
-      row: lookup.data,
-      error: lookup.error?.message ?? null,
     });
-    if (lookup.data) {
-      alreadyRequested = true;
-      requestedAt = lookup.data.requested_at as string;
+    try {
+      console.log("[t/slug] before maybeSingle");
+      const lookup = await supabase
+        .from("title_requests")
+        .select("requested_at")
+        .eq("title_id", title.id)
+        .eq("user_id", user.id)
+        .eq("request_type", "fan_edits")
+        .maybeSingle();
+      console.log("[t/slug] after maybeSingle", {
+        titleId: title.id,
+        userId: user.id,
+        hasData: lookup.data !== null && lookup.data !== undefined,
+        rowRaw: lookup.data,
+        errorCode: lookup.error?.code ?? null,
+        errorMessage: lookup.error?.message ?? null,
+        errorDetails: lookup.error?.details ?? null,
+        errorHint: lookup.error?.hint ?? null,
+        status: lookup.status,
+        statusText: lookup.statusText,
+      });
+      if (lookup.data) {
+        alreadyRequested = true;
+        requestedAt = lookup.data.requested_at as string;
+      }
+    } catch (err) {
+      const e = err as Error;
+      console.log("[t/slug] maybeSingle threw", {
+        titleId: title.id,
+        userId: user.id,
+        name: e?.name ?? null,
+        message: e?.message ?? null,
+        stack: e?.stack ?? null,
+      });
     }
+  } else {
+    console.log("[t/slug] skipped user block (user falsy)");
   }
   console.log("[t/slug] CTA props", {
     slug,
