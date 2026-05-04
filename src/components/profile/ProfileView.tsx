@@ -41,7 +41,7 @@ export default function ProfileView({
   const displayName = profile.display_name ?? profile.handle;
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-10 px-6 py-10">
+    <div className="mx-auto flex max-w-7xl flex-col gap-10 px-6 py-10">
       <header className="relative flex flex-col gap-6 sm:flex-row sm:items-start">
         <AvatarCircle
           avatarUrl={profile.avatar_url}

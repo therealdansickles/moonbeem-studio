@@ -149,7 +149,7 @@ export default async function TitlePage({ params }: PageProps) {
       </Suspense>
 
       <div className="mx-auto max-w-6xl flex flex-col items-center gap-8 md:flex-row md:items-start md:gap-10">
-        <div className="w-full max-w-[440px] md:w-[320px] md:max-w-none md:flex-shrink-0 md:sticky md:top-8">
+        <div className="w-full max-w-[440px] md:w-[320px] md:max-w-none md:flex-shrink-0 md:sticky md:top-8 md:max-h-[calc(100vh-4rem)] md:overflow-y-auto scrollbar-hide">
           {posterEl}
         </div>
 

@@ -127,9 +127,10 @@ export default function Top12Grid({ topTitles, isOwner }: Props) {
     }
   }
 
-  // 3 cols × 4 rows on mobile, 6 cols × 2 rows on desktop. Tighter
-  // gap on desktop to give each cell ~170px width inside the
-  // max-w-6xl profile container.
+  // 3 cols × 4 rows on mobile, 6 cols × 2 rows on desktop. Profile
+  // container is max-w-7xl (1280px) so at viewports ≥1280px each
+  // cell renders ~195px wide — comfortably inside the 160-180px
+  // target with poster artwork legible.
   const gridClass =
     "grid grid-cols-3 md:grid-cols-6 gap-2 md:gap-3";
 
