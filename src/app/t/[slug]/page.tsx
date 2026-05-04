@@ -71,24 +71,41 @@ export default async function TitlePage({ params }: PageProps) {
   ]);
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const userResult = await supabase.auth.getUser();
+  const user = userResult.data.user;
+  console.log("[t/slug] auth.getUser", {
+    slug,
+    titleId: title.id,
+    userId: user?.id ?? null,
+    userError: userResult.error?.message ?? null,
+  });
+
   let alreadyRequested = false;
   let requestedAt: string | null = null;
   if (user) {
-    const { data: existingRequest } = await supabase
+    const lookup = await supabase
       .from("title_requests")
       .select("requested_at")
       .eq("title_id", title.id)
       .eq("user_id", user.id)
       .eq("request_type", "fan_edits")
       .maybeSingle();
-    if (existingRequest) {
+    console.log("[t/slug] title_requests lookup", {
+      titleId: title.id,
+      userId: user.id,
+      row: lookup.data,
+      error: lookup.error?.message ?? null,
+    });
+    if (lookup.data) {
       alreadyRequested = true;
-      requestedAt = existingRequest.requested_at as string;
+      requestedAt = lookup.data.requested_at as string;
     }
   }
+  console.log("[t/slug] CTA props", {
+    slug,
+    alreadyRequested,
+    requestedAt,
+  });
 
   const metaParts = [
     title.director,
