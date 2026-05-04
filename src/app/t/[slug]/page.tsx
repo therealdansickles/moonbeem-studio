@@ -14,7 +14,9 @@ import FanEditsTab from "@/components/FanEditsTab";
 import VideosTab from "@/components/VideosTab";
 import StillsTab from "@/components/StillsTab";
 import RequestFanEditsCTA from "@/components/RequestFanEditsCTA";
+import RequestSubmittedToast from "@/components/RequestSubmittedToast";
 import AboutCredits from "@/components/AboutCredits";
+import { Suspense } from "react";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -89,13 +91,20 @@ export default async function TitlePage({ params }: PageProps) {
         </div>
       )}
       {clips.length === 0 && (
-        <RequestFanEditsCTA titleId={title.id} titleName={title.title} />
+        <RequestFanEditsCTA
+          titleId={title.id}
+          titleName={title.title}
+          titleSlug={title.slug}
+        />
       )}
     </div>
   );
 
   return (
     <div className="min-h-screen flex flex-col items-center gap-8 py-12 px-6 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]">
+      <Suspense fallback={null}>
+        <RequestSubmittedToast />
+      </Suspense>
       {title.poster_url ? (
         <div className="max-w-[440px] w-full rounded-lg overflow-hidden shadow-2xl">
           <Image

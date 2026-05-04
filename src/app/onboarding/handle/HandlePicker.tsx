@@ -10,7 +10,15 @@ function sanitize(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 30);
 }
 
-export default function HandlePicker() {
+type Props = {
+  next?: string | null;
+  requestSubmittedTitle?: string | null;
+};
+
+export default function HandlePicker({
+  next,
+  requestSubmittedTitle,
+}: Props = {}) {
   const router = useRouter();
   const [handle, setHandle] = useState("");
   const [status, setStatus] = useState<AvailStatus>("idle");
@@ -68,7 +76,15 @@ export default function HandlePicker() {
         setSubmitting(false);
         return;
       }
-      router.replace("/me");
+      const dest = next ?? "/me";
+      const tail = (() => {
+        if (!requestSubmittedTitle) return "";
+        const p = new URLSearchParams();
+        p.set("request_submitted", "1");
+        p.set("title", requestSubmittedTitle);
+        return `?${p.toString()}`;
+      })();
+      router.replace(`${dest}${tail}`);
       router.refresh();
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));

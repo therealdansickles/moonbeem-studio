@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 type Status = "idle" | "sending" | "sent" | "error";
 
-export default function LoginPage() {
+function LoginForm() {
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [errorMsg, setErrorMsg] = useState("");
@@ -15,11 +17,27 @@ export default function LoginPage() {
     setStatus("sending");
     setErrorMsg("");
 
+    const callbackParams = new URLSearchParams();
+    const passthrough = [
+      "redirect_to",
+      "action",
+      "title_id",
+      "title",
+      "request_type",
+    ];
+    for (const key of passthrough) {
+      const value = searchParams.get(key);
+      if (value) callbackParams.set(key, value);
+    }
+    const callbackUrl =
+      `${window.location.origin}/auth/callback` +
+      (callbackParams.size > 0 ? `?${callbackParams.toString()}` : "");
+
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: callbackUrl,
       },
     });
 
@@ -31,6 +49,13 @@ export default function LoginPage() {
 
     setStatus("sent");
   }
+
+  const titleParam = searchParams.get("title");
+  const action = searchParams.get("action");
+  const headline =
+    action === "request_fan_edits" && titleParam
+      ? `Sign in to request fan edits for ${titleParam}.`
+      : null;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-12 px-6 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]">
@@ -47,6 +72,11 @@ export default function LoginPage() {
           onSubmit={onSubmit}
           className="w-full max-w-sm flex flex-col gap-4"
         >
+          {headline && (
+            <p className="text-body text-moonbeem-ink text-center">
+              {headline}
+            </p>
+          )}
           <label
             htmlFor="email"
             className="text-body-sm text-moonbeem-ink-muted"
@@ -78,5 +108,13 @@ export default function LoginPage() {
         </form>
       )}
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

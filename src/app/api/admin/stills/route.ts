@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
 import { buildPublicUrl } from "@/lib/r2/upload";
+import { notifyTitleRequesters } from "@/lib/notifications/notify-title-requesters";
 
 type Body = {
   title_id?: string;
@@ -61,5 +62,16 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  try {
+    await notifyTitleRequesters({
+      titleId: body.title_id,
+      contentType: "still",
+      contentIds: [data.id as string],
+    });
+  } catch (err) {
+    console.error("notifyTitleRequesters failed (still)", err);
+  }
+
   return NextResponse.json(data, { status: 201 });
 }

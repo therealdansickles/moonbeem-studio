@@ -5,11 +5,16 @@ import { useState } from "react";
 type Props = {
   titleId: string;
   titleName: string;
+  titleSlug: string;
 };
 
 type Status = "idle" | "submitting" | "done" | "error";
 
-export default function RequestFanEditsCTA({ titleId, titleName }: Props) {
+export default function RequestFanEditsCTA({
+  titleId,
+  titleName,
+  titleSlug,
+}: Props) {
   const [status, setStatus] = useState<Status>("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -21,8 +26,25 @@ export default function RequestFanEditsCTA({ titleId, titleName }: Props) {
       const res = await fetch("/api/titles/request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title_id: titleId }),
+        body: JSON.stringify({
+          title_id: titleId,
+          redirect_to: `/t/${titleSlug}`,
+          title_name: titleName,
+          request_type: "fan_edits",
+        }),
       });
+
+      if (res.status === 401) {
+        const data = (await res.json().catch(() => ({}))) as {
+          requires_auth?: boolean;
+          redirect_to?: string;
+        };
+        if (data.requires_auth && data.redirect_to) {
+          window.location.href = data.redirect_to;
+          return;
+        }
+      }
+
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text.slice(0, 200) || `request ${res.status}`);
