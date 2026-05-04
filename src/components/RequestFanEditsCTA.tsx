@@ -1,5 +1,35 @@
 "use client";
 
+/**
+ * CTA architecture note (May 2026):
+ *
+ * This component currently handles two states: "Request fan edits"
+ * (with idempotent submitted-state tracking) and the auth-gate
+ * redirect for signed-out users. The In Theaters CTA renders
+ * separately from the offers stack on the title page.
+ *
+ * Future states this component (or a parent CTA orchestrator) will
+ * need to handle:
+ * - Theatrical: ticket purchase links (Atom Tickets, Fandango, etc.)
+ * - Pre-TVOD: "Coming soon to digital" placeholder
+ * - TVOD live: multiple destinations (Apple TV, Amazon, Vudu,
+ *   Moonbeem rental via Stripe Connect)
+ * - Post-TVOD streaming: subscription destinations (Netflix, Mubi,
+ *   Criterion Channel)
+ * - Library / archival: no transactional CTA, just request flows
+ *
+ * Plus the orthogonal request_type axis: fan_edits vs
+ * clips_and_stills (schema is ready; UI is single-button today).
+ *
+ * Open architectural questions when these states ship:
+ * 1. Single CTA vs. stacked CTAs when multiple destinations exist
+ * 2. Where the request CTA fits in priority hierarchy when
+ *    transactional options are live (probably demoted to secondary)
+ *
+ * Don't refactor toward this prematurely — the right design will
+ * come from real distributor TVOD link requirements.
+ */
+
 import { useState } from "react";
 import { formatRelativeDays } from "@/lib/relative-time";
 
