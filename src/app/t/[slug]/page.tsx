@@ -16,6 +16,7 @@ import StillsTab from "@/components/StillsTab";
 import RequestFanEditsCTA from "@/components/RequestFanEditsCTA";
 import RequestSubmittedToast from "@/components/RequestSubmittedToast";
 import AboutCredits from "@/components/AboutCredits";
+import { createClient } from "@/lib/supabase/server";
 import { Suspense } from "react";
 
 type PageProps = { params: Promise<{ slug: string }> };
@@ -69,6 +70,26 @@ export default async function TitlePage({ params }: PageProps) {
     getActiveStillsForTitle(title.id),
   ]);
 
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  let alreadyRequested = false;
+  let requestedAt: string | null = null;
+  if (user) {
+    const { data: existingRequest } = await supabase
+      .from("title_requests")
+      .select("requested_at")
+      .eq("title_id", title.id)
+      .eq("user_id", user.id)
+      .eq("request_type", "fan_edits")
+      .maybeSingle();
+    if (existingRequest) {
+      alreadyRequested = true;
+      requestedAt = existingRequest.requested_at as string;
+    }
+  }
+
   const metaParts = [
     title.director,
     title.year ? String(title.year) : null,
@@ -95,6 +116,8 @@ export default async function TitlePage({ params }: PageProps) {
           titleId={title.id}
           titleName={title.title}
           titleSlug={title.slug}
+          alreadyRequested={alreadyRequested}
+          requestedAt={requestedAt}
         />
       )}
     </div>

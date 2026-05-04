@@ -87,6 +87,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const { data: existing } = await supabase
+    .from("title_requests")
+    .select("requested_at")
+    .eq("title_id", body.title_id)
+    .eq("user_id", user.id)
+    .eq("request_type", requestType)
+    .maybeSingle();
+
+  if (existing) {
+    return NextResponse.json({
+      already_requested: true,
+      requested_at: existing.requested_at,
+    });
+  }
+
   const { error } = await supabase.from("title_requests").insert({
     title_id: body.title_id,
     user_id: user.id,
@@ -95,9 +110,20 @@ export async function POST(request: NextRequest) {
   });
 
   if (error) {
-    // 23505 = unique violation: already requested. Treat as success (idempotent).
     if (error.code === "23505") {
-      return NextResponse.json({ success: true, alreadyRequested: true });
+      // Race: another request inserted between our SELECT and INSERT.
+      // Re-fetch so we can return the canonical timestamp.
+      const { data: row } = await supabase
+        .from("title_requests")
+        .select("requested_at")
+        .eq("title_id", body.title_id)
+        .eq("user_id", user.id)
+        .eq("request_type", requestType)
+        .maybeSingle();
+      return NextResponse.json({
+        already_requested: true,
+        requested_at: row?.requested_at ?? null,
+      });
     }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

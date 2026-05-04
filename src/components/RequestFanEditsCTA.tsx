@@ -1,11 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { formatRelativeDays } from "@/lib/relative-time";
 
 type Props = {
   titleId: string;
   titleName: string;
   titleSlug: string;
+  alreadyRequested: boolean;
+  requestedAt: string | null;
 };
 
 type Status = "idle" | "submitting" | "done" | "error";
@@ -14,12 +17,17 @@ export default function RequestFanEditsCTA({
   titleId,
   titleName,
   titleSlug,
+  alreadyRequested,
+  requestedAt,
 }: Props) {
-  const [status, setStatus] = useState<Status>("idle");
+  const [status, setStatus] = useState<Status>(
+    alreadyRequested ? "done" : "idle",
+  );
+  const [submittedAt, setSubmittedAt] = useState<string | null>(requestedAt);
   const [errorMsg, setErrorMsg] = useState("");
 
   async function onClick() {
-    if (status === "submitting" || status === "done") return;
+    if (status !== "idle") return;
     setStatus("submitting");
     setErrorMsg("");
     try {
@@ -49,6 +57,16 @@ export default function RequestFanEditsCTA({
         const text = await res.text();
         throw new Error(text.slice(0, 200) || `request ${res.status}`);
       }
+
+      const data = (await res.json().catch(() => ({}))) as {
+        already_requested?: boolean;
+        requested_at?: string | null;
+      };
+      if (data.already_requested && data.requested_at) {
+        setSubmittedAt(data.requested_at);
+      } else {
+        setSubmittedAt(new Date().toISOString());
+      }
       setStatus("done");
     } catch (err) {
       setStatus("error");
@@ -56,19 +74,44 @@ export default function RequestFanEditsCTA({
     }
   }
 
+  if (status === "done") {
+    const when = submittedAt ? formatRelativeDays(submittedAt) : null;
+    return (
+      <div
+        className="flex items-center gap-2 text-body-sm text-moonbeem-ink-muted animate-fade-in"
+        role="status"
+        aria-live="polite"
+      >
+        <svg
+          className="h-4 w-4 text-moonbeem-pink shrink-0"
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M3 8.5l3.5 3.5L13 5"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <span>{when ? `Fan edit request submitted ${when}` : "Fan edit request submitted"}</span>
+      </div>
+    );
+  }
+
   const label =
-    status === "done"
-      ? "Requested ✓"
-      : status === "submitting"
-        ? "Requesting..."
-        : `Request fan edits for ${titleName}`;
+    status === "submitting"
+      ? "Requesting..."
+      : `Request fan edits for ${titleName}`;
 
   return (
     <div className="flex flex-col items-center gap-2">
       <button
         type="button"
         onClick={onClick}
-        disabled={status === "submitting" || status === "done"}
+        disabled={status === "submitting"}
         className="bg-moonbeem-pink text-moonbeem-navy rounded-md px-6 py-3 text-body font-semibold hover:opacity-90 disabled:opacity-60 disabled:cursor-default transition-opacity"
       >
         {label}
