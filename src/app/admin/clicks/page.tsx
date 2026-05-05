@@ -11,7 +11,7 @@
 
 import Link from "next/link";
 import { requireSuperAdmin } from "@/lib/dal";
-import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 
 const FETCH_CAP = 100_000;
 const TOP_N = 20;
@@ -46,8 +46,13 @@ function isoDay(d: Date): string {
 }
 
 export default async function AdminClicksPage() {
+  // requireSuperAdmin() above is the only auth gate — once past it,
+  // we use the service-role client so the rollup queries bypass RLS
+  // on external_clicks / affiliate_links / creators (all three have
+  // RLS enabled with zero read policies for non-service-role callers,
+  // so the cookie-aware SSR client returns empty rows).
   await requireSuperAdmin();
-  const supabase = await createClient();
+  const supabase = createServiceRoleClient();
 
   const now = Date.now();
   const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();

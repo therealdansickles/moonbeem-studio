@@ -59,11 +59,16 @@ function OfferButton({
   const href =
     `/go/offer?title_id=${encodeURIComponent(titleId)}` +
     `&title_offer_id=${encodeURIComponent(offer.id)}`;
+  // rel="noopener" only — noreferrer would strip the Referer header
+  // on the navigation to /go/offer, blanking the referrer column in
+  // external_clicks for clicks that originate on moonbeem.studio.
+  // noopener stays for security (prevents the destination from
+  // accessing window.opener).
   return (
     <a
       href={href}
       target="_blank"
-      rel="noopener noreferrer"
+      rel="noopener"
       className={className}
     >
       {label}
