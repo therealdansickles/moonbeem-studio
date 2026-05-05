@@ -36,7 +36,7 @@ export default function TitleCarousel({ title, titles }: Props) {
 
   return (
     <section className="w-full">
-      <h2 className="mb-4 px-6 text-caption font-medium uppercase tracking-wider text-moonbeem-lime">
+      <h2 className="mb-4 px-6 text-caption font-medium uppercase tracking-wider text-moonbeem-pink">
         {title}
       </h2>
 

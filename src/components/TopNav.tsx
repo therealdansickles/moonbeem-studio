@@ -44,7 +44,7 @@ export default async function TopNav() {
           {isSuperAdmin && (
             <Link
               href="/admin/titles/erupcja/upload"
-              className="text-body-sm text-moonbeem-lime hover:opacity-80 transition-opacity"
+              className="text-body-sm text-moonbeem-pink hover:opacity-80 transition-opacity"
             >
               Admin
             </Link>

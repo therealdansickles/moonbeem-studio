@@ -91,7 +91,7 @@ export default function ProfileView({
 
       <section className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
-          <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-lime uppercase m-0">
+          <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-pink uppercase m-0">
             Top 12
           </h2>
         </div>
