@@ -42,12 +42,20 @@ export default async function TopNav() {
             </Link>
           )}
           {isSuperAdmin && (
-            <Link
-              href="/admin/titles/erupcja/upload"
-              className="text-body-sm text-moonbeem-pink hover:opacity-80 transition-opacity"
-            >
-              Admin
-            </Link>
+            <>
+              <Link
+                href="/admin/titles/erupcja/upload"
+                className="text-body-sm text-moonbeem-pink hover:opacity-80 transition-opacity"
+              >
+                Admin
+              </Link>
+              <Link
+                href="/admin/clicks"
+                className="text-body-sm text-moonbeem-pink hover:opacity-80 transition-opacity"
+              >
+                Clicks
+              </Link>
+            </>
           )}
         </nav>
 

@@ -40,16 +40,28 @@ export async function generateMetadata({
   };
 }
 
-function OfferButton({ offer }: { offer: TitleOffer }) {
+function OfferButton({
+  offer,
+  titleId,
+}: {
+  offer: TitleOffer;
+  titleId: string;
+}) {
   if (!offer.provider_url) return null;
   const label = offer.provider ?? "Watch";
   const isPrimary = offer.offer_type === "theatrical";
   const className = isPrimary
     ? "bg-moonbeem-pink text-moonbeem-navy rounded-md px-4 py-3 text-body font-semibold hover:opacity-90 transition-opacity text-center"
     : "bg-transparent border border-moonbeem-pink text-moonbeem-pink rounded-md px-4 py-3 text-body font-semibold hover:bg-moonbeem-pink hover:text-moonbeem-navy transition-colors text-center";
+  // Route through /go/offer so the click hits the click-logger.
+  // /go/offer redirects to offer.provider_url with outbound UTMs
+  // appended; visual rendering of this button is unchanged.
+  const href =
+    `/go/offer?title_id=${encodeURIComponent(titleId)}` +
+    `&title_offer_id=${encodeURIComponent(offer.id)}`;
   return (
     <a
-      href={offer.provider_url}
+      href={href}
       target="_blank"
       rel="noopener noreferrer"
       className={className}
@@ -107,7 +119,7 @@ export default async function TitlePage({ params }: PageProps) {
       {title.is_active && offers.length > 0 && (
         <div className="flex flex-col gap-3 w-full max-w-sm">
           {offers.map((offer) => (
-            <OfferButton key={offer.id} offer={offer} />
+            <OfferButton key={offer.id} offer={offer} titleId={title.id} />
           ))}
         </div>
       )}
