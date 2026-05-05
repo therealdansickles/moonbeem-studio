@@ -41,3 +41,4 @@ yarn-error.log*
 next-env.d.ts
 public/moonbeem-logo-original.png
 .claude/
+handoff.md
