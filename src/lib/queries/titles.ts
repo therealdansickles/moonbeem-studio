@@ -282,21 +282,75 @@ export type FanEdit = {
   embed_url: string;
   caption: string | null;
   creator_handle_displayed: string | null;
+  // moonbeem_handle from the linked stub or claimed creator. Null
+  // when fan_edits.creator_id is null (handful of legacy @anon
+  // rows). Prefer this for clickable bylines; fall back to
+  // creator_handle_displayed for display when null.
+  creator_moonbeem_handle: string | null;
   display_order: number;
   is_active: boolean;
 };
 
+type FanEditRow = {
+  id: string;
+  title_id: string;
+  platform: "tiktok" | "instagram" | "youtube" | "twitter";
+  embed_url: string;
+  caption: string | null;
+  creator_handle_displayed: string | null;
+  creator_id: string | null;
+  display_order: number;
+  is_active: boolean;
+};
+
+// Two-query merge — embedding `creators` directly via PostgREST FK
+// would fail RLS (creators has no SELECT policy; only public_creators
+// is grant-readable). Fetch fan_edits first, then look up the
+// moonbeem_handle for each distinct creator_id from public_creators.
 export async function getActiveFanEditsForTitle(
   titleId: string,
 ): Promise<FanEdit[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("fan_edits")
-    .select("*")
+    .select(
+      "id, title_id, platform, embed_url, caption, creator_handle_displayed, creator_id, display_order, is_active",
+    )
     .eq("title_id", titleId)
     .order("display_order", { ascending: true });
   if (error || !data) return [];
-  return data as FanEdit[];
+  const rows = data as FanEditRow[];
+
+  const creatorIds = Array.from(
+    new Set(rows.map((r) => r.creator_id).filter((id): id is string => !!id)),
+  );
+  const handleById = new Map<string, string>();
+  if (creatorIds.length > 0) {
+    const { data: creators } = await supabase
+      .from("public_creators")
+      .select("id, moonbeem_handle")
+      .in("id", creatorIds);
+    for (const c of (creators ?? []) as Array<{
+      id: string;
+      moonbeem_handle: string;
+    }>) {
+      handleById.set(c.id, c.moonbeem_handle);
+    }
+  }
+
+  return rows.map((r) => ({
+    id: r.id,
+    title_id: r.title_id,
+    platform: r.platform,
+    embed_url: r.embed_url,
+    caption: r.caption,
+    creator_handle_displayed: r.creator_handle_displayed,
+    creator_moonbeem_handle: r.creator_id
+      ? (handleById.get(r.creator_id) ?? null)
+      : null,
+    display_order: r.display_order,
+    is_active: r.is_active,
+  }));
 }
 
 export type FanEditWithTitle = {
@@ -304,6 +358,7 @@ export type FanEditWithTitle = {
   title_id: string;
   creator_handle: string;
   creator_handle_displayed: string | null;
+  creator_moonbeem_handle: string | null;
   platform: "tiktok" | "instagram" | "youtube" | "twitter";
   embed_url: string;
   thumbnail_url: string | null;
@@ -320,6 +375,7 @@ type FanEditJoinRow = {
   embed_url: string;
   thumbnail_url: string | null;
   creator_handle_displayed: string | null;
+  creator_id: string | null;
   created_at: string;
   titles: {
     slug: string;
@@ -336,7 +392,7 @@ export async function getRecentFanEdits(
   const { data, error } = await supabase
     .from("fan_edits")
     .select(
-      "id, title_id, platform, embed_url, thumbnail_url, creator_handle_displayed, created_at, titles!inner(slug, title, poster_url, is_active)",
+      "id, title_id, platform, embed_url, thumbnail_url, creator_handle_displayed, creator_id, created_at, titles!inner(slug, title, poster_url, is_active)",
     )
     .eq("is_active", true)
     .eq("verification_status", "auto_verified")
@@ -344,13 +400,38 @@ export async function getRecentFanEdits(
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error || !data) return [];
-  return (data as unknown as FanEditJoinRow[])
-    .filter((r) => r.titles && r.titles.poster_url)
-    .map((r) => ({
+  const rows = (data as unknown as FanEditJoinRow[]).filter(
+    (r) => r.titles && r.titles.poster_url,
+  );
+
+  const creatorIds = Array.from(
+    new Set(rows.map((r) => r.creator_id).filter((id): id is string => !!id)),
+  );
+  const handleById = new Map<string, string>();
+  if (creatorIds.length > 0) {
+    const { data: creators } = await supabase
+      .from("public_creators")
+      .select("id, moonbeem_handle")
+      .in("id", creatorIds);
+    for (const c of (creators ?? []) as Array<{
+      id: string;
+      moonbeem_handle: string;
+    }>) {
+      handleById.set(c.id, c.moonbeem_handle);
+    }
+  }
+
+  return rows.map((r) => {
+    const moonbeemHandle = r.creator_id
+      ? (handleById.get(r.creator_id) ?? null)
+      : null;
+    return {
       id: r.id,
       title_id: r.title_id,
-      creator_handle: r.creator_handle_displayed ?? "anon",
+      creator_handle:
+        moonbeemHandle ?? r.creator_handle_displayed ?? "anon",
       creator_handle_displayed: r.creator_handle_displayed,
+      creator_moonbeem_handle: moonbeemHandle,
       platform: r.platform,
       embed_url: r.embed_url,
       thumbnail_url: r.thumbnail_url,
@@ -358,5 +439,6 @@ export async function getRecentFanEdits(
       title_name: r.titles!.title,
       title_poster_url: r.titles!.poster_url!,
       created_at: r.created_at,
-    }));
+    };
+  });
 }

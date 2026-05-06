@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { InstagramEmbed, TikTokEmbed, XEmbed } from "react-social-media-embed";
 import type { FanEdit } from "@/lib/queries/titles";
 
@@ -11,10 +12,32 @@ const platformLabel: Record<FanEdit["platform"], string> = {
 };
 
 export default function EmbedRenderer({ edit }: { edit: FanEdit }) {
+  // Prefer the moonbeem_handle for both display and link target —
+  // it's the canonical creator address. Fall back to the platform
+  // handle when the row has no linked creator (legacy @anon rows).
+  const moonbeemHandle = edit.creator_moonbeem_handle;
+  const displayHandle =
+    moonbeemHandle ?? edit.creator_handle_displayed ?? null;
+
   return (
     <div className="flex flex-col gap-2">
       <div className="text-body-sm text-moonbeem-ink-subtle px-1">
         {platformLabel[edit.platform]}
+        {displayHandle && (
+          <>
+            {" · by "}
+            {moonbeemHandle ? (
+              <Link
+                href={`/c/${moonbeemHandle}`}
+                className="text-moonbeem-ink-muted hover:text-moonbeem-pink hover:underline"
+              >
+                @{displayHandle}
+              </Link>
+            ) : (
+              <span>@{displayHandle}</span>
+            )}
+          </>
+        )}
       </div>
       {renderPlatformEmbed(edit)}
     </div>

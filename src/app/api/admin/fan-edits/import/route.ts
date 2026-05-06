@@ -19,9 +19,12 @@
 //   - title_id: valid UUID + must exist in titles table.
 //   - Idempotency: skip if a fan_edit row already exists with this
 //     embed_url.
-//   - creator lookup via creator_socials JOIN creators (best-effort;
-//     null creator_id is OK — creator_handle_displayed always
-//     populated from CSV).
+//   - creator resolution via find_or_create_stub_creator RPC: looks
+//     up an existing (platform, handle) creator_socials row and
+//     reuses its creator_id, or creates a stub creator + socials
+//     row in one transaction. creator_id is always populated when
+//     creator_handle is present; null only on rows that omit
+//     creator_handle entirely.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
@@ -302,28 +305,25 @@ export async function POST(request: NextRequest): Promise<Response> {
       continue;
     }
 
-    // Creator lookup. Strip leading @, lowercase. Only attempt if
-    // platform is one of the values creator_socials.platform allows
-    // ('tiktok','instagram','youtube' per the initial schema CHECK).
-    // Twitter creator_socials rows don't exist by design, so we skip
-    // the lookup for twitter — creator_id stays null.
+    // Creator resolution. Strip leading @, lowercase. The
+    // find_or_create_stub_creator RPC handles both lookup (existing
+    // (platform, handle) → reuse creator_id) and stub creation in
+    // one transaction. Twitter is now allowed by the
+    // creator_socials platform CHECK (Stage 3.1).
     let creatorId: string | null = null;
     let displayedHandle: string | null = null;
     if (rawHandle) {
       displayedHandle = rawHandle.replace(/^@+/, "").trim().toLowerCase();
-      if (
-        displayedHandle &&
-        (platform === "tiktok" || platform === "instagram" || platform === "youtube")
-      ) {
-        const { data: socialRow } = await supabase
-          .from("creator_socials")
-          .select("creator_id")
-          .eq("handle", displayedHandle)
-          .eq("platform", platform)
-          .maybeSingle();
-        if (socialRow?.creator_id) {
-          creatorId = socialRow.creator_id as string;
+      if (displayedHandle) {
+        const { data: stubId, error: stubErr } = await supabase.rpc(
+          "find_or_create_stub_creator",
+          { p_handle: displayedHandle, p_platform: platform },
+        );
+        if (stubErr) {
+          reject(`stub creator resolution failed: ${stubErr.message}`);
+          continue;
         }
+        creatorId = stubId as string;
       }
     }
 

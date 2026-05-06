@@ -1,5 +1,8 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { FanEditWithTitle } from "@/lib/queries/titles";
 import PlatformIcon from "./PlatformIcon";
 
@@ -8,6 +11,14 @@ type Props = {
 };
 
 export default function FanEditCard({ fanEdit }: Props) {
+  const router = useRouter();
+  // Prefer the canonical moonbeem_handle for both display and the
+  // /c/[handle] link target. Falls back to the platform-side handle
+  // for the small set of legacy null-creator rows.
+  const moonbeemHandle = fanEdit.creator_moonbeem_handle;
+  const displayHandle =
+    moonbeemHandle ?? fanEdit.creator_handle_displayed ?? null;
+
   return (
     <Link
       href={`/t/${fanEdit.title_slug}`}
@@ -17,7 +28,7 @@ export default function FanEditCard({ fanEdit }: Props) {
         src={fanEdit.thumbnail_url ?? fanEdit.title_poster_url}
         alt={
           fanEdit.thumbnail_url
-            ? `${fanEdit.title_name} fan edit by ${fanEdit.creator_handle_displayed ?? "@anon"}`
+            ? `${fanEdit.title_name} fan edit by ${displayHandle ?? "@anon"}`
             : `${fanEdit.title_name} poster`
         }
         fill
@@ -36,7 +47,22 @@ export default function FanEditCard({ fanEdit }: Props) {
           {fanEdit.title_name}
         </p>
         <p className="mt-0.5 text-caption text-moonbeem-ink-subtle">
-          by {fanEdit.creator_handle_displayed ?? "@anon"}
+          by{" "}
+          {moonbeemHandle ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                router.push(`/c/${moonbeemHandle}`);
+              }}
+              className="pointer-events-auto hover:text-moonbeem-pink hover:underline"
+            >
+              @{displayHandle}
+            </button>
+          ) : (
+            <span>@{displayHandle ?? "anon"}</span>
+          )}
         </p>
       </div>
     </Link>
