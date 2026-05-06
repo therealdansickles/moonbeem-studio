@@ -6,7 +6,7 @@ import type { FanEdit } from "@/lib/queries/titles";
 const platformLabel: Record<FanEdit["platform"], string> = {
   instagram: "via Instagram",
   tiktok: "via TikTok",
-  x: "via X",
+  twitter: "via X",
   youtube: "via YouTube",
 };
 
@@ -55,7 +55,7 @@ function renderPlatformEmbed(edit: FanEdit) {
           <TikTokEmbed url={edit.embed_url} width="100%" />
         </FramedEmbed>
       );
-    case "x":
+    case "twitter":
       return (
         <FramedEmbed>
           <XEmbed url={edit.embed_url} width="100%" />

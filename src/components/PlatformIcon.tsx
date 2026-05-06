@@ -1,5 +1,5 @@
 type Props = {
-  platform: "tiktok" | "instagram" | "youtube" | "x";
+  platform: "tiktok" | "instagram" | "youtube" | "twitter";
   className?: string;
 };
 
@@ -34,7 +34,7 @@ export default function PlatformIcon({ platform, className }: Props) {
           <circle cx="17.5" cy="6.5" r="0.5" fill="currentColor" />
         </svg>
       );
-    case "x":
+    case "twitter":
       return (
         <svg
           viewBox="0 0 24 24"

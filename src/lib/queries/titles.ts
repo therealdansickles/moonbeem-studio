@@ -278,7 +278,7 @@ export async function getActiveStillsForTitle(
 export type FanEdit = {
   id: string;
   title_id: string;
-  platform: "tiktok" | "instagram" | "youtube" | "x";
+  platform: "tiktok" | "instagram" | "youtube" | "twitter";
   embed_url: string;
   caption: string | null;
   creator_handle_displayed: string | null;
@@ -304,7 +304,7 @@ export type FanEditWithTitle = {
   title_id: string;
   creator_handle: string;
   creator_handle_displayed: string | null;
-  platform: "tiktok" | "instagram" | "youtube" | "x";
+  platform: "tiktok" | "instagram" | "youtube" | "twitter";
   embed_url: string;
   thumbnail_url: string | null;
   title_slug: string;
@@ -316,7 +316,7 @@ export type FanEditWithTitle = {
 type FanEditJoinRow = {
   id: string;
   title_id: string;
-  platform: "tiktok" | "instagram" | "youtube" | "x";
+  platform: "tiktok" | "instagram" | "youtube" | "twitter";
   embed_url: string;
   thumbnail_url: string | null;
   creator_handle_displayed: string | null;

@@ -1,12 +1,12 @@
 import EmbedRenderer from "@/components/EmbedRenderer";
 import type { FanEdit } from "@/lib/queries/titles";
 
-const platformOrder = ["tiktok", "instagram", "x", "youtube"] as const;
+const platformOrder = ["tiktok", "instagram", "twitter", "youtube"] as const;
 
 const platformLabel: Record<(typeof platformOrder)[number], string> = {
   tiktok: "TikTok",
   instagram: "Instagram",
-  x: "X",
+  twitter: "X",
   youtube: "YouTube",
 };
 
@@ -22,7 +22,7 @@ export default function FanEditsTab({ fanEdits }: { fanEdits: FanEdit[] }) {
   const grouped: Record<(typeof platformOrder)[number], FanEdit[]> = {
     tiktok: [],
     instagram: [],
-    x: [],
+    twitter: [],
     youtube: [],
   };
   for (const edit of fanEdits) {

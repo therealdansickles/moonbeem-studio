@@ -81,7 +81,7 @@ export async function fetchOembedForFanEdit(
   url: string,
 ): Promise<OembedResult> {
   if (platform === "tiktok") return fetchTikTokOembed(url);
-  if (platform === "x") return fetchXOembed(url);
+  if (platform === "twitter") return fetchXOembed(url);
   // Instagram and YouTube intentionally not implemented this round.
   return EMPTY;
 }
