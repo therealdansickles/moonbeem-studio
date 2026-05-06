@@ -55,5 +55,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  // Stage 2A: every claimed handle also gets a creators row so
+  // /c/[handle] (which now reads from creators) resolves correctly.
+  // Stage 2B will collapse this whole flow into a state machine that
+  // checks creators first and updates a stub when one exists.
+  const { error: cErr } = await supabase
+    .from("creators")
+    .insert({
+      user_id: session.userId,
+      moonbeem_handle: handle,
+      is_claimed: true,
+      is_stub: false,
+    });
+  if (cErr && cErr.code !== "23505") {
+    return NextResponse.json({ error: cErr.message }, { status: 500 });
+  }
+
   return NextResponse.json({ success: true });
 }

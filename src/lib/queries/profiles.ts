@@ -3,7 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 export type ProfileLink = { label: string; url: string };
 
 export type Profile = {
-  id: string;
+  creator_id: string;
+  user_id: string | null;
   handle: string;
   display_name: string | null;
   bio: string | null;
@@ -48,20 +49,47 @@ export async function getProfileByHandle(
   const cleaned = handle.trim().toLowerCase();
   if (!cleaned) return null;
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("public_profiles")
-    .select("id, handle, display_name, bio, avatar_url, links, is_stub")
-    .eq("handle", cleaned)
+
+  const { data: creator, error: cErr } = await supabase
+    .from("public_creators")
+    .select("id, user_id, moonbeem_handle, is_stub")
+    .eq("moonbeem_handle", cleaned)
     .maybeSingle();
-  if (error || !data) return null;
+  if (cErr || !creator) return null;
+
+  const creatorId = creator.id as string;
+  const userId = (creator.user_id as string | null) ?? null;
+  const moonbeemHandle = creator.moonbeem_handle as string;
+  const isStub = Boolean(creator.is_stub);
+
+  if (!userId) {
+    return {
+      creator_id: creatorId,
+      user_id: null,
+      handle: moonbeemHandle,
+      display_name: null,
+      bio: null,
+      avatar_url: null,
+      links: [],
+      is_stub: isStub,
+    };
+  }
+
+  const { data: user } = await supabase
+    .from("public_profiles")
+    .select("display_name, bio, avatar_url, links")
+    .eq("id", userId)
+    .maybeSingle();
+
   return {
-    id: data.id as string,
-    handle: data.handle as string,
-    display_name: (data.display_name ?? null) as string | null,
-    bio: (data.bio ?? null) as string | null,
-    avatar_url: (data.avatar_url ?? null) as string | null,
-    links: normalizeLinks(data.links),
-    is_stub: Boolean(data.is_stub),
+    creator_id: creatorId,
+    user_id: userId,
+    handle: moonbeemHandle,
+    display_name: (user?.display_name ?? null) as string | null,
+    bio: (user?.bio ?? null) as string | null,
+    avatar_url: (user?.avatar_url ?? null) as string | null,
+    links: normalizeLinks(user?.links),
+    is_stub: isStub,
   };
 }
 
