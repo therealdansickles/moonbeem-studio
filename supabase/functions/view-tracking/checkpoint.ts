@@ -14,9 +14,11 @@
 //      the next invocation finds it (same UTC day) and resumes from
 //      its last_processed_fan_edit_id.
 //
-// Same-UTC-date short-circuit: if the most recent row from today is
-// status='success', return alreadyCompleted=true. Caller exits early
-// without inserting a new row. Pattern matches catalog-freshness.
+// Same-UTC-date short-circuit: if today has ANY successful run that
+// processed > 0 fan_edits, return alreadyCompleted=true. An empty
+// success (processed=0) does NOT short-circuit — it just means
+// nothing was eligible at the moment that run fired; more fan_edits
+// may be eligible later in the day.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
@@ -51,10 +53,46 @@ export async function loadOrStartRun(
 ): Promise<LoadResult> {
   const todayUtcStart = `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
 
+  // Short-circuit only if today's queue has actually drained at some
+  // point — i.e. any successful run today processed > 0 fan_edits.
+  // Empty successes don't qualify: they reflect "nothing eligible at
+  // run time," not "today is done."
+  const { data: drainedRun, error: drainedErr } = await supabase
+    .from("view_tracking_runs")
+    .select("id")
+    .eq("status", "success")
+    .gt("fan_edits_processed", 0)
+    .gte("started_at", todayUtcStart)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (drainedErr) {
+    throw new Error(
+      `[view-tracking] failed to query drained runs: ${drainedErr.message}`,
+    );
+  }
+
+  if (drainedRun) {
+    console.log(
+      `[view-tracking] ALREADY_COMPLETED_TODAY drained_run=${drainedRun.id}`,
+    );
+    return {
+      alreadyCompleted: true,
+      runId: null,
+      lastProcessedFanEditId: null,
+      counters: { ...ZERO_COUNTERS },
+      previousRunId: drainedRun.id as string,
+    };
+  }
+
+  // No drained success today. Look for a partial run to recover
+  // the resume cursor from. Empty successes are skipped — they
+  // hold no meaningful cursor to resume from.
   const { data: candidate, error: qErr } = await supabase
     .from("view_tracking_runs")
-    .select("id, status, last_processed_fan_edit_id")
-    .in("status", ["partial", "success"])
+    .select("id, last_processed_fan_edit_id")
+    .eq("status", "partial")
     .gte("started_at", todayUtcStart)
     .order("started_at", { ascending: false })
     .limit(1)
@@ -64,19 +102,6 @@ export async function loadOrStartRun(
     throw new Error(
       `[view-tracking] failed to query candidate runs: ${qErr.message}`,
     );
-  }
-
-  if (candidate?.status === "success") {
-    console.log(
-      `[view-tracking] ALREADY_COMPLETED_TODAY most_recent_run=${candidate.id}`,
-    );
-    return {
-      alreadyCompleted: true,
-      runId: null,
-      lastProcessedFanEditId: null,
-      counters: { ...ZERO_COUNTERS },
-      previousRunId: candidate.id as string,
-    };
   }
 
   // Resume from prior partial's cursor, OR fresh chain (null cursor).
