@@ -23,7 +23,7 @@ const RESERVED = new Set([
 ]);
 
 export async function POST(request: NextRequest) {
-  const session = await verifySession();
+  await verifySession();
 
   let body: { handle?: string };
   try {
@@ -43,32 +43,32 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("users")
-    .update({ handle })
-    .eq("id", session.userId);
+  const { error } = await supabase.rpc("claim_handle", { p_handle: handle });
 
   if (error) {
-    if (error.code === "23505") {
+    const msg = error.message ?? "";
+    if (msg.includes("handle_taken")) {
       return NextResponse.json({ error: "Handle taken." }, { status: 409 });
     }
+    if (msg.includes("user_already_has_handle")) {
+      return NextResponse.json(
+        { error: "You already have a handle." },
+        { status: 409 },
+      );
+    }
+    if (msg.includes("invalid_handle")) {
+      return NextResponse.json(
+        { error: "Handle must be 3-30 chars: a-z, 0-9, underscore." },
+        { status: 400 },
+      );
+    }
+    if (msg.includes("not_authenticated")) {
+      return NextResponse.json(
+        { error: "Not authenticated." },
+        { status: 401 },
+      );
+    }
     return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  // Stage 2A: every claimed handle also gets a creators row so
-  // /c/[handle] (which now reads from creators) resolves correctly.
-  // Stage 2B will collapse this whole flow into a state machine that
-  // checks creators first and updates a stub when one exists.
-  const { error: cErr } = await supabase
-    .from("creators")
-    .insert({
-      user_id: session.userId,
-      moonbeem_handle: handle,
-      is_claimed: true,
-      is_stub: false,
-    });
-  if (cErr && cErr.code !== "23505") {
-    return NextResponse.json({ error: cErr.message }, { status: 500 });
   }
 
   return NextResponse.json({ success: true });
