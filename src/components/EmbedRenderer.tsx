@@ -29,6 +29,7 @@ export default function EmbedRenderer({ edit }: { edit: FanEdit }) {
             {moonbeemHandle ? (
               <Link
                 href={`/c/${moonbeemHandle}`}
+                prefetch={false}
                 className="text-moonbeem-ink-muted hover:text-moonbeem-pink hover:underline"
               >
                 @{displayHandle}
