@@ -14,6 +14,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { getUser } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import PlatformIcon from "@/components/PlatformIcon";
 import GrowthChart from "@/components/p/GrowthChart";
@@ -573,6 +574,14 @@ function HeroTile({
 
 export default async function PartnerDashboardPage({ params }: PageProps) {
   const { slug } = await params;
+
+  // Auth + membership check at the page level. We deliberately do NOT
+  // redirect to /login on missing auth — the dashboard URL is a real
+  // signal we don't want to leak ("404 hides existence"). Anonymous
+  // visitors and signed-in non-members both get notFound().
+  const user = await getUser();
+  if (!user) notFound();
+
   const supabase = createServiceRoleClient();
 
   const { data: partner, error: partnerErr } = await supabase
@@ -581,6 +590,15 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
     .eq("slug", slug)
     .maybeSingle();
   if (partnerErr || !partner) notFound();
+
+  const { data: membership } = await supabase
+    .from("partner_users")
+    .select("role")
+    .eq("partner_id", partner.id)
+    .eq("user_id", user.id)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (!membership) notFound();
 
   const { data: titles } = await supabase
     .from("titles")
