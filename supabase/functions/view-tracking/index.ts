@@ -1,13 +1,20 @@
 // view-tracking Edge Function — daily refresh of fan_edit engagement
 // metrics via EnsembleData.
 //
-// Orchestration (mirrors the Block D catalog-freshness pattern):
+// Orchestration (catalog-freshness pattern):
 //   1. loadOrStartRun — same-UTC-day short-circuit if today's chain
-//      already reached success; otherwise resume from prior partial's
-//      last_processed_fan_edit_id, or start a fresh run.
-//   2. Query active fan_edits where last_refreshed_at is null OR older
-//      than REFRESH_INTERVAL_HOURS, ordered by id ascending, filtered
-//      to id > prior cursor, limited to MAX_FAN_EDITS_PER_INVOCATION.
+//      already drained AND nothing is currently eligible; otherwise
+//      open a fresh run row.
+//   2. Query active fan_edits where last_refreshed_at IS NULL OR
+//      older than REFRESH_INTERVAL_HOURS, ordered by last_refreshed_at
+//      ASC NULLS FIRST, limited to MAX_FAN_EDITS_PER_INVOCATION.
+//      No cursor filter — the eligibility window itself is the
+//      "what's left to do" signal. Successfully refreshed rows fall
+//      out of the window; transient/parse_error skips leave
+//      last_refreshed_at unchanged so they stay at the front of the
+//      next invocation's queue. (Replaces the prior UUID-cursor
+//      design which silently dropped rows when the cursor advanced
+//      past a transient skip — see incidents on 2026-05-06/07.)
 //   3. Per fan_edit:
 //        - fetchEngagementMetrics
 //        - on success: write snapshot + update fan_edits counts +
@@ -127,27 +134,23 @@ Deno.serve(async (_req: Request) => {
       );
     }
     runId = state.runId;
-    lastProcessed = state.lastProcessedFanEditId;
 
-    // Query "due to refresh" fan_edits.
+    // Query "due to refresh" fan_edits ordered by last_refreshed_at
+    // ASC NULLS FIRST. Never-refreshed rows (NULL) come first, then
+    // oldest-stale. No cursor filter — see header comment.
     const refreshCutoff = new Date(
       Date.now() - REFRESH_INTERVAL_HOURS * 60 * 60 * 1000,
     ).toISOString();
 
-    let query = supabase
+    const { data: fanEdits, error: queryErr } = await supabase
       .from("fan_edits")
       .select("id, platform, embed_url")
       .eq("view_tracking_status", "active")
       .or(
         `last_refreshed_at.is.null,last_refreshed_at.lt.${refreshCutoff}`,
       )
-      .order("id", { ascending: true })
+      .order("last_refreshed_at", { ascending: true, nullsFirst: true })
       .limit(MAX_FAN_EDITS_PER_INVOCATION);
-    if (lastProcessed) {
-      query = query.gt("id", lastProcessed);
-    }
-
-    const { data: fanEdits, error: queryErr } = await query;
     if (queryErr) {
       throw new Error(
         `[view-tracking] fan_edits query failed: ${queryErr.message}`,

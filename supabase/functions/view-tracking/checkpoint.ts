@@ -1,32 +1,36 @@
 // view_tracking_runs lifecycle helpers.
 //
-// Mirrors the catalog-freshness checkpoint pattern (Block D) with two
-// simplifications:
-//   1. The resume cursor is a typed UUID FK (last_processed_fan_edit_id)
-//      rather than the open jsonb cutoff_token from Block D — we always
-//      know the cursor shape for this pipeline.
-//   2. There's no 'running' status. The view_tracking_runs CHECK
-//      constraint allows partial/success/failed only. New rows are
-//      inserted as 'partial' (the safe default if the function dies
-//      before writing terminal state) and transitioned to success or
-//      failed at the end. Naturally self-healing: a process death mid-
-//      run leaves a partial row with whatever counters got written;
-//      the next invocation finds it (same UTC day) and resumes from
-//      its last_processed_fan_edit_id.
+// Catalog-freshness pattern (Block D) with one simplification: there's
+// no 'running' status. The view_tracking_runs CHECK constraint allows
+// partial/success/failed only. New rows are inserted as 'partial' (the
+// safe default if the function dies before writing terminal state)
+// and transitioned to success or failed at the end. Naturally self-
+// healing: a process death mid-run leaves a partial row with whatever
+// counters got written; the next invocation just queries eligibility
+// fresh.
+//
+// Cursor semantics (post-2026-05-07): there is no resume cursor. The
+// orchestrator's eligibility query (status='active' AND
+// (last_refreshed_at IS NULL OR last_refreshed_at < now() -
+// refreshIntervalHours), ORDER BY last_refreshed_at ASC NULLS FIRST)
+// already encodes "what's left to do" — successfully refreshed rows
+// fall outside the eligibility window and stop appearing; transient/
+// parse_error skips leave last_refreshed_at unchanged so the row
+// stays at the front of the next invocation's queue and gets
+// retried. last_processed_fan_edit_id (UUID) is still written by
+// finalizeRun for forensic tracking but is NOT read back as a cursor
+// — the previous UUID-cursor design caused real production data
+// gaps (rows skipped silently when an EnsembleData transient fired).
 //
 // Same-UTC-date short-circuit: returns alreadyCompleted=true only
 // when BOTH conditions hold:
 //   (a) today has at least one successful run with fan_edits_processed
 //       > 0 — i.e. the queue has actually drained at some point today;
-//   (b) zero fan_edits are currently eligible (status='active' AND
-//       (last_refreshed_at IS NULL OR last_refreshed_at < now() -
-//       refreshIntervalHours)).
+//   (b) zero fan_edits are currently eligible.
 // If (a) is true but (b) finds new eligible rows, we fall through and
 // start a fresh run — the post-drain freshness window has reopened
 // because new fan_edits were added or existing rows aged past the
-// refresh interval. The previous "(a) alone" rule locked the chain
-// for the rest of the day after the first drain, even when new work
-// was clearly eligible.
+// refresh interval.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
@@ -40,11 +44,10 @@ export type RunCounters = {
 export type LoadResult = {
   alreadyCompleted: boolean;
   runId: string | null;
-  // Resume cursor: last fan_edit id processed by the most recent
-  // partial run from today's UTC day. New invocations filter
-  // fan_edits.id > this value.
-  lastProcessedFanEditId: string | null;
   counters: RunCounters;
+  // The most recent run id that satisfied the short-circuit (drained
+  // success), or null. Informational — surfaced in the API response
+  // when alreadyCompleted=true.
   previousRunId: string | null;
 };
 
@@ -111,7 +114,6 @@ export async function loadOrStartRun(
       return {
         alreadyCompleted: true,
         runId: null,
-        lastProcessedFanEditId: null,
         counters: { ...ZERO_COUNTERS },
         previousRunId: drainedRun.id as string,
       };
@@ -120,33 +122,10 @@ export async function loadOrStartRun(
     console.log(
       `[view-tracking] DRAINED_BUT_NEW_ELIGIBLE drained_run=${drainedRun.id} eligible=${eligibleCount}`,
     );
-    // Fall through — start a fresh run to drain the new eligible rows.
+    // Fall through — start a fresh run. With timestamp-based ordering
+    // there is no cursor to inherit; the orchestrator's eligibility
+    // query naturally picks up the oldest-stale rows first.
   }
-
-  // No drained success today. Look for a partial run to recover
-  // the resume cursor from. Empty successes are skipped — they
-  // hold no meaningful cursor to resume from.
-  const { data: candidate, error: qErr } = await supabase
-    .from("view_tracking_runs")
-    .select("id, last_processed_fan_edit_id")
-    .eq("status", "partial")
-    .gte("started_at", todayUtcStart)
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (qErr) {
-    throw new Error(
-      `[view-tracking] failed to query candidate runs: ${qErr.message}`,
-    );
-  }
-
-  // Resume from prior partial's cursor, OR fresh chain (null cursor).
-  // Note we DON'T carry counters forward — each invocation gets its
-  // own row with its own counters (per-row, not chain-cumulative),
-  // matching Block D's catalog-freshness pattern.
-  const lastProcessedFanEditId =
-    (candidate?.last_processed_fan_edit_id as string | null) ?? null;
 
   const { data: inserted, error: insErr } = await supabase
     .from("view_tracking_runs")
@@ -168,9 +147,8 @@ export async function loadOrStartRun(
   return {
     alreadyCompleted: false,
     runId: inserted.id as string,
-    lastProcessedFanEditId,
     counters: { ...ZERO_COUNTERS },
-    previousRunId: (candidate?.id as string) ?? null,
+    previousRunId: null,
   };
 }
 
