@@ -4,6 +4,9 @@ import { verifySession } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { SignOutButton } from "@/components/SignOutButton";
 import PlatformIcon from "@/components/PlatformIcon";
+import PayoutsControls from "@/components/me/PayoutsControls";
+
+const MIN_WITHDRAWAL_CENTS = 1000;
 
 type SocialPlatform = "tiktok" | "instagram" | "twitter" | "youtube";
 
@@ -71,6 +74,34 @@ export default async function MePage() {
   const titleBreakdown = [...byTitle.values()].sort(
     (a, b) => b.cents - a.cents,
   );
+
+  // Payout state (creator_payout_accounts + unwithdrawn earnings sum
+  // - pending withdrawals sum). Mirrors /api/me/payouts/status.
+  const [payoutAcctRes, unwithdrawnRes, pendingRes] = creator
+    ? await Promise.all([
+      service
+        .from("creator_payout_accounts")
+        .select("onboarding_completed, payouts_enabled")
+        .eq("creator_id", creator.id)
+        .maybeSingle(),
+      service
+        .from("creator_earnings")
+        .select("earnings_cents")
+        .eq("creator_id", creator.id)
+        .is("withdrawn_at", null),
+      service
+        .from("withdrawals")
+        .select("amount_cents")
+        .eq("creator_id", creator.id)
+        .eq("status", "pending"),
+    ])
+    : [{ data: null }, { data: [] }, { data: [] }];
+  const payoutAcct = (payoutAcctRes as { data: { onboarding_completed: boolean; payouts_enabled: boolean } | null }).data;
+  const unwithdrawnCents = ((unwithdrawnRes.data ?? []) as Array<{ earnings_cents: number | null }>)
+    .reduce((s, r) => s + (r.earnings_cents ?? 0), 0);
+  const pendingWithdrawalCents = ((pendingRes.data ?? []) as Array<{ amount_cents: number | null }>)
+    .reduce((s, r) => s + (r.amount_cents ?? 0), 0);
+  const availableCents = Math.max(0, unwithdrawnCents - pendingWithdrawalCents);
 
   // claimed status: if user has no handle, prompt to claim
   const handle = (userRow?.handle as string | null) ?? null;
@@ -242,10 +273,37 @@ export default async function MePage() {
                       ))}
                     </ul>
                   )}
-                  <p className="text-caption text-moonbeem-ink-subtle">
-                    Withdrawals are coming soon — your balance is being
-                    tracked daily.
-                  </p>
+
+                  <div className="mt-2 flex flex-col gap-1 border-t border-white/10 pt-3">
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-body-sm text-moonbeem-ink-muted">
+                        Available to withdraw
+                      </span>
+                      <span className="text-body font-semibold tabular-nums text-moonbeem-pink">
+                        ${(availableCents / 100).toFixed(2)}
+                      </span>
+                    </div>
+                    {pendingWithdrawalCents > 0 && (
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-caption text-moonbeem-ink-subtle">
+                          Pending transfer
+                        </span>
+                        <span className="text-caption tabular-nums text-moonbeem-ink-muted">
+                          ${(pendingWithdrawalCents / 100).toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="mt-2">
+                      <PayoutsControls
+                        hasAccount={!!payoutAcct}
+                        onboardingCompleted={!!payoutAcct?.onboarding_completed}
+                        payoutsEnabled={!!payoutAcct?.payouts_enabled}
+                        availableCents={availableCents}
+                        pendingCents={pendingWithdrawalCents}
+                        minimumCents={MIN_WITHDRAWAL_CENTS}
+                      />
+                    </div>
+                  </div>
                 </div>
               )}
           </div>
