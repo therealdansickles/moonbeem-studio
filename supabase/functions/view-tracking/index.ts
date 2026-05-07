@@ -189,6 +189,9 @@ Deno.serve(async (_req: Request) => {
             like_count: result.like_count,
             comment_count: result.comment_count,
             share_count: result.share_count,
+            thumbnail_url: result.thumbnail_url,
+            duration_seconds: result.duration_seconds,
+            aspect_ratio: result.aspect_ratio,
             raw_payload: result.raw_payload,
           });
           counters.fan_edits_succeeded += 1;

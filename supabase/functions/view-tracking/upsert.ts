@@ -25,6 +25,9 @@ export type SnapshotMetrics = {
   like_count: number | null;
   comment_count: number | null;
   share_count: number | null;
+  thumbnail_url: string | null;
+  duration_seconds: number | null;
+  aspect_ratio: string | null;
   raw_payload: unknown | null;
 };
 
@@ -50,23 +53,56 @@ export async function writeSnapshotAndUpdateFanEdit(
     );
   }
 
+  // Read current thumbnail_source so we know whether to overwrite
+  // thumbnail_url. Rule: only overwrite when current source is NULL
+  // or 'oembed'. If it's 'ensembledata' (already owned by us) or any
+  // future "respected" source (e.g. a manual override), leave the
+  // existing thumbnail_url alone — first ensembledata write wins.
+  const existing = await supabase
+    .from("fan_edits")
+    .select("thumbnail_source")
+    .eq("id", fanEditId)
+    .single();
+  if (existing.error || !existing.data) {
+    throw new Error(
+      `[view-tracking] failed to read thumbnail_source for ${fanEditId}: ${
+        existing.error?.message ?? "no row"
+      }`,
+    );
+  }
+  const currentSource =
+    (existing.data.thumbnail_source as string | null) ?? null;
+  const shouldUpdateThumb =
+    metrics.thumbnail_url !== null &&
+    (currentSource === null || currentSource === "oembed");
+
   // Denormalized counts on fan_edits use 0 fallback when the upstream
   // returned null (the columns are NOT NULL with default 0). The
   // snapshot row above preserves the actual null for forensic accuracy.
-  const update = await supabase
+  // duration_seconds and aspect_ratio are EnsembleData-only and always
+  // updated (no oEmbed conflict to worry about).
+  const update: Record<string, unknown> = {
+    view_count: metrics.view_count ?? 0,
+    like_count: metrics.like_count ?? 0,
+    comment_count: metrics.comment_count ?? 0,
+    share_count: metrics.share_count ?? 0,
+    duration_seconds: metrics.duration_seconds,
+    aspect_ratio: metrics.aspect_ratio,
+    last_refreshed_at: new Date().toISOString(),
+    view_tracking_failure_count: 0,
+  };
+  if (shouldUpdateThumb) {
+    update.thumbnail_url = metrics.thumbnail_url;
+    update.thumbnail_source = "ensembledata";
+  }
+
+  const updateResult = await supabase
     .from("fan_edits")
-    .update({
-      view_count: metrics.view_count ?? 0,
-      like_count: metrics.like_count ?? 0,
-      comment_count: metrics.comment_count ?? 0,
-      share_count: metrics.share_count ?? 0,
-      last_refreshed_at: new Date().toISOString(),
-      view_tracking_failure_count: 0,
-    })
+    .update(update)
     .eq("id", fanEditId);
-  if (update.error) {
+  if (updateResult.error) {
     throw new Error(
-      `[view-tracking] fan_edit update failed for ${fanEditId}: ${update.error.message}`,
+      `[view-tracking] fan_edit update failed for ${fanEditId}: ${updateResult.error.message}`,
     );
   }
 }

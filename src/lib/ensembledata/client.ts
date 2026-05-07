@@ -74,6 +74,9 @@ export type FetchEngagementResult = {
   like_count: number | null;
   comment_count: number | null;
   share_count: number | null;
+  thumbnail_url: string | null;
+  duration_seconds: number | null;
+  aspect_ratio: string | null;
   raw_payload: unknown | null;
   error: FetchErrorCategory | null;
   fetched_at: Date;
@@ -152,6 +155,9 @@ export async function fetchEngagementMetrics(args: {
     like_count: null,
     comment_count: null,
     share_count: null,
+    thumbnail_url: null,
+    duration_seconds: null,
+    aspect_ratio: null,
     raw_payload: null as unknown | null,
     fetched_at,
   };
@@ -261,6 +267,9 @@ export async function fetchEngagementMetrics(args: {
     like_count: metrics.like_count,
     comment_count: metrics.comment_count,
     share_count: metrics.share_count,
+    thumbnail_url: metrics.thumbnail_url,
+    duration_seconds: metrics.duration_seconds,
+    aspect_ratio: metrics.aspect_ratio,
     raw_payload: body,
     error: null,
     fetched_at,
@@ -276,6 +285,9 @@ type Metrics = {
   like_count: number | null;
   comment_count: number | null;
   share_count: number | null;
+  thumbnail_url: string | null;
+  duration_seconds: number | null;
+  aspect_ratio: string | null;
 };
 
 function toIntOrNull(v: unknown): number | null {
@@ -284,6 +296,32 @@ function toIntOrNull(v: unknown): number | null {
   if (typeof v === "string") {
     const n = parseInt(v, 10);
     return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function msToSeconds(ms: unknown): number | null {
+  const n = toIntOrNull(ms);
+  return n === null ? null : Math.round(n / 1000);
+}
+
+// Reduce w:h to lowest terms ("1080:1920" → "9:16"). Returns null
+// when either dimension is missing/zero/negative.
+function simplifyAspectRatio(
+  width: number | null,
+  height: number | null,
+): string | null {
+  if (!width || !height || width <= 0 || height <= 0) return null;
+  const w = Math.round(width);
+  const h = Math.round(height);
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const g = gcd(w, h);
+  return `${w / g}:${h / g}`;
+}
+
+function firstStringInList(v: unknown): string | null {
+  if (Array.isArray(v) && v.length > 0 && typeof v[0] === "string") {
+    return v[0];
   }
   return null;
 }
@@ -300,15 +338,20 @@ function get(obj: unknown, path: string[]): unknown {
   return cur;
 }
 
+function emptyMetrics(): Metrics {
+  return {
+    view_count: null,
+    like_count: null,
+    comment_count: null,
+    share_count: null,
+    thumbnail_url: null,
+    duration_seconds: null,
+    aspect_ratio: null,
+  };
+}
+
 function mapMetrics(platform: Platform, body: unknown): Metrics {
-  if (!body || typeof body !== "object") {
-    return {
-      view_count: null,
-      like_count: null,
-      comment_count: null,
-      share_count: null,
-    };
-  }
+  if (!body || typeof body !== "object") return emptyMetrics();
   // EnsembleData typically wraps its response as { data: { ... } }.
   // Some endpoints also return { data: {...}, units_charged: N }.
   // Fall through to the root if .data isn't present.
@@ -317,15 +360,30 @@ function mapMetrics(platform: Platform, body: unknown): Metrics {
   switch (platform) {
     case "tiktok": {
       // TikTok response wraps the result in an array under `data`:
-      //   { data: [{ statistics: {...} }], ... }
-      // Take the first element. Empty/missing array → all nulls.
+      //   { data: [{ statistics: {...}, video: {...} }], ... }
       const first = Array.isArray(data) ? data[0] : null;
       const stats = first ? get(first, ["statistics"]) : null;
+      const video = first ? get(first, ["video"]) : null;
+      // origin_cover preserves the video aspect (tplv-tiktokx-shrink);
+      // cover is square-cropped (tplv-tiktokx-cropcenter). Prefer
+      // origin_cover, fall back to cover.
+      const thumb =
+        firstStringInList(get(video, ["origin_cover", "url_list"])) ??
+          firstStringInList(get(video, ["cover", "url_list"]));
+      // duration is in milliseconds.
+      const duration_seconds = msToSeconds(get(video, ["duration"]));
+      const aspect_ratio = simplifyAspectRatio(
+        toIntOrNull(get(video, ["width"])),
+        toIntOrNull(get(video, ["height"])),
+      );
       return {
         view_count: toIntOrNull(get(stats, ["play_count"])),
         like_count: toIntOrNull(get(stats, ["digg_count"])),
         comment_count: toIntOrNull(get(stats, ["comment_count"])),
         share_count: toIntOrNull(get(stats, ["share_count"])),
+        thumbnail_url: thumb,
+        duration_seconds,
+        aspect_ratio,
       };
     }
     case "instagram": {
@@ -336,6 +394,22 @@ function mapMetrics(platform: Platform, body: unknown): Metrics {
       const rawLike = toIntOrNull(
         get(data, ["edge_media_preview_like", "count"]),
       );
+      // display_url preserves original aspect; thumbnail_src is a
+      // square crop. Prefer display_url for the player thumbnail.
+      const display = get(data, ["display_url"]);
+      const thumbSrc = get(data, ["thumbnail_src"]);
+      const thumb = typeof display === "string"
+        ? display
+        : (typeof thumbSrc === "string" ? thumbSrc : null);
+      // video_duration is decimal seconds (e.g. 134.837).
+      const dur = get(data, ["video_duration"]);
+      const duration_seconds = typeof dur === "number"
+        ? Math.round(dur)
+        : toIntOrNull(dur);
+      const aspect_ratio = simplifyAspectRatio(
+        toIntOrNull(get(data, ["dimensions", "width"])),
+        toIntOrNull(get(data, ["dimensions", "height"])),
+      );
       return {
         view_count: toIntOrNull(get(data, ["video_play_count"])),
         like_count: rawLike !== null && rawLike >= 0 ? rawLike : null,
@@ -343,35 +417,74 @@ function mapMetrics(platform: Platform, body: unknown): Metrics {
           get(data, ["edge_media_to_comment", "count"]),
         ),
         share_count: null, // IG doesn't expose share count
+        thumbnail_url: thumb,
+        duration_seconds,
+        aspect_ratio,
       };
     }
     case "youtube": {
-      // YT statistics fields are strings per YT API convention.
+      // No real raw_payload sample yet (no YouTube fan_edits in the
+      // current dataset). Visual fields stay null until we have a
+      // verified shape; metric paths preserved from prior version.
       const stats = get(data, ["statistics"]) ?? data;
       return {
         view_count: toIntOrNull(get(stats, ["viewCount"])),
         like_count: toIntOrNull(get(stats, ["likeCount"])),
         comment_count: toIntOrNull(get(stats, ["commentCount"])),
         share_count: null, // YT doesn't expose share count
+        thumbnail_url: null,
+        duration_seconds: null,
+        aspect_ratio: null,
       };
     }
     case "twitter": {
       // Twitter response: data.views.count is a string ("8944"),
-      // engagement fields under data.legacy.*.
+      // engagement fields under data.legacy.*. Media (thumbnail,
+      // video info, dimensions) lives in extended_entities.media[0]
+      // when the tweet has media; tweets without media → all visual
+      // fields null.
+      const extMedia = get(data, ["legacy", "extended_entities", "media"]);
+      const entMedia = get(data, ["legacy", "entities", "media"]);
+      const mediaCandidate =
+        (Array.isArray(extMedia) && extMedia[0]) ??
+          (Array.isArray(entMedia) && entMedia[0]) ?? null;
+      const media = mediaCandidate && typeof mediaCandidate === "object"
+        ? mediaCandidate as Record<string, unknown>
+        : null;
+
+      const mediaUrl = media ? media["media_url_https"] : null;
+      const thumb = typeof mediaUrl === "string" ? mediaUrl : null;
+
+      const duration_seconds = media
+        ? msToSeconds(get(media, ["video_info", "duration_millis"]))
+        : null;
+
+      let w: number | null = null;
+      let h: number | null = null;
+      if (media) {
+        const ar = get(media, ["video_info", "aspect_ratio"]);
+        if (Array.isArray(ar) && ar.length === 2) {
+          w = toIntOrNull(ar[0]);
+          h = toIntOrNull(ar[1]);
+        } else {
+          w = toIntOrNull(get(media, ["original_info", "width"]));
+          h = toIntOrNull(get(media, ["original_info", "height"]));
+        }
+      }
+      const aspect_ratio = simplifyAspectRatio(w, h);
+
       return {
         view_count: toIntOrNull(get(data, ["views", "count"])),
         like_count: toIntOrNull(get(data, ["legacy", "favorite_count"])),
         comment_count: toIntOrNull(get(data, ["legacy", "reply_count"])),
         share_count: toIntOrNull(get(data, ["legacy", "retweet_count"])),
+        thumbnail_url: thumb,
+        duration_seconds,
+        aspect_ratio,
       };
     }
     default:
-      return {
-        view_count: null,
-        like_count: null,
-        comment_count: null,
-        share_count: null,
-      };
+      return emptyMetrics();
   }
 }
 
