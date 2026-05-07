@@ -192,6 +192,7 @@ Deno.serve(async (_req: Request) => {
             thumbnail_url: result.thumbnail_url,
             duration_seconds: result.duration_seconds,
             aspect_ratio: result.aspect_ratio,
+            creator_handle_displayed: result.creator_handle_displayed,
             raw_payload: result.raw_payload,
           });
           counters.fan_edits_succeeded += 1;

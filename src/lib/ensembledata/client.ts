@@ -77,6 +77,11 @@ export type FetchEngagementResult = {
   thumbnail_url: string | null;
   duration_seconds: number | null;
   aspect_ratio: string | null;
+  // Platform-side handle extracted from the response — currently only
+  // populated for Instagram (data.owner.username). upsert.ts writes
+  // this to fan_edits.creator_handle_displayed when that column is
+  // null.
+  creator_handle_displayed: string | null;
   raw_payload: unknown | null;
   error: FetchErrorCategory | null;
   fetched_at: Date;
@@ -158,6 +163,7 @@ export async function fetchEngagementMetrics(args: {
     thumbnail_url: null,
     duration_seconds: null,
     aspect_ratio: null,
+    creator_handle_displayed: null,
     raw_payload: null as unknown | null,
     fetched_at,
   };
@@ -270,6 +276,7 @@ export async function fetchEngagementMetrics(args: {
     thumbnail_url: metrics.thumbnail_url,
     duration_seconds: metrics.duration_seconds,
     aspect_ratio: metrics.aspect_ratio,
+    creator_handle_displayed: metrics.creator_handle_displayed,
     raw_payload: body,
     error: null,
     fetched_at,
@@ -288,6 +295,7 @@ type Metrics = {
   thumbnail_url: string | null;
   duration_seconds: number | null;
   aspect_ratio: string | null;
+  creator_handle_displayed: string | null;
 };
 
 function toIntOrNull(v: unknown): number | null {
@@ -347,6 +355,7 @@ function emptyMetrics(): Metrics {
     thumbnail_url: null,
     duration_seconds: null,
     aspect_ratio: null,
+    creator_handle_displayed: null,
   };
 }
 
@@ -384,6 +393,7 @@ function mapMetrics(platform: Platform, body: unknown): Metrics {
         thumbnail_url: thumb,
         duration_seconds,
         aspect_ratio,
+        creator_handle_displayed: null,
       };
     }
     case "instagram": {
@@ -410,6 +420,13 @@ function mapMetrics(platform: Platform, body: unknown): Metrics {
         toIntOrNull(get(data, ["dimensions", "width"])),
         toIntOrNull(get(data, ["dimensions", "height"])),
       );
+      // data.owner.username — Instagram's authoritative handle for
+      // the post. Used by upsert.ts to backfill creator_handle_displayed
+      // on rows where it's null.
+      const ownerUsername = get(data, ["owner", "username"]);
+      const creator_handle = typeof ownerUsername === "string" && ownerUsername
+        ? ownerUsername
+        : null;
       return {
         view_count: toIntOrNull(get(data, ["video_play_count"])),
         like_count: rawLike !== null && rawLike >= 0 ? rawLike : null,
@@ -420,6 +437,7 @@ function mapMetrics(platform: Platform, body: unknown): Metrics {
         thumbnail_url: thumb,
         duration_seconds,
         aspect_ratio,
+        creator_handle_displayed: creator_handle,
       };
     }
     case "youtube": {
@@ -435,6 +453,7 @@ function mapMetrics(platform: Platform, body: unknown): Metrics {
         thumbnail_url: null,
         duration_seconds: null,
         aspect_ratio: null,
+        creator_handle_displayed: null,
       };
     }
     case "twitter": {
@@ -481,6 +500,7 @@ function mapMetrics(platform: Platform, body: unknown): Metrics {
         thumbnail_url: thumb,
         duration_seconds,
         aspect_ratio,
+        creator_handle_displayed: null,
       };
     }
     default:

@@ -289,6 +289,16 @@ export type FanEdit = {
   creator_moonbeem_handle: string | null;
   display_order: number;
   is_active: boolean;
+  // Visual-metadata fields populated by the view-tracking pipeline
+  // (Stage B1, 2026-05-07). Null on rows that haven't been refreshed
+  // since the new extractor shipped — UI should render a skeleton.
+  thumbnail_url: string | null;
+  duration_seconds: number | null;
+  aspect_ratio: string | null;
+  // Engagement count + ingest order — used for view-count-DESC sort
+  // and arrow-nav ordering in FanEditsTab/FanEditModal (Stage B2).
+  view_count: number;
+  created_at: string;
 };
 
 type FanEditRow = {
@@ -301,6 +311,11 @@ type FanEditRow = {
   creator_id: string | null;
   display_order: number;
   is_active: boolean;
+  thumbnail_url: string | null;
+  duration_seconds: number | null;
+  aspect_ratio: string | null;
+  view_count: number | null;
+  created_at: string;
 };
 
 // Two-query merge — embedding `creators` directly via PostgREST FK
@@ -314,10 +329,9 @@ export async function getActiveFanEditsForTitle(
   const { data, error } = await supabase
     .from("fan_edits")
     .select(
-      "id, title_id, platform, embed_url, caption, creator_handle_displayed, creator_id, display_order, is_active",
+      "id, title_id, platform, embed_url, caption, creator_handle_displayed, creator_id, display_order, is_active, thumbnail_url, duration_seconds, aspect_ratio, view_count, created_at",
     )
-    .eq("title_id", titleId)
-    .order("display_order", { ascending: true });
+    .eq("title_id", titleId);
   if (error || !data) return [];
   const rows = data as FanEditRow[];
 
@@ -338,19 +352,32 @@ export async function getActiveFanEditsForTitle(
     }
   }
 
-  return rows.map((r) => ({
-    id: r.id,
-    title_id: r.title_id,
-    platform: r.platform,
-    embed_url: r.embed_url,
-    caption: r.caption,
-    creator_handle_displayed: r.creator_handle_displayed,
-    creator_moonbeem_handle: r.creator_id
-      ? (handleById.get(r.creator_id) ?? null)
-      : null,
-    display_order: r.display_order,
-    is_active: r.is_active,
-  }));
+  // Sort view_count DESC, ties broken by created_at DESC. This is the
+  // ordering used by the thumbnail grid and modal arrow-nav (Stage B2).
+  // Most-watched edit appears first regardless of platform.
+  return rows
+    .map((r) => ({
+      id: r.id,
+      title_id: r.title_id,
+      platform: r.platform,
+      embed_url: r.embed_url,
+      caption: r.caption,
+      creator_handle_displayed: r.creator_handle_displayed,
+      creator_moonbeem_handle: r.creator_id
+        ? (handleById.get(r.creator_id) ?? null)
+        : null,
+      display_order: r.display_order,
+      is_active: r.is_active,
+      thumbnail_url: r.thumbnail_url,
+      duration_seconds: r.duration_seconds,
+      aspect_ratio: r.aspect_ratio,
+      view_count: r.view_count ?? 0,
+      created_at: r.created_at,
+    }))
+    .sort((a, b) => {
+      if (b.view_count !== a.view_count) return b.view_count - a.view_count;
+      return b.created_at.localeCompare(a.created_at);
+    });
 }
 
 export type FanEditWithTitle = {

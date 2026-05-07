@@ -189,7 +189,13 @@ export default async function TitlePage({ params }: PageProps) {
 
           <TitleTabs
             aboutContent={aboutContent}
-            fanEditsContent={<FanEditsTab fanEdits={fanEdits} />}
+            fanEditsContent={
+              <FanEditsTab
+                fanEdits={fanEdits}
+                titleSlug={title.slug}
+                titleName={title.title}
+              />
+            }
             videosContent={<VideosTab clips={clips} />}
             stillsContent={<StillsTab stills={stills} />}
           />

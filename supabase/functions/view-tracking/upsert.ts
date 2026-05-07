@@ -28,6 +28,7 @@ export type SnapshotMetrics = {
   thumbnail_url: string | null;
   duration_seconds: number | null;
   aspect_ratio: string | null;
+  creator_handle_displayed: string | null;
   raw_payload: unknown | null;
 };
 
@@ -53,14 +54,17 @@ export async function writeSnapshotAndUpdateFanEdit(
     );
   }
 
-  // Read current thumbnail_source so we know whether to overwrite
-  // thumbnail_url. Rule: only overwrite when current source is NULL
-  // or 'oembed'. If it's 'ensembledata' (already owned by us) or any
-  // future "respected" source (e.g. a manual override), leave the
-  // existing thumbnail_url alone — first ensembledata write wins.
+  // Read current thumbnail_source AND creator_handle_displayed so we
+  // know whether to overwrite each. Rules (both first-write-wins):
+  //   - thumbnail_url: only overwrite when thumbnail_source is NULL
+  //     or 'oembed'. If 'ensembledata' or some future tag (manual
+  //     override), leave alone.
+  //   - creator_handle_displayed: only set when currently NULL.
+  //     Once any value lands (ingest-time parse or EnsembleData),
+  //     don't overwrite.
   const existing = await supabase
     .from("fan_edits")
-    .select("thumbnail_source")
+    .select("thumbnail_source, creator_handle_displayed")
     .eq("id", fanEditId)
     .single();
   if (existing.error || !existing.data) {
@@ -72,9 +76,13 @@ export async function writeSnapshotAndUpdateFanEdit(
   }
   const currentSource =
     (existing.data.thumbnail_source as string | null) ?? null;
+  const currentHandle =
+    (existing.data.creator_handle_displayed as string | null) ?? null;
   const shouldUpdateThumb =
     metrics.thumbnail_url !== null &&
     (currentSource === null || currentSource === "oembed");
+  const shouldSetHandle =
+    metrics.creator_handle_displayed !== null && currentHandle === null;
 
   // Denormalized counts on fan_edits use 0 fallback when the upstream
   // returned null (the columns are NOT NULL with default 0). The
@@ -94,6 +102,9 @@ export async function writeSnapshotAndUpdateFanEdit(
   if (shouldUpdateThumb) {
     update.thumbnail_url = metrics.thumbnail_url;
     update.thumbnail_source = "ensembledata";
+  }
+  if (shouldSetHandle) {
+    update.creator_handle_displayed = metrics.creator_handle_displayed;
   }
 
   const updateResult = await supabase
