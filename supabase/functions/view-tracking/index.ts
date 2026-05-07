@@ -44,7 +44,7 @@ import {
 } from "./checkpoint.ts";
 
 const MAX_FAN_EDITS_PER_INVOCATION = 100;
-const WALL_CLOCK_BUDGET_MS = 25_000;
+const WALL_CLOCK_BUDGET_MS = 60_000;
 const FAILURE_THRESHOLD_TO_MARK_DEAD = 3;
 const REFRESH_INTERVAL_HOURS = 20;
 
