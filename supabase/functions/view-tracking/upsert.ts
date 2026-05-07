@@ -19,6 +19,7 @@
 // skips those without state changes per the Block D pattern.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { rehostThumbnail } from "./r2-upload.ts";
 
 export type SnapshotMetrics = {
   view_count: number | null;
@@ -99,9 +100,26 @@ export async function writeSnapshotAndUpdateFanEdit(
     last_refreshed_at: new Date().toISOString(),
     view_tracking_failure_count: 0,
   };
-  if (shouldUpdateThumb) {
-    update.thumbnail_url = metrics.thumbnail_url;
-    update.thumbnail_source = "ensembledata";
+  if (shouldUpdateThumb && metrics.thumbnail_url) {
+    // Re-host on R2 so we own the asset. Platform CDN URLs (Instagram
+    // fiev14 especially) sign and expire; R2 is stable. On upload
+    // failure, log and skip the thumbnail update entirely so the
+    // first-write-wins gate stays open for retry on the next refresh.
+    try {
+      const r2Url = await rehostThumbnail(fanEditId, metrics.thumbnail_url);
+      update.thumbnail_url = r2Url;
+      update.thumbnail_source_url = metrics.thumbnail_url;
+      update.thumbnail_source = "ensembledata";
+    } catch (err) {
+      console.error(
+        `[view-tracking] r2 rehost failed for ${fanEditId} (source ${
+          metrics.thumbnail_url
+        }): ${err instanceof Error ? err.message : err}`,
+      );
+      // Intentionally don't set thumbnail_url/source/source_url —
+      // next refresh will retry since thumbnail_source stays at
+      // its current value (NULL or 'oembed').
+    }
   }
   if (shouldSetHandle) {
     update.creator_handle_displayed = metrics.creator_handle_displayed;

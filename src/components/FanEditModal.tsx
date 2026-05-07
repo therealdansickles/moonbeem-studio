@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { InstagramEmbed, TikTokEmbed, XEmbed } from "react-social-media-embed";
 import type { FanEdit } from "@/lib/queries/titles";
+import { vibrate } from "@/lib/haptics";
 import PlatformIcon from "./PlatformIcon";
 
 type Props = {
@@ -27,6 +28,7 @@ const platformLabel: Record<FanEdit["platform"], string> = {
 };
 
 const SWIPE_DISMISS_THRESHOLD = 120;
+const SWIPE_NAV_THRESHOLD = 80;
 
 export default function FanEditModal({
   fanEdits,
@@ -72,11 +74,30 @@ export default function FanEditModal({
     };
   }, [isOpen, openIndex, fanEdits.length, onClose, onNavigate]);
 
+  // Both axes draggable. Intent is decided by which offset dominates
+  // at release time. Horizontal-dominant → nav (left=next, right=prev,
+  // matching the "flick the current item out, reveal the next" feed
+  // pattern). Vertical-dominant downward past threshold → close.
   const onDragEnd = useCallback(
     (_e: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
-      if (info.offset.y > SWIPE_DISMISS_THRESHOLD) onClose();
+      const dx = info.offset.x;
+      const dy = info.offset.y;
+      if (
+        Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > SWIPE_NAV_THRESHOLD
+      ) {
+        if (dx < 0 && openIndex < fanEdits.length - 1) {
+          vibrate(10);
+          onNavigate(openIndex + 1);
+        } else if (dx > 0 && openIndex > 0) {
+          vibrate(10);
+          onNavigate(openIndex - 1);
+        }
+      } else if (dy > SWIPE_DISMISS_THRESHOLD) {
+        vibrate(15);
+        onClose();
+      }
     },
-    [onClose],
+    [openIndex, fanEdits.length, onClose, onNavigate],
   );
 
   return (
@@ -154,9 +175,9 @@ function ModalContent({
       <motion.div
         key="dialog"
         layoutId={`fan-edit-${fanEdit.id}`}
-        drag="y"
-        dragConstraints={{ top: 0, bottom: 0 }}
-        dragElastic={{ top: 0, bottom: 0.5 }}
+        drag
+        dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
+        dragElastic={0.25}
         onDragEnd={onDragEnd}
         className="relative z-10 flex h-full w-full flex-col bg-moonbeem-black md:h-auto md:max-h-[90vh] md:w-auto md:max-w-[440px] md:overflow-hidden md:rounded-2xl md:border md:border-white/10 md:shadow-2xl md:shadow-black/60"
       >
@@ -248,6 +269,15 @@ function ModalContent({
   );
 }
 
+// react-social-media-embed/XEmbed parses the tweet ID with
+// `url.substring(url.lastIndexOf('/') + 1)`, which fails for share
+// URLs ending in `/video/1` or `/photo/1` (returns "1"). Strip the
+// trailing media segment and any query params before handing the URL
+// to XEmbed. Render-time only — DB embed_url stays canonical.
+function normalizeTwitterUrl(url: string): string {
+  return url.replace(/\/(video|photo)\/\d+\/?$/, "").replace(/\?.*$/, "");
+}
+
 function EmbedFor({ fanEdit }: { fanEdit: FanEdit }) {
   switch (fanEdit.platform) {
     case "instagram":
@@ -262,7 +292,9 @@ function EmbedFor({ fanEdit }: { fanEdit: FanEdit }) {
     case "tiktok":
       return <TikTokEmbed url={fanEdit.embed_url} width="100%" />;
     case "twitter":
-      return <XEmbed url={fanEdit.embed_url} width="100%" />;
+      return (
+        <XEmbed url={normalizeTwitterUrl(fanEdit.embed_url)} width="100%" />
+      );
     default:
       return (
         <div className="py-12 text-center text-body-sm text-moonbeem-ink-subtle">
