@@ -10,9 +10,21 @@
 // view_tracking_snapshots) doesn't have public SELECT policies, so
 // service role is required.
 
+import Image from "next/image";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import PlatformIcon from "@/components/PlatformIcon";
+
+type SocialPlatform = "tiktok" | "instagram" | "twitter" | "youtube";
+
+const platformLabel: Record<SocialPlatform, string> = {
+  tiktok: "TikTok",
+  instagram: "Instagram",
+  twitter: "X",
+  youtube: "YouTube",
+};
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -105,6 +117,321 @@ function formatMetric(n: number): string {
   return `${m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)}M`;
 }
 
+// Returns a Map<fan_edit_id, view_count_24h_ago> from the most recent
+// snapshot older than 24h per fan_edit. Used to compute 24-hour
+// growth deltas. Rows with no eligible snapshot get no entry — the
+// caller renders "—" for those.
+async function load24hGrowth(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  fanEditIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (fanEditIds.length === 0) return out;
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: snaps } = await supabase
+    .from("view_tracking_snapshots")
+    .select("fan_edit_id, view_count, captured_at")
+    .in("fan_edit_id", fanEditIds)
+    .lt("captured_at", cutoff)
+    .order("captured_at", { ascending: false });
+  for (const s of snaps ?? []) {
+    const fid = s.fan_edit_id as string;
+    if (!out.has(fid)) {
+      out.set(fid, (s.view_count as number | null) ?? 0);
+    }
+  }
+  return out;
+}
+
+// Resolves creator_id → moonbeem_handle via public_creators (the
+// RLS-readable view of creators).
+async function loadCreatorHandles(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  creatorIds: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (creatorIds.length === 0) return out;
+  const { data: rows } = await supabase
+    .from("public_creators")
+    .select("id, moonbeem_handle")
+    .in("id", creatorIds);
+  for (const r of rows ?? []) {
+    out.set(r.id as string, r.moonbeem_handle as string);
+  }
+  return out;
+}
+
+type TopPerformer = {
+  id: string;
+  platform: SocialPlatform;
+  view_count: number;
+  thumbnail_url: string | null;
+  creator_id: string | null;
+  creator_handle: string | null;
+  growth_24h: number | null;
+  growth_pct_24h: number | null;
+};
+
+async function loadTopPerformers(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  titleIds: string[],
+  limit = 10,
+): Promise<TopPerformer[]> {
+  if (titleIds.length === 0) return [];
+  const { data: rows } = await supabase
+    .from("fan_edits")
+    .select("id, platform, view_count, thumbnail_url, creator_id")
+    .in("title_id", titleIds)
+    .eq("view_tracking_status", "active")
+    .order("view_count", { ascending: false })
+    .limit(limit);
+  const fanEdits = rows ?? [];
+  const ids = fanEdits.map((r) => r.id as string);
+  const creatorIds = fanEdits
+    .map((r) => r.creator_id as string | null)
+    .filter((id): id is string => !!id);
+
+  const [growth, handles] = await Promise.all([
+    load24hGrowth(supabase, ids),
+    loadCreatorHandles(supabase, creatorIds),
+  ]);
+
+  return fanEdits.map((r) => {
+    const id = r.id as string;
+    const current = (r.view_count as number | null) ?? 0;
+    const prior = growth.get(id);
+    const delta = prior !== undefined ? current - prior : null;
+    const pct = prior !== undefined && prior > 0
+      ? (delta! / prior) * 100
+      : null;
+    return {
+      id,
+      platform: r.platform as SocialPlatform,
+      view_count: current,
+      thumbnail_url: r.thumbnail_url as string | null,
+      creator_id: r.creator_id as string | null,
+      creator_handle: r.creator_id
+        ? handles.get(r.creator_id as string) ?? null
+        : null,
+      growth_24h: delta,
+      growth_pct_24h: pct,
+    };
+  });
+}
+
+type TopCreator = {
+  creator_id: string;
+  handle: string;
+  total_views: number;
+  edit_count: number;
+};
+
+async function loadTopCreators(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  titleIds: string[],
+  limit = 10,
+): Promise<TopCreator[]> {
+  if (titleIds.length === 0) return [];
+  const { data: edits } = await supabase
+    .from("fan_edits")
+    .select("creator_id, view_count")
+    .in("title_id", titleIds)
+    .eq("view_tracking_status", "active")
+    .not("creator_id", "is", null);
+
+  const aggs = new Map<string, { views: number; edits: number }>();
+  for (const e of edits ?? []) {
+    const cid = e.creator_id as string;
+    const a = aggs.get(cid) ?? { views: 0, edits: 0 };
+    a.views += (e.view_count as number | null) ?? 0;
+    a.edits += 1;
+    aggs.set(cid, a);
+  }
+  const top = [...aggs.entries()]
+    .sort(([, a], [, b]) => b.views - a.views)
+    .slice(0, limit);
+
+  const handles = await loadCreatorHandles(
+    supabase,
+    top.map(([id]) => id),
+  );
+  return top.map(([cid, agg]) => ({
+    creator_id: cid,
+    handle: handles.get(cid) ?? "anon",
+    total_views: agg.views,
+    edit_count: agg.edits,
+  }));
+}
+
+// Stable per-handle background color for initial avatars.
+function avatarHueForHandle(handle: string): number {
+  let hash = 0;
+  for (let i = 0; i < handle.length; i++) {
+    hash = (hash * 31 + handle.charCodeAt(i)) >>> 0;
+  }
+  return hash % 360;
+}
+
+function InitialAvatar({ handle }: { handle: string }) {
+  const initial = handle[0]?.toUpperCase() ?? "?";
+  const hue = avatarHueForHandle(handle);
+  return (
+    <div
+      style={{
+        background:
+          `linear-gradient(135deg, hsl(${hue} 70% 50%), hsl(${(hue + 40) % 360} 70% 35%))`,
+      }}
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full font-wordmark text-body-sm font-semibold text-white"
+    >
+      {initial}
+    </div>
+  );
+}
+
+function GrowthBadge({
+  delta,
+  pct,
+}: {
+  delta: number | null;
+  pct: number | null;
+}) {
+  if (delta === null) {
+    return (
+      <span className="text-caption text-moonbeem-ink-subtle tabular-nums">
+        —
+      </span>
+    );
+  }
+  const positive = delta >= 0;
+  const sign = positive ? "+" : "";
+  const pctTxt = pct !== null
+    ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(pct >= 10 || pct <= -10 ? 0 : 1)}%)`
+    : "";
+  return (
+    <span
+      className={`text-caption tabular-nums ${
+        positive ? "text-emerald-300" : "text-moonbeem-magenta"
+      }`}
+    >
+      {sign}
+      {formatMetric(Math.abs(delta))}
+      {pctTxt}
+    </span>
+  );
+}
+
+function TopPerformersCard({
+  performers,
+  titleSlug,
+}: {
+  performers: TopPerformer[];
+  titleSlug: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+      <div className="flex items-center gap-3">
+        <span className="rounded-full bg-moonbeem-pink/15 px-2.5 py-0.5 text-caption font-medium text-moonbeem-pink">
+          Top performers
+        </span>
+        <span className="text-caption text-moonbeem-ink-subtle">
+          by view count
+        </span>
+      </div>
+      <ol className="mt-4 flex flex-col divide-y divide-white/5">
+        {performers.map((fe, i) => (
+          <li key={fe.id} className="flex items-center gap-3 py-3">
+            <span className="w-5 shrink-0 text-caption tabular-nums text-moonbeem-ink-subtle">
+              {i + 1}
+            </span>
+            <Link
+              href={`/t/${titleSlug}#fan-edits`}
+              className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-moonbeem-navy/40"
+            >
+              {fe.thumbnail_url
+                ? (
+                  <Image
+                    src={fe.thumbnail_url}
+                    alt=""
+                    fill
+                    sizes="48px"
+                    unoptimized
+                    className="object-cover"
+                  />
+                )
+                : null}
+            </Link>
+            <div className="flex min-w-0 flex-1 flex-col">
+              {fe.creator_handle
+                ? (
+                  <Link
+                    href={`/c/${fe.creator_handle}`}
+                    className="truncate text-body-sm font-medium text-moonbeem-ink hover:text-moonbeem-pink"
+                  >
+                    @{fe.creator_handle}
+                  </Link>
+                )
+                : (
+                  <span className="text-body-sm text-moonbeem-ink-subtle">
+                    @anon
+                  </span>
+                )}
+              <span className="flex items-center gap-1.5 text-caption text-moonbeem-ink-subtle">
+                <PlatformIcon platform={fe.platform} className="h-3 w-3" />
+                {platformLabel[fe.platform]}
+              </span>
+            </div>
+            <div className="flex flex-col items-end">
+              <span className="text-body-sm font-semibold tabular-nums text-moonbeem-ink">
+                {formatMetric(fe.view_count)}
+              </span>
+              <GrowthBadge delta={fe.growth_24h} pct={fe.growth_pct_24h} />
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function TopCreatorsCard({ creators }: { creators: TopCreator[] }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+      <div className="flex items-center gap-3">
+        <span className="rounded-full bg-moonbeem-pink/15 px-2.5 py-0.5 text-caption font-medium text-moonbeem-pink">
+          Top fan editors
+        </span>
+        <span className="text-caption text-moonbeem-ink-subtle">
+          by total views
+        </span>
+      </div>
+      <ol className="mt-4 flex flex-col divide-y divide-white/5">
+        {creators.map((c, i) => (
+          <li key={c.creator_id} className="flex items-center gap-3 py-3">
+            <span className="w-5 shrink-0 text-caption tabular-nums text-moonbeem-ink-subtle">
+              {i + 1}
+            </span>
+            <InitialAvatar handle={c.handle} />
+            <div className="flex min-w-0 flex-1 flex-col">
+              <Link
+                href={`/c/${c.handle}`}
+                className="truncate text-body-sm font-medium text-moonbeem-ink hover:text-moonbeem-pink"
+              >
+                @{c.handle}
+              </Link>
+              <span className="text-caption text-moonbeem-ink-subtle">
+                {c.edit_count} {c.edit_count === 1 ? "edit" : "edits"}
+              </span>
+            </div>
+            <span className="text-body-sm font-semibold tabular-nums text-moonbeem-ink">
+              {formatMetric(c.total_views)}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function HeroTile({
   value,
   label,
@@ -147,11 +474,16 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
   const titleRows = titles ?? [];
   const titleIds = titleRows.map((t) => t.id as string);
 
-  const metrics = await loadHeroMetrics(supabase, titleIds);
+  const [metrics, topPerformers, topCreators] = await Promise.all([
+    loadHeroMetrics(supabase, titleIds),
+    loadTopPerformers(supabase, titleIds, 10),
+    loadTopCreators(supabase, titleIds, 10),
+  ]);
 
   const titleSummary = titleRows.length === 1
     ? titleRows[0].title
     : `${titleRows.length} titles`;
+  const primarySlug = (titleRows[0]?.slug as string | undefined) ?? "";
 
   return (
     <div className="min-h-screen px-6 py-12 bg-[radial-gradient(ellipse_at_top,_#1a0f3a_0%,_#0a0a14_60%)]">
@@ -206,9 +538,16 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
           />
         </div>
 
-        <div className="mt-12 rounded-2xl border border-dashed border-white/10 p-10 text-center text-body-sm text-moonbeem-ink-subtle">
-          Top performers, top creators, growth chart, and full fan-edit
-          table — coming next.
+        <div className="mt-10 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <TopPerformersCard
+            performers={topPerformers}
+            titleSlug={primarySlug}
+          />
+          <TopCreatorsCard creators={topCreators} />
+        </div>
+
+        <div className="mt-10 rounded-2xl border border-dashed border-white/10 p-10 text-center text-body-sm text-moonbeem-ink-subtle">
+          Growth chart and full fan-edit table — coming next.
         </div>
       </div>
     </div>

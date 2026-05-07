@@ -35,7 +35,7 @@ export default async function TopNav() {
           </Link>
           {profile && (
             <Link
-              href="/me"
+              href="/for-you"
               className="text-body-sm text-moonbeem-ink-muted hover:text-moonbeem-ink transition-colors"
             >
               For You
