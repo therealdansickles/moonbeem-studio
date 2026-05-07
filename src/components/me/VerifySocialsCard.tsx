@@ -45,7 +45,7 @@ export default function VerifySocialsCard({ initialSocials }: Props) {
   }
 
   return (
-    <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-moonbeem-black/60 p-6">
+    <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-moonbeem-black/60 p-6">
       <h2 className="m-0 font-wordmark text-heading-md text-moonbeem-ink">
         Verify your social accounts
       </h2>

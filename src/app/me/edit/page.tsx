@@ -1,8 +1,10 @@
 import { redirect } from "next/navigation";
 import { verifySession } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 import { type ProfileLink } from "@/lib/queries/profiles";
 import EditProfileForm from "@/components/profile/EditProfileForm";
+import VerifySocialsCard from "@/components/me/VerifySocialsCard";
 
 type RawLink = { label?: unknown; url?: unknown };
 
@@ -34,13 +36,39 @@ export default async function EditProfilePage() {
     redirect("/onboarding/handle");
   }
 
+  // Pre-fetch the user's socials for the verify card. Service role
+  // (creator_socials has RLS with no SELECT policies); scoped to the
+  // caller's creator so this can't leak other users' data.
+  const service = createServiceRoleClient();
+  const { data: creator } = await service
+    .from("creators")
+    .select("id")
+    .eq("user_id", session.userId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  const { data: socials } = creator
+    ? await service
+      .from("creator_socials")
+      .select(
+        "platform, handle, verified_at, is_verified, verification_code, verification_started_at",
+      )
+      .eq("creator_id", creator.id)
+    : { data: [] };
+
   return (
-    <EditProfileForm
-      handle={data.handle as string}
-      initialDisplayName={(data.display_name ?? "") as string}
-      initialBio={(data.bio ?? "") as string}
-      initialAvatarUrl={(data.avatar_url ?? null) as string | null}
-      initialLinks={normalizeLinks(data.links)}
-    />
+    <>
+      <EditProfileForm
+        handle={data.handle as string}
+        initialDisplayName={(data.display_name ?? "") as string}
+        initialBio={(data.bio ?? "") as string}
+        initialAvatarUrl={(data.avatar_url ?? null) as string | null}
+        initialLinks={normalizeLinks(data.links)}
+      />
+      <div className="mx-auto flex max-w-2xl flex-col gap-8 px-6 pb-12">
+        <VerifySocialsCard
+          initialSocials={(socials ?? []) as never}
+        />
+      </div>
+    </>
   );
 }
