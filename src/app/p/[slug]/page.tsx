@@ -19,6 +19,7 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import PlatformIcon from "@/components/PlatformIcon";
 import GrowthChart from "@/components/p/GrowthChart";
 import AllEditsTable from "@/components/p/AllEditsTable";
+import PartnerRatesCard from "@/components/p/PartnerRatesCard";
 import { formatMetric } from "@/lib/format";
 
 type SocialPlatform = "tiktok" | "instagram" | "twitter" | "youtube";
@@ -599,6 +600,7 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
     .is("deleted_at", null)
     .maybeSingle();
   if (!membership) notFound();
+  const isPartnerAdmin = membership.role === "admin";
 
   const { data: titles } = await supabase
     .from("titles")
@@ -617,6 +619,38 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
     supabase,
     allEdits.map((r) => r.id),
   );
+
+  // Per-title CPM rates + this-month earnings rollup for the
+  // "Pay creators" card.
+  const { data: rateRows } = await supabase
+    .from("partner_title_rates")
+    .select("title_id, rate_cents_per_thousand")
+    .eq("partner_id", partner.id)
+    .is("deleted_at", null);
+  const rateByTitle = new Map<string, number>();
+  for (const r of rateRows ?? []) {
+    rateByTitle.set(r.title_id as string, r.rate_cents_per_thousand as number);
+  }
+  const titleRates = titleRows.map((t) => ({
+    title_id: t.id as string,
+    title: t.title as string,
+    rate_cents_per_thousand: rateByTitle.get(t.id as string) ?? null,
+  }));
+
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const { data: monthEarnings } = await supabase
+    .from("creator_earnings")
+    .select("earnings_cents, creator_id")
+    .eq("partner_id", partner.id)
+    .gte("calculation_date", monthStart.toISOString().slice(0, 10));
+  let paidThisMonthCents = 0;
+  const creatorsThisMonth = new Set<string>();
+  for (const e of monthEarnings ?? []) {
+    paidThisMonthCents += (e.earnings_cents as number | null) ?? 0;
+    if (e.creator_id) creatorsThisMonth.add(e.creator_id as string);
+  }
 
   const titleSummary = titleRows.length === 1
     ? titleRows[0].title
@@ -682,6 +716,16 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
             titleSlug={primarySlug}
           />
           <TopCreatorsCard creators={topCreators} />
+        </div>
+
+        <div className="mt-10">
+          <PartnerRatesCard
+            partnerSlug={partner.slug as string}
+            isAdmin={isPartnerAdmin}
+            titles={titleRates}
+            paid_this_month_cents={paidThisMonthCents}
+            unique_creators_paid={creatorsThisMonth.size}
+          />
         </div>
 
         <div className="mt-10 rounded-2xl border border-white/10 bg-white/[0.02] p-5">

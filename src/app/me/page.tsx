@@ -41,6 +41,37 @@ export default async function MePage() {
       .not("verified_at", "is", null)
     : { data: [] };
 
+  // earnings (creator-scoped). Aggregate total + this-month +
+  // per-title in JS — small dataset, simpler than three queries.
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const monthStartIso = monthStart.toISOString().slice(0, 10);
+  const { data: earningsRows } = creator
+    ? await service
+      .from("creator_earnings")
+      .select(
+        "earnings_cents, calculation_date, title_id, titles(title)",
+      )
+      .eq("creator_id", creator.id)
+    : { data: [] };
+  let totalCents = 0;
+  let monthCents = 0;
+  const byTitle = new Map<string, { name: string; cents: number }>();
+  for (const r of earningsRows ?? []) {
+    const cents = (r.earnings_cents as number | null) ?? 0;
+    totalCents += cents;
+    if ((r.calculation_date as string) >= monthStartIso) monthCents += cents;
+    const titleName = (r.titles as { title?: string } | null)?.title ?? "—";
+    const tid = r.title_id as string;
+    const existing = byTitle.get(tid) ?? { name: titleName, cents: 0 };
+    existing.cents += cents;
+    byTitle.set(tid, existing);
+  }
+  const titleBreakdown = [...byTitle.values()].sort(
+    (a, b) => b.cents - a.cents,
+  );
+
   // claimed status: if user has no handle, prompt to claim
   const handle = (userRow?.handle as string | null) ?? null;
   if (!handle) {
@@ -149,6 +180,73 @@ export default async function MePage() {
                     </li>
                   ))}
                 </ul>
+              )}
+          </div>
+        </section>
+
+        {/* Earnings — read-only summary, no withdrawal yet (Stripe
+            Connect lands tomorrow). */}
+        <section>
+          <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
+            Earnings
+          </h2>
+          <div className="mt-3 border-t border-white/10 pt-3">
+            {verifiedSocials.length === 0 && totalCents === 0
+              ? (
+                <p className="text-body-sm text-moonbeem-ink-subtle">
+                  Earnings will be claimable after you verify a social
+                  account.{" "}
+                  <Link
+                    href="/me/edit"
+                    className="text-moonbeem-pink hover:underline"
+                  >
+                    Verify your socials
+                  </Link>
+                  .
+                </p>
+              )
+              : (
+                <div className="flex flex-col gap-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <div className="font-wordmark text-display-sm text-moonbeem-pink leading-none">
+                        ${(totalCents / 100).toFixed(2)}
+                      </div>
+                      <div className="mt-1 text-caption text-moonbeem-ink-subtle">
+                        total to date
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-wordmark text-display-sm text-moonbeem-ink leading-none">
+                        ${(monthCents / 100).toFixed(2)}
+                      </div>
+                      <div className="mt-1 text-caption text-moonbeem-ink-subtle">
+                        this month
+                      </div>
+                    </div>
+                  </div>
+                  {titleBreakdown.length > 0 && (
+                    <ul className="flex flex-col gap-1">
+                      {titleBreakdown.map((t) => (
+                        <li
+                          key={t.name}
+                          className="flex items-center justify-between text-body-sm"
+                        >
+                          <span className="text-moonbeem-ink-muted">
+                            {t.name}
+                          </span>
+                          <span className="tabular-nums text-moonbeem-ink">
+                            ${(t.cents / 100).toFixed(2)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="text-caption text-moonbeem-ink-subtle">
+                    Withdrawals are coming soon — your balance is being
+                    tracked daily.
+                  </p>
+                </div>
               )}
           </div>
         </section>
