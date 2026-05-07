@@ -1,31 +1,97 @@
 // EnsembleData public-profile lookups for Stage 2C bio verification.
 //
-// Each platform fetcher returns the bio text as a string, throwing
-// on shape mismatch (so the caller can show "couldn't read bio,
-// try again" rather than silently passing a wrong field). Field
-// paths are best-effort plausible — the first real call against
-// each endpoint will tell us if they're right; errors include the
-// raw_payload preview so we can iterate quickly.
+// Verified endpoint shapes (2026-05-07, against real production data):
+//   Instagram /apis/instagram/user/detailed-info?username=X
+//     → data.biography. NOT /apis/instagram/user/info, which returns
+//       only basic profile (pk, username, full_name, is_verified) and
+//       no biography field.
+//   TikTok    /apis/tt/user/info?username=X
+//     → data.user.signature ("signature" is TikTok's term for bio).
+//   Twitter   /apis/twitter/user/info?name=X
+//     → data.legacy.description. The Twitter endpoint requires `name`,
+//       NOT `screen_name` (returns 422 "field required: name" otherwise).
+//
+// On shape mismatch we log the full upstream body to console.error so
+// Vercel function logs capture it for follow-up debugging — a
+// 200-char in-message preview wasn't enough on the first iteration.
+//
+// Categorized error codes (caller maps to UI strings):
+//   handle_not_found      — upstream 404 / empty data
+//   platform_unavailable  — network error, timeout, or upstream 5xx
+//   shape_mismatch        — response decoded but bio field absent
+//   bio_empty             — response decoded with empty-string bio
+//   token_missing         — server misconfiguration
+//   rate_limited          — upstream 429
 
 import type { SocialPlatform } from "@/lib/socials/handle";
 
 const ENSEMBLEDATA_BASE = "https://ensembledata.com/apis";
 const FETCH_TIMEOUT_MS = 8000;
 
-async function fetchJson(url: string): Promise<unknown> {
+export class BioFetchError extends Error {
+  code: string;
+  constructor(code: string, message?: string) {
+    super(message ?? code);
+    this.code = code;
+    this.name = "BioFetchError";
+  }
+}
+
+type FetchResult =
+  | { ok: true; body: unknown }
+  | { ok: false; error: BioFetchError };
+
+async function fetchJson(url: string): Promise<FetchResult> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(url, { signal: ctrl.signal });
-  } finally {
+  } catch (err) {
     clearTimeout(timer);
+    return {
+      ok: false,
+      error: new BioFetchError(
+        "platform_unavailable",
+        `network: ${err instanceof Error ? err.message : "unknown"}`,
+      ),
+    };
+  }
+  clearTimeout(timer);
+
+  if (res.status === 404) {
+    return { ok: false, error: new BioFetchError("handle_not_found") };
+  }
+  if (res.status === 429) {
+    return { ok: false, error: new BioFetchError("rate_limited") };
+  }
+  if (res.status >= 500) {
+    return {
+      ok: false,
+      error: new BioFetchError("platform_unavailable", `upstream ${res.status}`),
+    };
   }
   if (!res.ok) {
+    // Other 4xx (validation, etc.) — log + treat as platform unavailable
+    // for the user-facing error. Console captures the upstream payload.
     const txt = await res.text().catch(() => "");
-    throw new Error(`upstream ${res.status}: ${txt.slice(0, 200)}`);
+    console.error(`[bio] upstream ${res.status} for ${url}: ${txt.slice(0, 500)}`);
+    return {
+      ok: false,
+      error: new BioFetchError("platform_unavailable", `upstream ${res.status}`),
+    };
   }
-  return res.json();
+
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return {
+      ok: false,
+      error: new BioFetchError("platform_unavailable", "non-json response"),
+    };
+  }
+  return { ok: true, body };
 }
 
 function get(obj: unknown, path: string[]): unknown {
@@ -40,9 +106,14 @@ function get(obj: unknown, path: string[]): unknown {
   return cur;
 }
 
-function shapeError(platform: string, body: unknown): Error {
-  const preview = JSON.stringify(body).slice(0, 200);
-  return new Error(`${platform} bio shape mismatch (preview: ${preview})`);
+function logShapeMismatch(platform: string, url: string, body: unknown) {
+  // Full body to console.error so Vercel logs capture it. The thrown
+  // error is intentionally short — UI maps the code to a user string.
+  console.error(
+    `[bio] shape_mismatch platform=${platform} url=${url} body=${
+      JSON.stringify(body).slice(0, 4000)
+    }`,
+  );
 }
 
 export async function fetchBio(
@@ -50,7 +121,7 @@ export async function fetchBio(
   handle: string,
 ): Promise<string> {
   const token = process.env.ENSEMBLEDATA_TOKEN;
-  if (!token) throw new Error("ENSEMBLEDATA_TOKEN missing");
+  if (!token) throw new BioFetchError("token_missing");
 
   switch (platform) {
     case "tiktok":
@@ -63,62 +134,72 @@ export async function fetchBio(
 }
 
 async function fetchTikTokBio(handle: string, token: string): Promise<string> {
-  // Plausible: GET /tt/user/info?username=X → data.user.signature
-  // (TikTok's term for bio is "signature"). Some endpoints wrap
-  // the result in an array under data; check both.
   const url = `${ENSEMBLEDATA_BASE}/tt/user/info?username=${
     encodeURIComponent(handle)
   }&token=${encodeURIComponent(token)}`;
-  const body = await fetchJson(url);
-  const candidates: unknown[] = [
-    get(body, ["data", "user", "signature"]),
-    get(body, ["data", "0", "user", "signature"]),
-    get(body, ["data", "userInfo", "user", "signature"]),
-  ];
-  for (const c of candidates) {
-    if (typeof c === "string") return c;
+  const result = await fetchJson(url);
+  if (!result.ok) throw result.error;
+  const body = result.body;
+
+  const sig = get(body, ["data", "user", "signature"]);
+  if (typeof sig === "string") {
+    if (sig.length === 0) throw new BioFetchError("bio_empty");
+    return sig;
   }
-  throw shapeError("tiktok", body);
+  // Sometimes the user simply doesn't exist — EnsembleData may return
+  // 200 with empty/missing data instead of 404. Treat as not found.
+  const userObj = get(body, ["data", "user"]);
+  if (!userObj) throw new BioFetchError("handle_not_found");
+
+  logShapeMismatch("tiktok", url, body);
+  throw new BioFetchError("shape_mismatch");
 }
 
 async function fetchInstagramBio(
   handle: string,
   token: string,
 ): Promise<string> {
-  // Plausible: GET /instagram/user/info?username=X → data.biography
-  // (or data.user.biography depending on endpoint shape).
-  const url = `${ENSEMBLEDATA_BASE}/instagram/user/info?username=${
+  // /detailed-info is the variant that includes biography. /user/info
+  // returns only basic profile and was the source of the 2026-05-07
+  // 502 incident.
+  const url = `${ENSEMBLEDATA_BASE}/instagram/user/detailed-info?username=${
     encodeURIComponent(handle)
   }&token=${encodeURIComponent(token)}`;
-  const body = await fetchJson(url);
-  const candidates: unknown[] = [
-    get(body, ["data", "biography"]),
-    get(body, ["data", "user", "biography"]),
-  ];
-  for (const c of candidates) {
-    if (typeof c === "string") return c;
+  const result = await fetchJson(url);
+  if (!result.ok) throw result.error;
+  const body = result.body;
+
+  const bio = get(body, ["data", "biography"]);
+  if (typeof bio === "string") {
+    if (bio.length === 0) throw new BioFetchError("bio_empty");
+    return bio;
   }
-  throw shapeError("instagram", body);
+  if (!get(body, ["data"])) throw new BioFetchError("handle_not_found");
+
+  logShapeMismatch("instagram", url, body);
+  throw new BioFetchError("shape_mismatch");
 }
 
 async function fetchTwitterBio(
   handle: string,
   token: string,
 ): Promise<string> {
-  // Plausible: GET /twitter/user/info?screen_name=X →
-  // data.legacy.description. Mirrors the post endpoint's shape
-  // (data.legacy.* for tweet engagement).
-  const url = `${ENSEMBLEDATA_BASE}/twitter/user/info?screen_name=${
+  // Twitter endpoint expects `name`, NOT `screen_name`. Wrong param
+  // returns 422 with "field required: name".
+  const url = `${ENSEMBLEDATA_BASE}/twitter/user/info?name=${
     encodeURIComponent(handle)
   }&token=${encodeURIComponent(token)}`;
-  const body = await fetchJson(url);
-  const candidates: unknown[] = [
-    get(body, ["data", "legacy", "description"]),
-    get(body, ["data", "description"]),
-    get(body, ["data", "user", "legacy", "description"]),
-  ];
-  for (const c of candidates) {
-    if (typeof c === "string") return c;
+  const result = await fetchJson(url);
+  if (!result.ok) throw result.error;
+  const body = result.body;
+
+  const bio = get(body, ["data", "legacy", "description"]);
+  if (typeof bio === "string") {
+    if (bio.length === 0) throw new BioFetchError("bio_empty");
+    return bio;
   }
-  throw shapeError("twitter", body);
+  if (!get(body, ["data"])) throw new BioFetchError("handle_not_found");
+
+  logShapeMismatch("twitter", url, body);
+  throw new BioFetchError("shape_mismatch");
 }

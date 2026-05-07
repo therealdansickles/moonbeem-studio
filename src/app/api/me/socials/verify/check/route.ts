@@ -13,7 +13,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { verifySession } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { fetchBio } from "@/lib/ensembledata/bio";
+import { BioFetchError, fetchBio } from "@/lib/ensembledata/bio";
 import {
   isSocialPlatform,
   normalizeHandle,
@@ -74,10 +74,16 @@ export async function POST(request: NextRequest) {
   try {
     bio = await fetchBio(platform as SocialPlatform, handle);
   } catch (err) {
+    if (err instanceof BioFetchError) {
+      // Categorized failure — UI maps the code to a friendly string.
+      // 200 here (not 502) because the request itself succeeded; the
+      // verification just couldn't proceed.
+      return NextResponse.json({ verified: false, error: err.code });
+    }
     const msg = err instanceof Error ? err.message : "unknown";
+    console.error("[bio] unexpected error:", msg);
     return NextResponse.json(
-      { verified: false, error: `bio_fetch_failed: ${msg}` },
-      { status: 502 },
+      { verified: false, error: "platform_unavailable" },
     );
   }
 

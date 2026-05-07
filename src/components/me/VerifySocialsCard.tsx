@@ -269,8 +269,23 @@ function humanizeError(code: string | undefined): string | null {
   }
   if (code === "invalid_handle") return "Handle doesn't look right.";
   if (code === "invalid_platform") return "Platform not supported.";
-  if (code.startsWith("bio_fetch_failed:")) {
-    return "Couldn't read the bio from the platform. Try again in a moment.";
+  if (code === "handle_not_found") {
+    return "We couldn't find that handle. Double-check the spelling.";
+  }
+  if (code === "bio_empty") {
+    return "Your bio looks empty. Add the code anywhere in your bio, save, then try again.";
+  }
+  if (code === "rate_limited") {
+    return "Too many requests right now. Try again in a minute.";
+  }
+  if (code === "platform_unavailable") {
+    return "Couldn't reach the platform. Try again in a moment.";
+  }
+  if (code === "shape_mismatch") {
+    return "Couldn't read the bio (Moonbeem-side hiccup). We've logged it; please reach out if it persists.";
+  }
+  if (code === "token_missing") {
+    return "Server misconfigured. We've logged it.";
   }
   return code;
 }
