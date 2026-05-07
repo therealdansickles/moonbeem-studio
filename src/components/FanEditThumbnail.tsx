@@ -19,15 +19,24 @@ const platformLabel: Record<FanEdit["platform"], string> = {
   youtube: "YouTube",
 };
 
-// 9:16 default for video-vertical (TikTok/Reels are most common).
-// 16:9 fallback specifically for YouTube. Otherwise we follow the
-// extracted aspect_ratio from view-tracking. CSS `aspect-ratio`
-// accepts "w / h" so we transform "9:16" → "9 / 16".
+// Use a fixed per-platform aspect ratio in the grid — not the
+// per-row fan_edit.aspect_ratio. Reason: mixed aspects inside one
+// platform section produced visibly inconsistent heights even with
+// align-items: start (a tall outlier still expands its row's
+// max-content height; framer-motion's layoutId measurement also
+// fights aspect-ratio on certain widths). Forcing uniformity here
+// trades exact-fit for visual consistency; off-aspect images get
+// cropped via object-cover. The DB aspect_ratio is preserved and
+// can drive the modal player at native aspect.
 function aspectFor(fe: FanEdit): string {
-  if (fe.aspect_ratio) {
-    return fe.aspect_ratio.replace(":", " / ");
+  switch (fe.platform) {
+    case "tiktok":
+    case "instagram":
+      return "9 / 16";
+    case "twitter":
+    case "youtube":
+      return "16 / 9";
   }
-  return fe.platform === "youtube" ? "16 / 9" : "9 / 16";
 }
 
 export default function FanEditThumbnail({ fanEdit, eager, onOpen }: Props) {

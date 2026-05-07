@@ -223,6 +223,14 @@ function ModalContent({
         onDragEnd={onDragEnd}
         className="relative z-10 flex h-full w-full flex-col bg-moonbeem-black md:h-auto md:max-h-[90vh] md:w-auto md:max-w-[440px] md:overflow-hidden md:rounded-2xl md:border md:border-white/10 md:shadow-2xl md:shadow-black/60"
       >
+        {/* Drag-handle bar — mobile only. Standard bottom-sheet
+            affordance signaling that the modal can be dragged.
+            Sits above the header. The motion.div parent handles
+            the actual drag; this is purely visual. */}
+        <div className="flex shrink-0 justify-center pt-2 pb-1 md:hidden">
+          <div className="h-1 w-12 rounded-full bg-white/30" />
+        </div>
+
         {/* Swipe-hint arrows — fade out shortly after the modal opens
             (and on each nav). Iframe embeds capture touches in the
             body, so this gives mobile users a visual cue that nav
@@ -270,8 +278,13 @@ function ModalContent({
             ref={closeRef}
             type="button"
             onClick={onClose}
+            // Stop pointerdown so framer-motion's drag intent on the
+            // dialog never sees this tap. Without it, a few-pixel
+            // finger drift during tap is interpreted as drag and
+            // onClick never fires.
+            onPointerDown={(e) => e.stopPropagation()}
             aria-label="Close"
-            className="rounded-md px-2 py-1 text-body text-moonbeem-ink-subtle hover:text-moonbeem-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
+            className="flex h-11 w-11 items-center justify-center rounded-md text-body text-moonbeem-ink-subtle hover:text-moonbeem-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
           >
             ✕
           </button>
@@ -290,6 +303,7 @@ function ModalContent({
             href={fanEdit.embed_url}
             target="_blank"
             rel="noopener noreferrer"
+            onPointerDown={(e) => e.stopPropagation()}
             onClick={() => {
               if (sessionId) {
                 trackModalEvent({
@@ -299,7 +313,7 @@ function ModalContent({
                 });
               }
             }}
-            className="flex items-center gap-1.5 text-body-sm text-moonbeem-ink hover:text-moonbeem-pink"
+            className="flex min-h-11 items-center gap-1.5 px-1 text-body-sm text-moonbeem-ink hover:text-moonbeem-pink"
           >
             <PlatformIcon
               platform={fanEdit.platform}
@@ -311,21 +325,23 @@ function ModalContent({
             <button
               type="button"
               onClick={onPrev}
+              onPointerDown={(e) => e.stopPropagation()}
               disabled={openIndex <= 0}
               aria-label="Previous fan edit"
-              className="rounded-md px-2 py-1 text-body text-moonbeem-ink hover:text-moonbeem-pink disabled:cursor-not-allowed disabled:opacity-30 focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
+              className="flex h-11 w-11 items-center justify-center rounded-md text-body text-moonbeem-ink hover:text-moonbeem-pink disabled:cursor-not-allowed disabled:opacity-30 focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
             >
               ←
             </button>
-            <span className="text-caption tabular-nums text-moonbeem-ink-subtle">
+            <span className="select-none text-caption tabular-nums text-moonbeem-ink-subtle">
               {openIndex + 1} / {total}
             </span>
             <button
               type="button"
               onClick={onNext}
+              onPointerDown={(e) => e.stopPropagation()}
               disabled={openIndex >= total - 1}
               aria-label="Next fan edit"
-              className="rounded-md px-2 py-1 text-body text-moonbeem-ink hover:text-moonbeem-pink disabled:cursor-not-allowed disabled:opacity-30 focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
+              className="flex h-11 w-11 items-center justify-center rounded-md text-body text-moonbeem-ink hover:text-moonbeem-pink disabled:cursor-not-allowed disabled:opacity-30 focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
             >
               →
             </button>
