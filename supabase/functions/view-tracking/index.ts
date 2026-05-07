@@ -100,7 +100,11 @@ Deno.serve(async (_req: Request) => {
       { auth: { persistSession: false, autoRefreshToken: false } },
     );
 
-    const state = await loadOrStartRun(supabase, WALL_CLOCK_BUDGET_MS);
+    const state = await loadOrStartRun(
+      supabase,
+      WALL_CLOCK_BUDGET_MS,
+      REFRESH_INTERVAL_HOURS,
+    );
 
     if (state.alreadyCompleted) {
       return jsonResponse({

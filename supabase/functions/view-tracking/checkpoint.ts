@@ -14,11 +14,19 @@
 //      the next invocation finds it (same UTC day) and resumes from
 //      its last_processed_fan_edit_id.
 //
-// Same-UTC-date short-circuit: if today has ANY successful run that
-// processed > 0 fan_edits, return alreadyCompleted=true. An empty
-// success (processed=0) does NOT short-circuit — it just means
-// nothing was eligible at the moment that run fired; more fan_edits
-// may be eligible later in the day.
+// Same-UTC-date short-circuit: returns alreadyCompleted=true only
+// when BOTH conditions hold:
+//   (a) today has at least one successful run with fan_edits_processed
+//       > 0 — i.e. the queue has actually drained at some point today;
+//   (b) zero fan_edits are currently eligible (status='active' AND
+//       (last_refreshed_at IS NULL OR last_refreshed_at < now() -
+//       refreshIntervalHours)).
+// If (a) is true but (b) finds new eligible rows, we fall through and
+// start a fresh run — the post-drain freshness window has reopened
+// because new fan_edits were added or existing rows aged past the
+// refresh interval. The previous "(a) alone" rule locked the chain
+// for the rest of the day after the first drain, even when new work
+// was clearly eligible.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
@@ -50,13 +58,13 @@ const ZERO_COUNTERS: RunCounters = {
 export async function loadOrStartRun(
   supabase: SupabaseClient,
   cpuBudgetMs: number,
+  refreshIntervalHours: number,
 ): Promise<LoadResult> {
   const todayUtcStart = `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
 
-  // Short-circuit only if today's queue has actually drained at some
-  // point — i.e. any successful run today processed > 0 fan_edits.
-  // Empty successes don't qualify: they reflect "nothing eligible at
-  // run time," not "today is done."
+  // (a) Has today's queue drained at least once — any successful run
+  // today with fan_edits_processed > 0? Empty successes don't qualify;
+  // they reflect "nothing eligible at run time," not "today is done."
   const { data: drainedRun, error: drainedErr } = await supabase
     .from("view_tracking_runs")
     .select("id")
@@ -73,17 +81,46 @@ export async function loadOrStartRun(
     );
   }
 
+  // (b) If today drained, only short-circuit when nothing is currently
+  // eligible. Otherwise the freshness window has reopened post-drain
+  // (new fan_edits added today, or existing rows aged past the refresh
+  // interval) and we should run again.
   if (drainedRun) {
+    const refreshCutoff = new Date(
+      Date.now() - refreshIntervalHours * 60 * 60 * 1000,
+    ).toISOString();
+
+    const { count: eligibleCount, error: eligErr } = await supabase
+      .from("fan_edits")
+      .select("id", { count: "exact", head: true })
+      .eq("view_tracking_status", "active")
+      .or(
+        `last_refreshed_at.is.null,last_refreshed_at.lt.${refreshCutoff}`,
+      );
+
+    if (eligErr) {
+      throw new Error(
+        `[view-tracking] failed to query eligible fan_edits: ${eligErr.message}`,
+      );
+    }
+
+    if ((eligibleCount ?? 0) === 0) {
+      console.log(
+        `[view-tracking] ALREADY_COMPLETED_TODAY drained_run=${drainedRun.id} eligible=0`,
+      );
+      return {
+        alreadyCompleted: true,
+        runId: null,
+        lastProcessedFanEditId: null,
+        counters: { ...ZERO_COUNTERS },
+        previousRunId: drainedRun.id as string,
+      };
+    }
+
     console.log(
-      `[view-tracking] ALREADY_COMPLETED_TODAY drained_run=${drainedRun.id}`,
+      `[view-tracking] DRAINED_BUT_NEW_ELIGIBLE drained_run=${drainedRun.id} eligible=${eligibleCount}`,
     );
-    return {
-      alreadyCompleted: true,
-      runId: null,
-      lastProcessedFanEditId: null,
-      counters: { ...ZERO_COUNTERS },
-      previousRunId: drainedRun.id as string,
-    };
+    // Fall through — start a fresh run to drain the new eligible rows.
   }
 
   // No drained success today. Look for a partial run to recover
