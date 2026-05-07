@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { InstagramEmbed, TikTokEmbed, XEmbed } from "react-social-media-embed";
 import type { FanEdit } from "@/lib/queries/titles";
+import { trackModalEvent } from "@/lib/analytics/modal-event";
 import { vibrate } from "@/lib/haptics";
 import PlatformIcon from "./PlatformIcon";
 
@@ -47,11 +48,17 @@ export default function FanEditModal({
   const fanEdit = isOpen ? fanEdits[openIndex] : null;
 
   const closeRef = useRef<HTMLButtonElement | null>(null);
+  // session_id is regenerated on every modal-open (each fan_edit
+  // viewing is its own session). Held in state so ModalContent can
+  // read it for view_on_platform_click events. Refs would be stale
+  // for child reads.
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
-  // Body scroll lock + ESC/arrow keys + focus management. All scoped
-  // to "while open."
+  // Body scroll lock + ESC/arrow keys + focus management + analytics.
+  // All scoped to "while open." On open: emit modal_open and start
+  // a duration timer. On unmount/nav: emit modal_close with elapsed.
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !fanEdit) return;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
@@ -73,11 +80,38 @@ export default function FanEditModal({
     // accessible-correct for dialogs).
     closeRef.current?.focus();
 
+    // Analytics: new session per open. Cleanup fires modal_close on
+    // any close path (ESC, swipe, X, backdrop, nav).
+    const sid = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setSessionId(sid);
+    const fanEditId = fanEdit.id;
+    const openedAt = Date.now();
+    trackModalEvent({
+      fan_edit_id: fanEditId,
+      event_type: "modal_open",
+      session_id: sid,
+      metadata: typeof window !== "undefined"
+        ? {
+          platform: fanEdit.platform,
+          viewport: { w: window.innerWidth, h: window.innerHeight },
+          referrer: document.referrer || null,
+        }
+        : undefined,
+    });
+
     return () => {
       document.body.style.overflow = prevOverflow;
       document.removeEventListener("keydown", onKey);
+      trackModalEvent({
+        fan_edit_id: fanEditId,
+        event_type: "modal_close",
+        session_id: sid,
+        duration_ms: Date.now() - openedAt,
+      });
     };
-  }, [isOpen, openIndex, fanEdits.length, onClose, onNavigate]);
+  }, [isOpen, openIndex, fanEdits.length, onClose, onNavigate, fanEdit]);
 
   // Both axes draggable. Intent is decided by which offset dominates
   // at release time. Horizontal-dominant → nav (left=next, right=prev,
@@ -114,6 +148,7 @@ export default function FanEditModal({
           total={fanEdits.length}
           titleSlug={titleSlug}
           titleName={titleName}
+          sessionId={sessionId}
           onClose={onClose}
           onPrev={() => onNavigate(openIndex - 1)}
           onNext={() => onNavigate(openIndex + 1)}
@@ -131,6 +166,7 @@ type ContentProps = {
   total: number;
   titleSlug: string;
   titleName: string;
+  sessionId: string | null;
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
@@ -147,6 +183,7 @@ function ModalContent({
   total,
   titleSlug,
   titleName,
+  sessionId,
   onClose,
   onPrev,
   onNext,
@@ -253,6 +290,15 @@ function ModalContent({
             href={fanEdit.embed_url}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={() => {
+              if (sessionId) {
+                trackModalEvent({
+                  fan_edit_id: fanEdit.id,
+                  event_type: "view_on_platform_click",
+                  session_id: sessionId,
+                });
+              }
+            }}
             className="flex items-center gap-1.5 text-body-sm text-moonbeem-ink hover:text-moonbeem-pink"
           >
             <PlatformIcon
