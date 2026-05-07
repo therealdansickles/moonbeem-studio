@@ -91,7 +91,7 @@ export default function FanEditsTab({
                 {platformLabel[platform]}
               </h3>
               <div className="mt-2 mb-6 border-t border-white/10" />
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:gap-4 lg:grid-cols-4">
+              <div className="grid grid-cols-2 items-start gap-3 sm:grid-cols-3 md:gap-4 lg:grid-cols-4">
                 {edits.map((fe) => (
                   <FanEditThumbnail
                     key={fe.id}

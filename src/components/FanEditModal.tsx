@@ -28,7 +28,12 @@ const platformLabel: Record<FanEdit["platform"], string> = {
 };
 
 const SWIPE_DISMISS_THRESHOLD = 120;
-const SWIPE_NAV_THRESHOLD = 80;
+// 50px feels light enough that a casual flick navigates without
+// accidental triggers. Iframe embeds capture touches in the body,
+// so the effective swipe surface is header+footer+body padding —
+// keeping the threshold short matters on mobile.
+const SWIPE_NAV_THRESHOLD = 50;
+const HINT_FADE_DELAY_MS = 1500;
 
 export default function FanEditModal({
   fanEdits,
@@ -181,6 +186,22 @@ function ModalContent({
         onDragEnd={onDragEnd}
         className="relative z-10 flex h-full w-full flex-col bg-moonbeem-black md:h-auto md:max-h-[90vh] md:w-auto md:max-w-[440px] md:overflow-hidden md:rounded-2xl md:border md:border-white/10 md:shadow-2xl md:shadow-black/60"
       >
+        {/* Swipe-hint arrows — fade out shortly after the modal opens
+            (and on each nav). Iframe embeds capture touches in the
+            body, so this gives mobile users a visual cue that nav
+            is available via swipe at the edges. Pointer-events-none
+            so they don't interfere with the embed or chrome. */}
+        <motion.div
+          key={fanEdit.id}
+          initial={{ opacity: 0.55 }}
+          animate={{ opacity: 0 }}
+          transition={{ delay: 1.5, duration: 0.6, ease: "easeOut" }}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 left-0 right-0 z-20 flex items-center justify-between px-3 text-2xl text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.7)]"
+        >
+          <span className={openIndex > 0 ? "" : "opacity-0"}>◀</span>
+          <span className={openIndex < total - 1 ? "" : "opacity-0"}>▶</span>
+        </motion.div>
         {/* Header */}
         <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
           <div className="flex min-w-0 flex-col gap-0.5">
