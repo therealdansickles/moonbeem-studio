@@ -16,6 +16,9 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import PlatformIcon from "@/components/PlatformIcon";
+import GrowthChart from "@/components/p/GrowthChart";
+import AllEditsTable from "@/components/p/AllEditsTable";
+import { formatMetric } from "@/lib/format";
 
 type SocialPlatform = "tiktok" | "instagram" | "twitter" | "youtube";
 
@@ -104,17 +107,6 @@ async function loadHeroMetrics(
     modal_opens: modalOpensRes.count ?? 0,
     ticket_clicks: ticketClicksRes.count ?? 0,
   };
-}
-
-// Compact-format a metric: 1234 → "1.2K", 1200000 → "1.2M".
-function formatMetric(n: number): string {
-  if (n < 1000) return n.toLocaleString();
-  if (n < 1_000_000) {
-    const k = n / 1000;
-    return `${k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)}K`;
-  }
-  const m = n / 1_000_000;
-  return `${m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)}M`;
 }
 
 // Returns a Map<fan_edit_id, view_count_24h_ago> from the most recent
@@ -393,6 +385,129 @@ function TopPerformersCard({
   );
 }
 
+// COUNT(modal_open) per fan_edit. The dashboard's ALL-edits table
+// surfaces this; the hero tile uses a single COUNT separately.
+async function loadModalOpensMap(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  fanEditIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (fanEditIds.length === 0) return out;
+  const { data: events } = await supabase
+    .from("fan_edit_events")
+    .select("fan_edit_id")
+    .eq("event_type", "modal_open")
+    .in("fan_edit_id", fanEditIds);
+  for (const e of events ?? []) {
+    const fid = e.fan_edit_id as string;
+    out.set(fid, (out.get(fid) ?? 0) + 1);
+  }
+  return out;
+}
+
+// Daily-summed total views across all of partner's fan_edits. Per
+// (fan_edit_id, day) we keep the day's max view_count, then forward-
+// fill so days without a snapshot for a given edit still contribute
+// the most recent prior value to the daily sum. Fixes the
+// "Tuesday's total drops because we only refreshed half the catalog
+// on Tuesday" artefact.
+async function loadDailyGrowth(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  fanEditIds: string[],
+  lookbackDays = 30,
+): Promise<Array<{ day: string; views: number }>> {
+  if (fanEditIds.length === 0) return [];
+  const cutoff = new Date(
+    Date.now() - lookbackDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+  const { data: snaps } = await supabase
+    .from("view_tracking_snapshots")
+    .select("fan_edit_id, view_count, captured_at")
+    .in("fan_edit_id", fanEditIds)
+    .gte("captured_at", cutoff)
+    .order("captured_at", { ascending: true });
+
+  const perEditPerDay = new Map<string, Map<string, number>>();
+  const allDays = new Set<string>();
+  for (const s of snaps ?? []) {
+    const fid = s.fan_edit_id as string;
+    const day = (s.captured_at as string).slice(0, 10);
+    const v = (s.view_count as number | null) ?? 0;
+    allDays.add(day);
+    let editMap = perEditPerDay.get(fid);
+    if (!editMap) {
+      editMap = new Map();
+      perEditPerDay.set(fid, editMap);
+    }
+    const existing = editMap.get(day) ?? 0;
+    if (v > existing) editMap.set(day, v);
+  }
+
+  const sortedDays = [...allDays].sort();
+  const editLatest = new Map<string, number>();
+  return sortedDays.map((d) => {
+    for (const [fid, days] of perEditPerDay) {
+      if (days.has(d)) editLatest.set(fid, days.get(d)!);
+    }
+    let total = 0;
+    for (const v of editLatest.values()) total += v;
+    return { day: d, views: total };
+  });
+}
+
+type AllEditRow = {
+  id: string;
+  platform: SocialPlatform;
+  thumbnail_url: string | null;
+  creator_handle: string | null;
+  view_count: number;
+  growth_24h: number | null;
+  modal_opens: number;
+};
+
+async function loadAllEdits(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  titleIds: string[],
+): Promise<AllEditRow[]> {
+  if (titleIds.length === 0) return [];
+  const { data: rows } = await supabase
+    .from("fan_edits")
+    .select("id, platform, view_count, thumbnail_url, creator_id")
+    .in("title_id", titleIds)
+    .eq("view_tracking_status", "active")
+    .order("view_count", { ascending: false });
+
+  const fanEdits = rows ?? [];
+  const ids = fanEdits.map((r) => r.id as string);
+  const creatorIds = fanEdits
+    .map((r) => r.creator_id as string | null)
+    .filter((id): id is string => !!id);
+
+  const [growth, handles, modalOpens] = await Promise.all([
+    load24hGrowth(supabase, ids),
+    loadCreatorHandles(supabase, creatorIds),
+    loadModalOpensMap(supabase, ids),
+  ]);
+
+  return fanEdits.map((r) => {
+    const id = r.id as string;
+    const current = (r.view_count as number | null) ?? 0;
+    const prior = growth.get(id);
+    const delta = prior !== undefined ? current - prior : null;
+    return {
+      id,
+      platform: r.platform as SocialPlatform,
+      thumbnail_url: r.thumbnail_url as string | null,
+      creator_handle: r.creator_id
+        ? handles.get(r.creator_id as string) ?? null
+        : null,
+      view_count: current,
+      growth_24h: delta,
+      modal_opens: modalOpens.get(id) ?? 0,
+    };
+  });
+}
+
 function TopCreatorsCard({ creators }: { creators: TopCreator[] }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
@@ -474,11 +589,16 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
   const titleRows = titles ?? [];
   const titleIds = titleRows.map((t) => t.id as string);
 
-  const [metrics, topPerformers, topCreators] = await Promise.all([
+  const [metrics, topPerformers, topCreators, allEdits] = await Promise.all([
     loadHeroMetrics(supabase, titleIds),
     loadTopPerformers(supabase, titleIds, 10),
     loadTopCreators(supabase, titleIds, 10),
+    loadAllEdits(supabase, titleIds),
   ]);
+  const dailyGrowth = await loadDailyGrowth(
+    supabase,
+    allEdits.map((r) => r.id),
+  );
 
   const titleSummary = titleRows.length === 1
     ? titleRows[0].title
@@ -546,8 +666,30 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
           <TopCreatorsCard creators={topCreators} />
         </div>
 
-        <div className="mt-10 rounded-2xl border border-dashed border-white/10 p-10 text-center text-body-sm text-moonbeem-ink-subtle">
-          Growth chart and full fan-edit table — coming next.
+        <div className="mt-10 rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+          <div className="flex items-center gap-3">
+            <span className="rounded-full bg-moonbeem-violet/20 px-2.5 py-0.5 text-caption font-medium text-moonbeem-violet-soft">
+              Growth
+            </span>
+            <span className="text-caption text-moonbeem-ink-subtle">
+              total views over time
+            </span>
+          </div>
+          <div className="mt-4">
+            <GrowthChart data={dailyGrowth} />
+          </div>
+        </div>
+
+        <div className="mt-10">
+          <div className="mb-4 flex items-center gap-3">
+            <span className="rounded-full bg-moonbeem-pink/15 px-2.5 py-0.5 text-caption font-medium text-moonbeem-pink">
+              All fan edits
+            </span>
+            <span className="text-caption text-moonbeem-ink-subtle">
+              {allEdits.length} active · click columns to sort
+            </span>
+          </div>
+          <AllEditsTable rows={allEdits} titleSlug={primarySlug} />
         </div>
       </div>
     </div>
