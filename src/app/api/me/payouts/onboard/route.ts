@@ -8,17 +8,26 @@
 // later — this endpoint is safe to call repeatedly to regenerate the
 // link.
 
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { verifySession } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getStripe } from "@/lib/stripe/server";
 
-function publicBaseUrl(): string {
-  const v = process.env.NEXT_PUBLIC_SITE_URL ?? "https://moonbeem.studio";
-  return v.replace(/\/$/, "");
+// Resolve the public base URL for Stripe-redirect targets. Stripe
+// echoes return_url/refresh_url back verbatim, so a misconfigured
+// env var in production lands users on localhost (verified incident
+// 2026-05-08). Defensive: prefer NEXT_PUBLIC_SITE_URL when it isn't
+// localhost; otherwise use the request's actual origin (what the
+// user came in on) which is correct in both dev and prod.
+function publicBaseUrl(request: NextRequest): string {
+  const env = process.env.NEXT_PUBLIC_SITE_URL;
+  if (env && !env.includes("localhost") && !env.includes("127.0.0.1")) {
+    return env.replace(/\/$/, "");
+  }
+  return request.nextUrl.origin;
 }
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   const session = await verifySession();
   const supabase = createServiceRoleClient();
 
@@ -88,7 +97,7 @@ export async function POST() {
     }
   }
 
-  const base = publicBaseUrl();
+  const base = publicBaseUrl(request);
   const link = await stripe.accountLinks.create({
     account: accountId,
     // Stripe redirects to refresh_url if the link expires before
