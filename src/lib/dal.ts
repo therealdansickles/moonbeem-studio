@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 export const verifySession = cache(async () => {
@@ -56,4 +56,23 @@ export const requireSuperAdmin = cache(async () => {
     redirect("/");
   }
   return session;
+});
+
+// Like requireSuperAdmin, but for routes that should not reveal their
+// existence to non-admins. Anonymous + non-super-admin users both get
+// a generic 404. Used for the /admin root, where the URL itself is a
+// signal we don't want to leak.
+export const requireSuperAdminOr404 = cache(async () => {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) notFound();
+  const { data } = await supabase
+    .from("users")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (data?.role !== "super_admin") notFound();
+  return { userId: user.id, email: user.email ?? "" };
 });
