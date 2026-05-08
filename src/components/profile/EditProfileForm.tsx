@@ -134,8 +134,12 @@ export default function EditProfileForm({
 
         <fieldset className="flex flex-col gap-3">
           <legend className="text-body-sm text-moonbeem-ink-muted mb-1">
-            Links
+            Other links
           </legend>
+          <p className="text-caption text-moonbeem-ink-subtle -mt-1">
+            Verified socials are managed below — these are for personal
+            sites, mailing lists, etc.
+          </p>
           {links.length === 0 && (
             <p className="text-caption text-moonbeem-ink-subtle">
               No links yet.
@@ -147,7 +151,7 @@ export default function EditProfileForm({
                 type="text"
                 value={link.label}
                 onChange={(e) => updateLink(idx, { label: e.target.value })}
-                placeholder="Label (e.g. Twitter)"
+                placeholder="Label (e.g. Substack)"
                 maxLength={30}
                 className="w-full sm:w-40 rounded-md border border-moonbeem-border-strong bg-transparent px-3 py-2 text-body-sm text-moonbeem-ink placeholder:text-moonbeem-ink-subtle focus:border-moonbeem-pink focus:outline-none"
               />

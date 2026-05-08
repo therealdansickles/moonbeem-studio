@@ -130,6 +130,14 @@ export async function fetchBio(
       return fetchInstagramBio(handle, token);
     case "twitter":
       return fetchTwitterBio(handle, token);
+    case "youtube":
+      // Stage 2C ships UI rows for YouTube (display + visibility) but
+      // the bio fetch path is not implemented. Returning a clean
+      // 'platform_unavailable' surfaces "Couldn't reach the platform"
+      // in the UI rather than a 500. When the first YouTube creator
+      // wants to verify, wire fetchYouTubeBio against the EnsembleData
+      // YouTube channel endpoint and surface description/about text.
+      throw new BioFetchError("platform_unavailable");
   }
 }
 

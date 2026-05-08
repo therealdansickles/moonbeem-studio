@@ -35,7 +35,7 @@ export async function GET() {
   const { data: socials, error: socialsErr } = await supabase
     .from("creator_socials")
     .select(
-      "platform, handle, verified_at, is_verified, verification_code, verification_started_at, verification_method",
+      "platform, handle, verified_at, is_verified, verification_code, verification_started_at, verification_method, display_on_profile",
     )
     .eq("creator_id", creator.id);
   if (socialsErr) {

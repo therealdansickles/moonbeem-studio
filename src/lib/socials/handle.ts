@@ -4,6 +4,7 @@ export const ALLOWED_SOCIAL_PLATFORMS = [
   "tiktok",
   "instagram",
   "twitter",
+  "youtube",
 ] as const;
 export type SocialPlatform = (typeof ALLOWED_SOCIAL_PLATFORMS)[number];
 

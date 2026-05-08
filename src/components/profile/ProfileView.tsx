@@ -1,5 +1,10 @@
 import Link from "next/link";
 import type { Profile, TopTitle } from "@/lib/queries/profiles";
+import {
+  PLATFORM_LABEL,
+  buildSocialProfileUrl,
+} from "@/lib/socials/profile-url";
+import PlatformIcon from "@/components/PlatformIcon";
 import AvatarCircle from "./AvatarCircle";
 import Top12Grid from "./Top12Grid";
 
@@ -62,21 +67,53 @@ export default function ProfileView({
               {profile.bio}
             </p>
           )}
-          {profile.links.length > 0 && (
+          {profile.verified_socials.length > 0 && (
             <ul className="mt-4 flex flex-wrap gap-2">
-              {profile.links.map((link, i) => (
-                <li key={i}>
+              {profile.verified_socials.map((s) => (
+                <li key={s.platform}>
                   <a
-                    href={link.url}
+                    href={buildSocialProfileUrl(s.platform, s.handle)}
                     target="_blank"
                     rel="noopener noreferrer nofollow"
-                    className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-body-sm text-moonbeem-ink transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
+                    className="group inline-flex items-center gap-2 rounded-full border border-moonbeem-pink/30 bg-moonbeem-pink/10 px-3 py-1 text-body-sm text-moonbeem-ink transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
+                    title={`Verified on ${PLATFORM_LABEL[s.platform]}`}
                   >
-                    {link.label} <span aria-hidden>→</span>
+                    <PlatformIcon
+                      platform={s.platform}
+                      className="h-4 w-4 text-moonbeem-pink"
+                    />
+                    <span>@{s.handle}</span>
+                    <span
+                      aria-label="Verified"
+                      className="text-emerald-300"
+                    >
+                      ✓
+                    </span>
                   </a>
                 </li>
               ))}
             </ul>
+          )}
+          {profile.links.length > 0 && (
+            <div className="mt-5">
+              <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-ink-subtle uppercase m-0">
+                Other links
+              </h2>
+              <ul className="mt-2 flex flex-wrap gap-2">
+                {profile.links.map((link, i) => (
+                  <li key={i}>
+                    <a
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer nofollow"
+                      className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-body-sm text-moonbeem-ink transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
+                    >
+                      {link.label} <span aria-hidden>→</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
         {isOwner && (

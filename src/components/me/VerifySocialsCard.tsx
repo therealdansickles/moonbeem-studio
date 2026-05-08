@@ -5,6 +5,11 @@ import {
   ALLOWED_SOCIAL_PLATFORMS,
   type SocialPlatform,
 } from "@/lib/socials/handle";
+import {
+  PLATFORM_BIO_LABEL,
+  PLATFORM_LABEL,
+  buildSocialProfileUrl,
+} from "@/lib/socials/profile-url";
 import PlatformIcon from "@/components/PlatformIcon";
 
 type SocialRow = {
@@ -14,6 +19,7 @@ type SocialRow = {
   is_verified: boolean | null;
   verification_code: string | null;
   verification_started_at: string | null;
+  display_on_profile: boolean | null;
 };
 
 type Props = {
@@ -22,17 +28,8 @@ type Props = {
   initialSocials: SocialRow[];
 };
 
-const platformLabel: Record<SocialPlatform, string> = {
-  tiktok: "TikTok",
-  instagram: "Instagram",
-  twitter: "X",
-};
-
-const bioWordFor: Record<SocialPlatform, string> = {
-  tiktok: "TikTok bio",
-  instagram: "Instagram bio",
-  twitter: "X bio",
-};
+const platformLabel = PLATFORM_LABEL;
+const bioWordFor = PLATFORM_BIO_LABEL;
 
 export default function VerifySocialsCard({ initialSocials }: Props) {
   const [socials, setSocials] = useState<SocialRow[]>(initialSocials);
@@ -88,6 +85,42 @@ function PlatformRow({ platform, row, onChange }: PlatformRowProps) {
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // Optimistic visibility — server is source of truth on refresh.
+  const [displayOn, setDisplayOn] = useState<boolean>(
+    row?.display_on_profile !== false,
+  );
+  const [visBusy, setVisBusy] = useState(false);
+
+  async function toggleVisibility(next: boolean) {
+    if (visBusy) return;
+    setVisBusy(true);
+    setDisplayOn(next);
+    setErrorMsg(null);
+    try {
+      const res = await fetch("/api/me/socials/visibility", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform, display_on_profile: next }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!res.ok || !json.ok) {
+        setDisplayOn(!next);
+        setErrorMsg(humanizeError(json.error) ?? "Couldn't save visibility.");
+        return;
+      }
+      // Refresh so any other consumers (e.g. /c/[handle] preview)
+      // see the latest state.
+      await onChange();
+    } catch (err) {
+      setDisplayOn(!next);
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setVisBusy(false);
+    }
+  }
 
   async function start() {
     if (!handleInput.trim() || busy) return;
@@ -172,9 +205,35 @@ function PlatformRow({ platform, row, onChange }: PlatformRowProps) {
       </div>
 
       {verified && row?.handle && (
-        <p className="mt-2 text-body-sm text-moonbeem-ink-muted">
-          @{row.handle}
-        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <a
+            href={buildSocialProfileUrl(platform, row.handle)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-body-sm text-moonbeem-ink-muted hover:text-moonbeem-pink"
+          >
+            @{row.handle}
+          </a>
+          <label className="ml-auto flex items-center gap-2 text-caption text-moonbeem-ink-subtle">
+            <span>Show on profile</span>
+            <button
+              type="button"
+              onClick={() => toggleVisibility(!displayOn)}
+              disabled={visBusy}
+              aria-pressed={displayOn}
+              aria-label="Toggle public visibility"
+              className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                displayOn ? "bg-moonbeem-pink" : "bg-white/15"
+              }`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                  displayOn ? "translate-x-5" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+          </label>
+        </div>
       )}
 
       {!verified && pendingCode && pendingHandle && (
