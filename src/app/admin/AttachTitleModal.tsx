@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import PartnerLogoUploader from "@/components/admin/PartnerLogoUploader";
 
 type Partner = {
   id: string;
@@ -54,7 +55,8 @@ export default function AttachTitleModal({ onClose }: Props) {
   const [newName, setNewName] = useState("");
   const [newSlug, setNewSlug] = useState("");
   const [newSlugTouched, setNewSlugTouched] = useState(false);
-  const [newLogoUrl, setNewLogoUrl] = useState("");
+  const [newLogoKey, setNewLogoKey] = useState<string | null>(null);
+  const [newLogoPreview, setNewLogoPreview] = useState<string | null>(null);
 
   // Flags + submit state
   const [isActive, setIsActive] = useState(true);
@@ -150,11 +152,12 @@ export default function AttachTitleModal({ onClose }: Props) {
     if (mode === "pick-existing") {
       payload.partner_id = partnerId;
     } else {
-      payload.new_partner = {
+      const np: Record<string, unknown> = {
         name: newName.trim(),
         slug: newSlug.trim(),
-        logo_url: newLogoUrl.trim() || null,
       };
+      if (newLogoKey) np.logo_key = newLogoKey;
+      payload.new_partner = np;
     }
 
     try {
@@ -384,16 +387,23 @@ export default function AttachTitleModal({ onClose }: Props) {
                     Lower-case, hyphens only. URL becomes /p/{newSlug || "<slug>"}.
                   </span>
                 </label>
-                <label className="flex flex-col gap-1 text-caption text-moonbeem-ink-subtle">
-                  Logo URL (optional)
-                  <input
-                    type="url"
-                    value={newLogoUrl}
-                    onChange={(e) => setNewLogoUrl(e.target.value)}
-                    placeholder="https://…"
-                    className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none"
+                <div className="flex flex-col gap-2">
+                  <span className="text-caption text-moonbeem-ink-subtle">
+                    Logo (optional)
+                  </span>
+                  <PartnerLogoUploader
+                    partnerSlug={newSlug}
+                    initialUrl={newLogoPreview}
+                    onUploaded={({ key, previewUrl }) => {
+                      setNewLogoKey(key);
+                      setNewLogoPreview(previewUrl);
+                    }}
+                    onCleared={() => {
+                      setNewLogoKey(null);
+                      setNewLogoPreview(null);
+                    }}
                   />
-                </label>
+                </div>
               </div>
             )}
           </section>

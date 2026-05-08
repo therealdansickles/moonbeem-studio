@@ -58,3 +58,13 @@ export function buildStillKey(
 ): string {
   return `stills/${titleSlug}/${index}.${safeExt(ext)}`;
 }
+
+// partners/<slug>/logo.<ext>. Slug-based path (not id-based) so the
+// "create new partner" flow can upload before the partner row's id
+// is known to the client. If a slug is later changed via Edit
+// Partner, the stored logo_url still resolves — we don't move the
+// R2 object on slug change. Re-upload to overwrite at the new slug
+// path if you want the file to follow the URL.
+export function buildPartnerLogoKey(slug: string, ext: string): string {
+  return `partners/${slug}/logo.${safeExt(ext)}`;
+}

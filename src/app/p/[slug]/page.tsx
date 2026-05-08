@@ -14,7 +14,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { getUser } from "@/lib/dal";
+import { getCurrentProfile, getUser } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import PlatformIcon from "@/components/PlatformIcon";
 import GrowthChart from "@/components/p/GrowthChart";
@@ -592,15 +592,28 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
     .maybeSingle();
   if (partnerErr || !partner) notFound();
 
-  const { data: membership } = await supabase
-    .from("partner_users")
-    .select("role")
-    .eq("partner_id", partner.id)
-    .eq("user_id", user.id)
-    .is("deleted_at", null)
-    .maybeSingle();
-  if (!membership) notFound();
-  const isPartnerAdmin = membership.role === "admin";
+  // Access: partner_users membership OR super_admin role. Super
+  // admins (Moonbeem ops) need every partner dashboard for
+  // debugging, demo prep, and verifying campaigns — adding them to
+  // partner_users for every partner is duplicative and error-prone.
+  // Partner-team members still scope only to their own partner.
+  // Super admins are also treated as partner-admin so they can edit
+  // CPM rates etc. without a separate code path.
+  const profile = await getCurrentProfile();
+  const isSuperAdmin = profile?.role === "super_admin";
+  let membershipRole: string | null = null;
+  if (!isSuperAdmin) {
+    const { data: membership } = await supabase
+      .from("partner_users")
+      .select("role")
+      .eq("partner_id", partner.id)
+      .eq("user_id", user.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (!membership) notFound();
+    membershipRole = (membership.role as string) ?? null;
+  }
+  const isPartnerAdmin = isSuperAdmin || membershipRole === "admin";
 
   const { data: titles } = await supabase
     .from("titles")

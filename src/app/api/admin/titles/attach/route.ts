@@ -28,12 +28,18 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { buildPublicUrl } from "@/lib/r2/upload";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-type NewPartner = { name?: string; slug?: string; logo_url?: string | null };
+type NewPartner = {
+  name?: string;
+  slug?: string;
+  logo_url?: string | null;
+  logo_key?: string | null;
+};
 type Body = {
   title_id?: string;
   partner_id?: string | null;
@@ -96,7 +102,10 @@ export async function POST(request: NextRequest) {
   if (body.new_partner) {
     const name = (body.new_partner.name ?? "").trim();
     const slug = (body.new_partner.slug ?? "").trim().toLowerCase();
-    const logoUrl = body.new_partner.logo_url?.trim() || null;
+    const logoKey = body.new_partner.logo_key?.trim() || null;
+    const logoUrl = logoKey
+      ? buildPublicUrl(logoKey)
+      : body.new_partner.logo_url?.trim() || null;
     if (!name) {
       return NextResponse.json({ error: "partner_name_required" }, { status: 400 });
     }

@@ -12,13 +12,19 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { buildPublicUrl } from "@/lib/r2/upload";
 
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 type CreateBody = {
   name?: string;
   slug?: string;
+  // Either logo_url (already a public URL — typically empty for new
+  // partners) or logo_key (R2 object key from the upload flow). When
+  // logo_key is set, server resolves it via buildPublicUrl. logo_key
+  // wins if both are provided.
   logo_url?: string | null;
+  logo_key?: string | null;
 };
 
 export async function GET() {
@@ -45,7 +51,10 @@ export async function POST(request: NextRequest) {
 
   const name = (body.name ?? "").trim();
   const slug = (body.slug ?? "").trim().toLowerCase();
-  const logoUrl = body.logo_url?.trim() || null;
+  const logoKey = body.logo_key?.trim() || null;
+  const logoUrl = logoKey
+    ? buildPublicUrl(logoKey)
+    : body.logo_url?.trim() || null;
 
   if (!name) {
     return NextResponse.json({ error: "name_required" }, { status: 400 });

@@ -18,6 +18,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { buildPublicUrl } from "@/lib/r2/upload";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -27,6 +28,7 @@ type PatchBody = {
   name?: string;
   slug?: string;
   logo_url?: string | null;
+  logo_key?: string | null;
 };
 
 export async function PATCH(
@@ -61,7 +63,14 @@ export async function PATCH(
     }
     update.slug = s;
   }
-  if (body.logo_url !== undefined) {
+  // logo_key (preferred) takes precedence — server resolves the
+  // R2 key to a public URL. logo_url is the legacy direct-URL form
+  // and still works (e.g. the AttachTitleModal create-new path
+  // when no upload was provided).
+  if (body.logo_key !== undefined) {
+    const trimmed = body.logo_key?.trim() ?? "";
+    update.logo_url = trimmed === "" ? null : buildPublicUrl(trimmed);
+  } else if (body.logo_url !== undefined) {
     const trimmed = body.logo_url?.trim() ?? "";
     update.logo_url = trimmed === "" ? null : trimmed;
   }

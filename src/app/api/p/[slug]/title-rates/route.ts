@@ -11,7 +11,7 @@
 // soft-deleting is a v2 concern.
 
 import { NextResponse, type NextRequest } from "next/server";
-import { getUser } from "@/lib/dal";
+import { getCurrentProfile, getUser } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 
 const UUID_RE =
@@ -37,15 +37,21 @@ export async function PUT(
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  const { data: membership } = await supabase
-    .from("partner_users")
-    .select("role")
-    .eq("partner_id", partner.id)
-    .eq("user_id", user.id)
-    .is("deleted_at", null)
-    .maybeSingle();
-  if (!membership || membership.role !== "admin") {
-    return NextResponse.json({ error: "not_authorized" }, { status: 403 });
+  // super_admin bypasses partner_users check (matches /p/[slug]
+  // page-level access). Otherwise the caller must be a partner_users
+  // member with role='admin'.
+  const profile = await getCurrentProfile();
+  if (profile?.role !== "super_admin") {
+    const { data: membership } = await supabase
+      .from("partner_users")
+      .select("role")
+      .eq("partner_id", partner.id)
+      .eq("user_id", user.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (!membership || membership.role !== "admin") {
+      return NextResponse.json({ error: "not_authorized" }, { status: 403 });
+    }
   }
 
   let body: unknown;

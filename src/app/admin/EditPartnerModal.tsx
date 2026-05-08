@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import PartnerLogoUploader from "@/components/admin/PartnerLogoUploader";
 
 type Partner = {
   id: string;
@@ -22,7 +23,16 @@ export default function EditPartnerModal({ partner, onClose }: Props) {
   const router = useRouter();
   const [name, setName] = useState(partner.name);
   const [slug, setSlug] = useState(partner.slug);
-  const [logoUrl, setLogoUrl] = useState(partner.logo_url ?? "");
+  // logoChange tracks pending logo state since the modal opens:
+  //   undefined → no pending change (keep current logo on save)
+  //   { key }   → upload happened, persist this key on save
+  //   null      → user clicked Remove, persist null on save
+  const [logoChange, setLogoChange] = useState<
+    undefined | { key: string } | null
+  >(undefined);
+  const [logoPreview, setLogoPreview] = useState<string | null>(
+    partner.logo_url,
+  );
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +52,7 @@ export default function EditPartnerModal({ partner, onClose }: Props) {
   const dirty =
     name.trim() !== partner.name ||
     slug !== partner.slug ||
-    (logoUrl.trim() || null) !== (partner.logo_url ?? null);
+    logoChange !== undefined;
   const canSave = dirty && name.trim().length > 0 && slugValid && !saving;
   const canDelete = partner.title_count === 0 && !deleting;
 
@@ -51,14 +61,19 @@ export default function EditPartnerModal({ partner, onClose }: Props) {
     setSaving(true);
     setError(null);
     try {
+      const payload: Record<string, unknown> = {
+        name: name.trim(),
+        slug: slug.trim().toLowerCase(),
+      };
+      if (logoChange === null) {
+        payload.logo_url = null;
+      } else if (logoChange) {
+        payload.logo_key = logoChange.key;
+      }
       const res = await fetch(`/api/admin/partners/${partner.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          slug: slug.trim().toLowerCase(),
-          logo_url: logoUrl.trim() || null,
-        }),
+        body: JSON.stringify(payload),
       });
       const j = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
@@ -166,16 +181,23 @@ export default function EditPartnerModal({ partner, onClose }: Props) {
               </span>
             )}
           </label>
-          <label className="flex flex-col gap-1 text-caption text-moonbeem-ink-subtle">
-            Logo URL (optional)
-            <input
-              type="url"
-              value={logoUrl}
-              onChange={(e) => setLogoUrl(e.target.value)}
-              placeholder="https://…"
-              className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none"
+          <div className="flex flex-col gap-2">
+            <span className="text-caption text-moonbeem-ink-subtle">
+              Logo
+            </span>
+            <PartnerLogoUploader
+              partnerSlug={slug}
+              initialUrl={logoPreview}
+              onUploaded={({ key, previewUrl }) => {
+                setLogoChange({ key });
+                setLogoPreview(previewUrl);
+              }}
+              onCleared={() => {
+                setLogoChange(null);
+                setLogoPreview(null);
+              }}
             />
-          </label>
+          </div>
         </div>
 
         {error && (
