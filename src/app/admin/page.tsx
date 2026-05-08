@@ -23,6 +23,7 @@ import { requireSuperAdminOr404 } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { formatMetric } from "@/lib/format";
 import AdminQuickActions from "./AdminQuickActions";
+import TitleRowControls from "./TitleRowControls";
 
 export const metadata: Metadata = {
   title: "Moonbeem admin",
@@ -41,10 +42,17 @@ type TitleRow = {
   id: string;
   slug: string;
   title: string;
+  is_active: boolean;
+  is_public: boolean;
   partner_name: string | null;
   partner_slug: string | null;
   fan_edit_count: number;
   total_views: number;
+};
+
+type CatalogCounts = {
+  total_titles: number;
+  partnered_titles: number;
 };
 
 type WithdrawalRow = {
@@ -108,31 +116,46 @@ async function loadPartners(
 
 async function loadTitles(
   supabase: ReturnType<typeof createServiceRoleClient>,
+  partners: PartnerRow[],
 ): Promise<TitleRow[]> {
-  // Scope to partner-attached titles only. The titles table is the
-  // full scraped catalog (~1.4M rows); listing it all would brick
-  // the page. "With partner attribution" implies partner_id NOT NULL.
-  const { data: titles } = await supabase
+  // Query partners → titles via partner_id IN (...), not NOT NULL.
+  // The titles table is ~1.4M rows; the planner has historically been
+  // shaky with NOT NULL filters here (incident 2026-05-08: stale
+  // stats caused a parallel seq scan + statement timeout). The IN
+  // form is selective on the partial index every time.
+  if (partners.length === 0) return [];
+  const partnerIds = partners.map((p) => p.id);
+  const partnerById = new Map(partners.map((p) => [p.id, p]));
+
+  const { data: titles, error } = await supabase
     .from("titles")
-    .select("id, slug, title, partner_id, partners:partner_id(name, slug)")
-    .not("partner_id", "is", null)
+    .select("id, slug, title, partner_id, is_active, is_public")
+    .in("partner_id", partnerIds)
+    .is("deleted_at", null)
     .order("title");
-  const rows = (titles ?? []) as unknown as Array<{
+  if (error) {
+    throw new Error(`loadTitles failed: ${error.message}`);
+  }
+  const rows = (titles ?? []) as Array<{
     id: string;
     slug: string;
     title: string;
-    partner_id: string | null;
-    partners: { name: string; slug: string } | null;
+    partner_id: string;
+    is_active: boolean;
+    is_public: boolean;
   }>;
   if (rows.length === 0) return [];
 
   const ids = rows.map((t) => t.id);
   // Soft-deleted fan_edits excluded from the rollup.
-  const { data: edits } = await supabase
+  const { data: edits, error: editsErr } = await supabase
     .from("fan_edits")
     .select("title_id, view_count")
     .in("title_id", ids)
     .is("deleted_at", null);
+  if (editsErr) {
+    throw new Error(`loadTitles fan_edits agg failed: ${editsErr.message}`);
+  }
   const editCount = new Map<string, { c: number; v: number }>();
   for (const e of edits ?? []) {
     const tid = e.title_id as string;
@@ -141,15 +164,38 @@ async function loadTitles(
     acc.v += (e.view_count as number | null) ?? 0;
     editCount.set(tid, acc);
   }
-  return rows.map((t) => ({
-    id: t.id,
-    slug: t.slug,
-    title: t.title,
-    partner_name: t.partners?.name ?? null,
-    partner_slug: t.partners?.slug ?? null,
-    fan_edit_count: editCount.get(t.id)?.c ?? 0,
-    total_views: editCount.get(t.id)?.v ?? 0,
-  }));
+  return rows.map((t) => {
+    const partner = partnerById.get(t.partner_id);
+    return {
+      id: t.id,
+      slug: t.slug,
+      title: t.title,
+      is_active: t.is_active,
+      is_public: t.is_public,
+      partner_name: partner?.name ?? null,
+      partner_slug: partner?.slug ?? null,
+      fan_edit_count: editCount.get(t.id)?.c ?? 0,
+      total_views: editCount.get(t.id)?.v ?? 0,
+    };
+  });
+}
+
+async function loadCatalogCounts(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+): Promise<CatalogCounts> {
+  // Two cheap counts via head:exact. Total uses a pure count(*); the
+  // partnered count uses the partial index on partner_id.
+  const [totalRes, partneredRes] = await Promise.all([
+    supabase.from("titles").select("id", { count: "exact", head: true }),
+    supabase
+      .from("titles")
+      .select("id", { count: "exact", head: true })
+      .not("partner_id", "is", null),
+  ]);
+  return {
+    total_titles: totalRes.count ?? 0,
+    partnered_titles: partneredRes.count ?? 0,
+  };
 }
 
 async function loadRecentWithdrawals(
@@ -301,9 +347,10 @@ export default async function AdminLanding() {
   await requireSuperAdminOr404();
   const supabase = createServiceRoleClient();
 
-  const [partners, titles, withdrawals, earnings] = await Promise.all([
-    loadPartners(supabase),
-    loadTitles(supabase),
+  const partners = await loadPartners(supabase);
+  const [titles, catalogCounts, withdrawals, earnings] = await Promise.all([
+    loadTitles(supabase, partners),
+    loadCatalogCounts(supabase),
     loadRecentWithdrawals(supabase),
     loadRecentEarnings(supabase),
   ]);
@@ -380,62 +427,34 @@ export default async function AdminLanding() {
         <div className="mt-10">
           <SectionHeader
             pill="Titles"
-            title={`${titles.length} ${titles.length === 1 ? "title" : "titles"}`}
-            hint="across system"
+            title={`${titles.length} partnered`}
+            hint={`${catalogCounts.total_titles.toLocaleString()} titles in catalog · ${catalogCounts.partnered_titles} with partner`}
           />
-          <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
-            {titles.length === 0 ? (
-              <p className="p-5 text-body-sm text-moonbeem-ink-muted">
-                No titles yet.
+          {titles.length === 0 ? (
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+              <p className="text-body-sm text-moonbeem-ink-muted">
+                No partner-attached titles yet. Attach a title to a partner via{" "}
+                <code className="font-mono">titles.partner_id</code>.
               </p>
-            ) : (
-              <table className="w-full text-body-sm">
-                <thead className="border-b border-white/5 text-caption uppercase tracking-wider text-moonbeem-ink-subtle">
-                  <tr>
-                    <th className="px-5 py-3 text-left">Title</th>
-                    <th className="px-5 py-3 text-left">Partner</th>
-                    <th className="px-5 py-3 text-right">Edits</th>
-                    <th className="px-5 py-3 text-right">Views</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {titles.map((t) => (
-                    <tr
-                      key={t.id}
-                      className="border-b border-white/5 last:border-b-0"
-                    >
-                      <td className="px-5 py-3">
-                        <Link
-                          href={`/t/${t.slug}`}
-                          className="text-moonbeem-ink hover:text-moonbeem-pink"
-                        >
-                          {t.title}
-                        </Link>
-                      </td>
-                      <td className="px-5 py-3">
-                        {t.partner_slug ? (
-                          <Link
-                            href={`/p/${t.partner_slug}`}
-                            className="text-moonbeem-ink-muted hover:text-moonbeem-pink"
-                          >
-                            {t.partner_name}
-                          </Link>
-                        ) : (
-                          <span className="text-moonbeem-ink-subtle">—</span>
-                        )}
-                      </td>
-                      <td className="px-5 py-3 text-right tabular-nums text-moonbeem-ink-muted">
-                        {t.fan_edit_count}
-                      </td>
-                      <td className="px-5 py-3 text-right tabular-nums text-moonbeem-ink">
-                        {formatMetric(t.total_views)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {titles.map((t) => (
+                <TitleRowControls
+                  key={t.id}
+                  slug={t.slug}
+                  title={t.title}
+                  initialIsActive={t.is_active}
+                  initialIsPublic={t.is_public}
+                  partnerName={t.partner_name}
+                  partnerSlug={t.partner_slug}
+                  fanEditCount={t.fan_edit_count}
+                  totalViews={t.total_views}
+                  totalViewsFormatted={formatMetric(t.total_views)}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Withdrawals */}

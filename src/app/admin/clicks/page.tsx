@@ -165,9 +165,14 @@ export default async function AdminClicksPage() {
   return (
     <div className="min-h-screen px-6 py-12 bg-moonbeem-black text-moonbeem-ink">
       <div className="max-w-4xl mx-auto flex flex-col gap-10">
-        <h1 className="font-wordmark text-display-md text-moonbeem-pink m-0">
-          Clicks
-        </h1>
+        <div className="flex flex-col gap-1">
+          <h1 className="font-wordmark text-display-md text-moonbeem-pink m-0">
+            All Clicks
+          </h1>
+          <p className="text-body-sm text-moonbeem-ink-muted m-0">
+            Moonbeem internal — all click events across partners
+          </p>
+        </div>
 
         <section className="flex flex-col gap-3">
           <h2 className="text-body-lg font-semibold text-moonbeem-ink m-0">

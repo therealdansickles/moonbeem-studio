@@ -1,20 +1,11 @@
-import { notFound } from "next/navigation";
-import { requireSuperAdmin } from "@/lib/dal";
-import { getTitleBySlug } from "@/lib/queries/titles";
-import UploadClient from "./UploadClient";
+// Deprecated: the upload UI now lives at /admin/titles/[slug]?tab=upload.
+// This route persists as a redirect so any bookmarked URLs still work.
+
+import { redirect } from "next/navigation";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
-export default async function UploadPage({ params }: PageProps) {
-  await requireSuperAdmin();
+export default async function DeprecatedUploadRoute({ params }: PageProps) {
   const { slug } = await params;
-  const title = await getTitleBySlug(slug);
-  if (!title) notFound();
-  return (
-    <UploadClient
-      titleId={title.id}
-      titleName={title.title}
-      titleSlug={title.slug}
-    />
-  );
+  redirect(`/admin/titles/${slug}?tab=upload`);
 }

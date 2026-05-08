@@ -165,6 +165,22 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
+  // Optional title_id_override: when present, every row in the CSV
+  // is forced to this title_id and the CSV's title_id column is no
+  // longer required. Used by the per-title upload flow on
+  // /admin/titles/[slug] where context is already explicit.
+  const rawOverride = formData.get("title_id_override");
+  const titleIdOverride =
+    typeof rawOverride === "string" && rawOverride.trim() !== ""
+      ? rawOverride.trim()
+      : null;
+  if (titleIdOverride && !UUID_RE.test(titleIdOverride)) {
+    return NextResponse.json(
+      { error: "title_id_override is not a valid UUID" },
+      { status: 400 },
+    );
+  }
+
   const text = await file.text();
   const rows = parseCsv(text);
   if (rows.length < 2) {
@@ -175,7 +191,9 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   const headerIdx = indexHeaders(rows[0]);
-  const required = ["embed_url", "platform", "creator_handle", "title_id"];
+  const required = titleIdOverride
+    ? ["embed_url", "platform", "creator_handle"]
+    : ["embed_url", "platform", "creator_handle", "title_id"];
   for (const col of required) {
     if (!(col in headerIdx)) {
       return NextResponse.json(
@@ -203,7 +221,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     const rawEmbedUrl = getCol(row, headerIdx, "embed_url");
     const rawPlatform = getCol(row, headerIdx, "platform");
     const rawHandle = getCol(row, headerIdx, "creator_handle");
-    const rawTitleId = getCol(row, headerIdx, "title_id");
+    const rawTitleId = titleIdOverride ?? getCol(row, headerIdx, "title_id");
 
     const reportEmbedUrl = rawEmbedUrl ?? null;
 
