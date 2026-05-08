@@ -23,6 +23,7 @@ import { requireSuperAdminOr404 } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { formatMetric } from "@/lib/format";
 import AdminQuickActions from "./AdminQuickActions";
+import AttachTitleButton from "./AttachTitleButton";
 import TitleRowControls from "./TitleRowControls";
 
 export const metadata: Metadata = {
@@ -425,11 +426,14 @@ export default async function AdminLanding() {
 
         {/* Titles */}
         <div className="mt-10">
-          <SectionHeader
-            pill="Titles"
-            title={`${titles.length} partnered`}
-            hint={`${catalogCounts.total_titles.toLocaleString()} titles in catalog · ${catalogCounts.partnered_titles} with partner`}
-          />
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <SectionHeader
+              pill="Titles"
+              title={`${titles.length} partnered`}
+              hint={`${catalogCounts.total_titles.toLocaleString()} titles in catalog · ${catalogCounts.partnered_titles} with partner`}
+            />
+            <AttachTitleButton />
+          </div>
           {titles.length === 0 ? (
             <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
               <p className="text-body-sm text-moonbeem-ink-muted">
