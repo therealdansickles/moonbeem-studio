@@ -255,6 +255,7 @@ export async function getActiveClipsForTitle(titleId: string): Promise<Clip[]> {
       "id, title_id, file_url, thumbnail_url, label, duration_seconds, file_size_bytes, content_type, display_order",
     )
     .eq("title_id", titleId)
+    .is("deleted_at", null)
     .order("display_order", { ascending: true });
   if (error || !data) return [];
   return data as Clip[];
@@ -270,6 +271,7 @@ export async function getActiveStillsForTitle(
       "id, title_id, file_url, thumbnail_url, alt_text, photographer_credit, width, height, file_size_bytes, display_order",
     )
     .eq("title_id", titleId)
+    .is("deleted_at", null)
     .order("display_order", { ascending: true });
   if (error || !data) return [];
   return data as Still[];

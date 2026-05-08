@@ -13,7 +13,11 @@ import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { requireSuperAdminOr404 } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import TitleDetailTabs, { type FanEditRow } from "./TitleDetailTabs";
+import TitleDetailTabs, {
+  type ClipRow,
+  type FanEditRow,
+  type StillRow,
+} from "./TitleDetailTabs";
 
 type PageProps = {
   params: Promise<{ slug: string }>;
@@ -30,7 +34,13 @@ export async function generateMetadata({
   };
 }
 
-const ALLOWED_TABS = ["fan-edits", "upload", "settings"] as const;
+const ALLOWED_TABS = [
+  "fan-edits",
+  "clips",
+  "stills",
+  "upload",
+  "settings",
+] as const;
 type Tab = (typeof ALLOWED_TABS)[number];
 
 function parseTab(raw: string | undefined): Tab {
@@ -138,6 +148,59 @@ export default async function AdminTitleDetailPage({
     created_at: e.created_at,
   }));
 
+  // Admin sees all clips/stills including soft-deleted (audit /
+  // restore). Public RLS on the tables handles user-facing exclusion.
+  const [clipsRes, stillsRes] = await Promise.all([
+    supabase
+      .from("clips")
+      .select(
+        "id, file_url, thumbnail_url, label, content_type, duration_seconds, file_size_bytes, display_order, deleted_at, created_at",
+      )
+      .eq("title_id", t.id)
+      .order("display_order", { ascending: true }),
+    supabase
+      .from("stills")
+      .select(
+        "id, file_url, thumbnail_url, alt_text, content_type, file_size_bytes, width, height, display_order, deleted_at, created_at",
+      )
+      .eq("title_id", t.id)
+      .order("display_order", { ascending: true }),
+  ]);
+  if (clipsRes.error) {
+    throw new Error(`clips load failed: ${clipsRes.error.message}`);
+  }
+  if (stillsRes.error) {
+    throw new Error(`stills load failed: ${stillsRes.error.message}`);
+  }
+  const clips: ClipRow[] = (clipsRes.data ?? []).map((c) => ({
+    id: c.id as string,
+    file_url: (c.file_url as string | null) ?? null,
+    thumbnail_url: (c.thumbnail_url as string | null) ?? null,
+    label: (c.label as string | null) ?? null,
+    content_type: (c.content_type as string | null) ?? null,
+    duration_seconds:
+      typeof c.duration_seconds === "string"
+        ? Number(c.duration_seconds)
+        : (c.duration_seconds as number | null) ?? null,
+    file_size_bytes: (c.file_size_bytes as number | null) ?? null,
+    display_order: (c.display_order as number | null) ?? 0,
+    deleted_at: (c.deleted_at as string | null) ?? null,
+    created_at: c.created_at as string,
+  }));
+  const stills: StillRow[] = (stillsRes.data ?? []).map((s) => ({
+    id: s.id as string,
+    file_url: (s.file_url as string | null) ?? null,
+    thumbnail_url: (s.thumbnail_url as string | null) ?? null,
+    alt_text: (s.alt_text as string | null) ?? null,
+    content_type: (s.content_type as string | null) ?? null,
+    file_size_bytes: (s.file_size_bytes as number | null) ?? null,
+    width: (s.width as number | null) ?? null,
+    height: (s.height as number | null) ?? null,
+    display_order: (s.display_order as number | null) ?? 0,
+    deleted_at: (s.deleted_at as string | null) ?? null,
+    created_at: s.created_at as string,
+  }));
+
   return (
     <TitleDetailTabs
       titleId={t.id}
@@ -149,6 +212,8 @@ export default async function AdminTitleDetailPage({
       partnerSlug={t.partners?.slug ?? null}
       hasPartner={!!t.partner_id}
       fanEdits={fanEdits}
+      clips={clips}
+      stills={stills}
       activeTab={parseTab(tab)}
     />
   );

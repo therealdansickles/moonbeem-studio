@@ -26,7 +26,34 @@ export type FanEditRow = {
   created_at: string;
 };
 
-type Tab = "fan-edits" | "upload" | "settings";
+export type ClipRow = {
+  id: string;
+  file_url: string | null;
+  thumbnail_url: string | null;
+  label: string | null;
+  content_type: string | null;
+  duration_seconds: number | null;
+  file_size_bytes: number | null;
+  display_order: number;
+  deleted_at: string | null;
+  created_at: string;
+};
+
+export type StillRow = {
+  id: string;
+  file_url: string | null;
+  thumbnail_url: string | null;
+  alt_text: string | null;
+  content_type: string | null;
+  file_size_bytes: number | null;
+  width: number | null;
+  height: number | null;
+  display_order: number;
+  deleted_at: string | null;
+  created_at: string;
+};
+
+type Tab = "fan-edits" | "clips" | "stills" | "upload" | "settings";
 
 type Props = {
   titleId: string;
@@ -38,14 +65,34 @@ type Props = {
   partnerSlug: string | null;
   hasPartner: boolean;
   fanEdits: FanEditRow[];
+  clips: ClipRow[];
+  stills: StillRow[];
   activeTab: Tab;
 };
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "fan-edits", label: "Fan edits" },
+  { id: "clips", label: "Clips" },
+  { id: "stills", label: "Stills" },
   { id: "upload", label: "Upload" },
   { id: "settings", label: "Settings" },
 ];
+
+function formatBytes(n: number | null): string {
+  if (n === null) return "—";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function formatDuration(s: number | null): string {
+  if (s === null || !Number.isFinite(s)) return "—";
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const r = s - m * 60;
+  return `${m}m ${r.toFixed(0)}s`;
+}
 
 function formatNum(n: number): string {
   return n.toLocaleString();
@@ -157,6 +204,16 @@ export default function TitleDetailTabs(props: Props) {
                     {props.fanEdits.filter((e) => !e.deleted_at).length}
                   </span>
                 )}
+                {t.id === "clips" && (
+                  <span className="ml-2 rounded-full bg-white/10 px-1.5 text-caption tabular-nums text-moonbeem-ink-subtle">
+                    {props.clips.filter((c) => !c.deleted_at).length}
+                  </span>
+                )}
+                {t.id === "stills" && (
+                  <span className="ml-2 rounded-full bg-white/10 px-1.5 text-caption tabular-nums text-moonbeem-ink-subtle">
+                    {props.stills.filter((s) => !s.deleted_at).length}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
@@ -165,6 +222,12 @@ export default function TitleDetailTabs(props: Props) {
         <div className="mt-8">
           {tab === "fan-edits" && (
             <FanEditsList rows={props.fanEdits} titleSlug={props.titleSlug} />
+          )}
+          {tab === "clips" && (
+            <ClipsList rows={props.clips} titleSlug={props.titleSlug} />
+          )}
+          {tab === "stills" && (
+            <StillsList rows={props.stills} titleSlug={props.titleSlug} />
           )}
           {tab === "upload" && (
             <UploadTab
@@ -370,6 +433,351 @@ function FanEditsList({
 
       <p className="text-caption text-moonbeem-ink-subtle">
         Public surface: <Link href={`/t/${titleSlug}`} className="hover:text-moonbeem-pink">/t/{titleSlug}</Link>. Soft-deleted edits drop out immediately.
+      </p>
+    </div>
+  );
+}
+
+function ClipsList({
+  rows,
+  titleSlug,
+}: {
+  rows: ClipRow[];
+  titleSlug: string;
+}) {
+  const [clips, setClips] = useState(rows);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [errorId, setErrorId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  async function deleteClip(id: string, label: string | null) {
+    const ok = window.confirm(
+      `Soft-delete clip ${label ?? id}? It will disappear from the public title page immediately. (Restorable from SQL today.)`,
+    );
+    if (!ok) return;
+    setBusyId(id);
+    setErrorId(null);
+    setErrorMsg(null);
+    try {
+      const res = await fetch(`/api/admin/clips/${id}/delete`, {
+        method: "POST",
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!res.ok || !json.ok) {
+        setErrorId(id);
+        setErrorMsg(json.error ?? `request failed (${res.status})`);
+        return;
+      }
+      setClips((cur) =>
+        cur.map((c) =>
+          c.id === id ? { ...c, deleted_at: new Date().toISOString() } : c,
+        ),
+      );
+    } catch (err) {
+      setErrorId(id);
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (clips.length === 0) {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-8 text-center">
+        <p className="text-body-sm text-moonbeem-ink-muted">
+          No clips uploaded for this title yet. Use the Upload tab.
+        </p>
+      </div>
+    );
+  }
+
+  const live = clips.filter((c) => !c.deleted_at);
+  const deleted = clips.filter((c) => !!c.deleted_at);
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
+        <table className="w-full text-body-sm">
+          <thead className="border-b border-white/5 text-caption uppercase tracking-wider text-moonbeem-ink-subtle">
+            <tr>
+              <th className="px-4 py-3 text-left">Clip</th>
+              <th className="px-4 py-3 text-left">Type</th>
+              <th className="px-4 py-3 text-right">Duration</th>
+              <th className="px-4 py-3 text-right">Size</th>
+              <th className="px-4 py-3 text-left">Uploaded</th>
+              <th className="px-4 py-3 text-right"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {live.map((c) => (
+              <tr
+                key={c.id}
+                className="border-b border-white/5 last:border-b-0"
+              >
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="relative h-12 w-16 shrink-0 overflow-hidden rounded-md bg-moonbeem-navy/40">
+                      {c.thumbnail_url ? (
+                        <Image
+                          src={c.thumbnail_url}
+                          alt=""
+                          fill
+                          sizes="64px"
+                          unoptimized
+                          className="object-cover"
+                        />
+                      ) : null}
+                    </div>
+                    {c.file_url ? (
+                      <a
+                        href={c.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="truncate text-moonbeem-ink hover:text-moonbeem-pink max-w-xs"
+                      >
+                        {c.label ?? c.file_url.split("/").pop()}
+                      </a>
+                    ) : (
+                      <span className="text-moonbeem-ink-subtle">
+                        {c.label ?? "(no file)"}
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-4 py-3 font-mono text-caption text-moonbeem-ink-muted">
+                  {c.content_type ?? "—"}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums text-moonbeem-ink-muted">
+                  {formatDuration(c.duration_seconds)}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums text-moonbeem-ink-muted">
+                  {formatBytes(c.file_size_bytes)}
+                </td>
+                <td className="px-4 py-3 text-moonbeem-ink-subtle text-caption">
+                  {new Date(c.created_at).toLocaleDateString()}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    type="button"
+                    onClick={() => deleteClip(c.id, c.label)}
+                    disabled={busyId === c.id}
+                    className="rounded-md border border-moonbeem-magenta/30 px-3 py-1 text-caption text-moonbeem-magenta hover:bg-moonbeem-magenta/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {busyId === c.id ? "Deleting…" : "Delete"}
+                  </button>
+                  {errorId === c.id && errorMsg && (
+                    <p className="mt-1 text-caption text-moonbeem-magenta">
+                      {errorMsg}
+                    </p>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {deleted.length > 0 && (
+        <details className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+          <summary className="cursor-pointer text-body-sm text-moonbeem-ink-muted">
+            Soft-deleted ({deleted.length})
+          </summary>
+          <ul className="mt-3 flex flex-col gap-2 text-caption text-moonbeem-ink-subtle">
+            {deleted.map((c) => (
+              <li
+                key={c.id}
+                className="flex items-center justify-between gap-3"
+              >
+                <span className="truncate">
+                  {c.label ?? c.file_url ?? "(unnamed)"} ·{" "}
+                  {formatDuration(c.duration_seconds)} ·{" "}
+                  {formatBytes(c.file_size_bytes)}
+                </span>
+                <span className="font-mono">
+                  {c.deleted_at &&
+                    new Date(c.deleted_at).toLocaleDateString()}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      <p className="text-caption text-moonbeem-ink-subtle">
+        Public surface:{" "}
+        <Link
+          href={`/t/${titleSlug}`}
+          className="hover:text-moonbeem-pink"
+        >
+          /t/{titleSlug}
+        </Link>
+        . Soft-deleted clips drop out immediately. R2 objects are kept
+        (purge job TBD).
+      </p>
+    </div>
+  );
+}
+
+function StillsList({
+  rows,
+  titleSlug,
+}: {
+  rows: StillRow[];
+  titleSlug: string;
+}) {
+  const [stills, setStills] = useState(rows);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [errorId, setErrorId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  async function deleteStill(id: string, alt: string | null) {
+    const ok = window.confirm(
+      `Soft-delete still ${alt ?? id}? It will disappear from the public title page immediately. (Restorable from SQL today.)`,
+    );
+    if (!ok) return;
+    setBusyId(id);
+    setErrorId(null);
+    setErrorMsg(null);
+    try {
+      const res = await fetch(`/api/admin/stills/${id}/delete`, {
+        method: "POST",
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!res.ok || !json.ok) {
+        setErrorId(id);
+        setErrorMsg(json.error ?? `request failed (${res.status})`);
+        return;
+      }
+      setStills((cur) =>
+        cur.map((s) =>
+          s.id === id ? { ...s, deleted_at: new Date().toISOString() } : s,
+        ),
+      );
+    } catch (err) {
+      setErrorId(id);
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (stills.length === 0) {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-8 text-center">
+        <p className="text-body-sm text-moonbeem-ink-muted">
+          No stills uploaded for this title yet. Use the Upload tab.
+        </p>
+      </div>
+    );
+  }
+
+  const live = stills.filter((s) => !s.deleted_at);
+  const deleted = stills.filter((s) => !!s.deleted_at);
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+        {live.map((s) => (
+          <div
+            key={s.id}
+            className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]"
+          >
+            <div className="relative aspect-video bg-moonbeem-navy/40">
+              {s.file_url ? (
+                <Image
+                  src={s.file_url}
+                  alt={s.alt_text ?? ""}
+                  fill
+                  sizes="(min-width: 1024px) 25vw, (min-width: 768px) 33vw, 50vw"
+                  unoptimized
+                  className="object-cover"
+                />
+              ) : null}
+            </div>
+            <div className="flex flex-col gap-2 p-3">
+              <div className="truncate text-body-sm text-moonbeem-ink">
+                {s.alt_text ?? s.file_url?.split("/").pop() ?? "(unnamed)"}
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-moonbeem-ink-subtle">
+                {s.width && s.height && (
+                  <span className="tabular-nums">
+                    {s.width}×{s.height}
+                  </span>
+                )}
+                <span>{formatBytes(s.file_size_bytes)}</span>
+                <span>{new Date(s.created_at).toLocaleDateString()}</span>
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-2">
+                {s.file_url ? (
+                  <a
+                    href={s.file_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-caption text-moonbeem-ink-muted hover:text-moonbeem-pink"
+                  >
+                    Open →
+                  </a>
+                ) : (
+                  <span />
+                )}
+                <button
+                  type="button"
+                  onClick={() => deleteStill(s.id, s.alt_text)}
+                  disabled={busyId === s.id}
+                  className="rounded-md border border-moonbeem-magenta/30 px-2.5 py-1 text-caption text-moonbeem-magenta hover:bg-moonbeem-magenta/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {busyId === s.id ? "Deleting…" : "Delete"}
+                </button>
+              </div>
+              {errorId === s.id && errorMsg && (
+                <p className="text-caption text-moonbeem-magenta">{errorMsg}</p>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {deleted.length > 0 && (
+        <details className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+          <summary className="cursor-pointer text-body-sm text-moonbeem-ink-muted">
+            Soft-deleted ({deleted.length})
+          </summary>
+          <ul className="mt-3 flex flex-col gap-2 text-caption text-moonbeem-ink-subtle">
+            {deleted.map((s) => (
+              <li
+                key={s.id}
+                className="flex items-center justify-between gap-3"
+              >
+                <span className="truncate">
+                  {s.alt_text ?? s.file_url ?? "(unnamed)"} ·{" "}
+                  {formatBytes(s.file_size_bytes)}
+                </span>
+                <span className="font-mono">
+                  {s.deleted_at &&
+                    new Date(s.deleted_at).toLocaleDateString()}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      <p className="text-caption text-moonbeem-ink-subtle">
+        Public surface:{" "}
+        <Link
+          href={`/t/${titleSlug}`}
+          className="hover:text-moonbeem-pink"
+        >
+          /t/{titleSlug}
+        </Link>
+        . Soft-deleted stills drop out immediately. R2 objects are kept
+        (purge job TBD).
       </p>
     </div>
   );
