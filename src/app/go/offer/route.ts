@@ -15,6 +15,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { appendOutboundUtms, logClick } from "@/lib/click-logger";
+import { loadVisibleTitleById } from "@/lib/title-access";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -52,6 +53,18 @@ export async function GET(request: NextRequest): Promise<Response> {
   };
 
   const supabase = createServiceRoleClient();
+
+  // Visibility gate first — don't reveal that the offer exists when
+  // the underlying title is unlisted to this caller. 404 matches the
+  // "dead link" UX we use for stale offers.
+  const visibleTitle = await loadVisibleTitleById(supabase, title_id);
+  if (!visibleTitle) {
+    return new Response("Offer not found", {
+      status: 404,
+      headers: { "Content-Type": "text/plain" },
+    });
+  }
+
   const { data, error } = await supabase
     .from("title_offers")
     .select("id, title_id, provider_url, titles(slug)")

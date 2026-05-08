@@ -12,6 +12,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { appendOutboundUtms, logClick } from "@/lib/click-logger";
+import { loadVisibleTitleById } from "@/lib/title-access";
 
 type Params = { params: Promise<{ code: string }> };
 
@@ -54,6 +55,17 @@ export async function GET(request: NextRequest, ctx: Params): Promise<Response> 
   // after the error guard above we know data is the row shape (or null).
   const row = data as AffiliateLinkRow | null;
   if (!row || !row.destination_url) {
+    return new Response("Link not found", {
+      status: 404,
+      headers: { "Content-Type": "text/plain" },
+    });
+  }
+
+  // Visibility gate on the title the affiliate link points at. Mirrors
+  // /go/offer: pre-launch titles get a 404 even if someone has already
+  // shared an affiliate URL pointing at them.
+  const visibleTitle = await loadVisibleTitleById(supabase, row.title_id);
+  if (!visibleTitle) {
     return new Response("Link not found", {
       status: 404,
       headers: { "Content-Type": "text/plain" },

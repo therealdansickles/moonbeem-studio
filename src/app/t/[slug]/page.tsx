@@ -17,6 +17,7 @@ import RequestFanEditsCTA from "@/components/RequestFanEditsCTA";
 import RequestSubmittedToast from "@/components/RequestSubmittedToast";
 import AboutCredits from "@/components/AboutCredits";
 import { createClient } from "@/lib/supabase/server";
+import { canViewTitle } from "@/lib/title-access";
 import { Suspense } from "react";
 
 type PageProps = { params: Promise<{ slug: string }> };
@@ -27,6 +28,14 @@ export async function generateMetadata({
   const { slug } = await params;
   const title = await getTitleBySlug(slug);
   if (!title) return { title: "Not found" };
+  // Don't leak the title name + poster via OpenGraph for unlisted
+  // titles. Pre-launch URLs shared accidentally still 404 for non-
+  // members, and the metadata stays neutral.
+  const visible = await canViewTitle({
+    is_public: title.is_public,
+    partner_id: title.partner_id,
+  });
+  if (!visible) return { title: "Not found" };
   const description =
     title.synopsis?.slice(0, 160) ?? `Watch ${title.title} on Moonbeem.`;
   return {
@@ -80,6 +89,14 @@ export default async function TitlePage({ params }: PageProps) {
   const { slug } = await params;
   const title = await getTitleBySlug(slug);
   if (!title) notFound();
+  // Visibility gate: hidden (is_public=false) titles 404 for anon
+  // and signed-in non-members. Super-admins and partner-team
+  // members of the title's partner pass through.
+  const visible = await canViewTitle({
+    is_public: title.is_public,
+    partner_id: title.partner_id,
+  });
+  if (!visible) notFound();
   const [offers, fanEdits, clips, stills] = await Promise.all([
     getActiveOffersForTitle(title.id),
     getActiveFanEditsForTitle(title.id),

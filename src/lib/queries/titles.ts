@@ -28,7 +28,9 @@ export type Title = {
   external_watch_url: string | null;
   theatrical_release_start: string | null;
   is_active: boolean;
+  is_public: boolean;
   is_featured: boolean;
+  partner_id: string | null;
   cast_members: CastMember[] | null;
   crew: CrewMember[] | null;
 };
