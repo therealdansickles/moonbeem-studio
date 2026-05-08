@@ -24,6 +24,7 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { formatMetric } from "@/lib/format";
 import AdminQuickActions from "./AdminQuickActions";
 import AttachTitleButton from "./AttachTitleButton";
+import PartnerRow from "./PartnerRow";
 import TitleRowControls from "./TitleRowControls";
 
 export const metadata: Metadata = {
@@ -31,10 +32,11 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-type PartnerRow = {
+type PartnerSummary = {
   id: string;
   slug: string;
   name: string;
+  logo_url: string | null;
   title_count: number;
   member_count: number;
 };
@@ -77,15 +79,16 @@ type EarningsBucket = {
 
 async function loadPartners(
   supabase: ReturnType<typeof createServiceRoleClient>,
-): Promise<PartnerRow[]> {
+): Promise<PartnerSummary[]> {
   const { data: partners } = await supabase
     .from("partners")
-    .select("id, slug, name")
+    .select("id, slug, name, logo_url")
     .order("name");
   const rows = (partners ?? []) as Array<{
     id: string;
     slug: string;
     name: string;
+    logo_url: string | null;
   }>;
   if (rows.length === 0) return [];
 
@@ -117,7 +120,7 @@ async function loadPartners(
 
 async function loadTitles(
   supabase: ReturnType<typeof createServiceRoleClient>,
-  partners: PartnerRow[],
+  partners: PartnerSummary[],
 ): Promise<TitleRow[]> {
   // Query partners → titles via partner_id IN (...), not NOT NULL.
   // The titles table is ~1.4M rows; the planner has historically been
@@ -401,23 +404,7 @@ export default async function AdminLanding() {
             ) : (
               <ul className="flex flex-col divide-y divide-white/5">
                 {partners.map((p) => (
-                  <li key={p.id} className="flex items-center gap-4 py-3">
-                    <Link
-                      href={`/p/${p.slug}`}
-                      className="min-w-0 flex-1 text-body font-medium text-moonbeem-ink hover:text-moonbeem-pink"
-                    >
-                      {p.name}
-                    </Link>
-                    <span className="text-caption text-moonbeem-ink-subtle">
-                      /p/{p.slug}
-                    </span>
-                    <span className="text-body-sm tabular-nums text-moonbeem-ink-muted">
-                      {p.title_count} {p.title_count === 1 ? "title" : "titles"}
-                    </span>
-                    <span className="text-body-sm tabular-nums text-moonbeem-ink-muted">
-                      {p.member_count} {p.member_count === 1 ? "member" : "members"}
-                    </span>
-                  </li>
+                  <PartnerRow key={p.id} {...p} />
                 ))}
               </ul>
             )}

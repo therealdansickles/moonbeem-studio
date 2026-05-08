@@ -201,6 +201,19 @@ export default async function AdminTitleDetailPage({
     created_at: s.created_at as string,
   }));
 
+  // Partners list for the Settings tab's partner picker. Cheap
+  // (one row per partner), plus we already need this elsewhere on
+  // /admin so caching policy isn't a concern.
+  const { data: allPartnersRaw } = await supabase
+    .from("partners")
+    .select("id, slug, name")
+    .order("name");
+  const allPartners = (allPartnersRaw ?? []) as Array<{
+    id: string;
+    slug: string;
+    name: string;
+  }>;
+
   return (
     <TitleDetailTabs
       titleId={t.id}
@@ -208,9 +221,11 @@ export default async function AdminTitleDetailPage({
       titleName={t.title}
       isActive={t.is_active}
       isPublic={t.is_public}
+      partnerId={t.partner_id}
       partnerName={t.partners?.name ?? null}
       partnerSlug={t.partners?.slug ?? null}
       hasPartner={!!t.partner_id}
+      allPartners={allPartners}
       fanEdits={fanEdits}
       clips={clips}
       stills={stills}

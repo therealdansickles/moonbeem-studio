@@ -55,15 +55,19 @@ export type StillRow = {
 
 type Tab = "fan-edits" | "clips" | "stills" | "upload" | "settings";
 
+type PartnerOption = { id: string; slug: string; name: string };
+
 type Props = {
   titleId: string;
   titleSlug: string;
   titleName: string;
   isActive: boolean;
   isPublic: boolean;
+  partnerId: string | null;
   partnerName: string | null;
   partnerSlug: string | null;
   hasPartner: boolean;
+  allPartners: PartnerOption[];
   fanEdits: FanEditRow[];
   clips: ClipRow[];
   stills: StillRow[];
@@ -242,9 +246,10 @@ export default function TitleDetailTabs(props: Props) {
               titleName={props.titleName}
               initialIsActive={props.isActive}
               initialIsPublic={props.isPublic}
-              partnerName={props.partnerName}
-              partnerSlug={props.partnerSlug}
-              hasPartner={props.hasPartner}
+              initialPartnerId={props.partnerId}
+              initialPartnerName={props.partnerName}
+              initialPartnerSlug={props.partnerSlug}
+              allPartners={props.allPartners}
             />
           )}
         </div>
@@ -836,26 +841,41 @@ function SettingsTab({
   titleName,
   initialIsActive,
   initialIsPublic,
-  partnerName,
-  partnerSlug,
-  hasPartner,
+  initialPartnerId,
+  initialPartnerName,
+  initialPartnerSlug,
+  allPartners,
 }: {
   slug: string;
   titleName: string;
   initialIsActive: boolean;
   initialIsPublic: boolean;
-  partnerName: string | null;
-  partnerSlug: string | null;
-  hasPartner: boolean;
+  initialPartnerId: string | null;
+  initialPartnerName: string | null;
+  initialPartnerSlug: string | null;
+  allPartners: PartnerOption[];
 }) {
   const [isActive, setIsActive] = useState(initialIsActive);
   const [isPublic, setIsPublic] = useState(initialIsPublic);
+  const [partnerId, setPartnerId] = useState<string | null>(initialPartnerId);
+  const [partnerName, setPartnerName] = useState<string | null>(
+    initialPartnerName,
+  );
+  const [partnerSlug, setPartnerSlug] = useState<string | null>(
+    initialPartnerSlug,
+  );
   const [state, setState] = useState<SettingsState>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerChoice, setPickerChoice] = useState<string>(
+    initialPartnerId ?? "",
+  );
+  const [partnerBusy, setPartnerBusy] = useState(false);
 
   async function patch(payload: {
     is_active?: boolean;
     is_public?: boolean;
+    partner_id?: string | null;
   }) {
     setState("saving");
     setErrorMsg(null);
@@ -867,7 +887,11 @@ function SettingsTab({
       });
       const json = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
-        title?: { is_active: boolean; is_public: boolean };
+        title?: {
+          is_active: boolean;
+          is_public: boolean;
+          partner_id: string | null;
+        };
         error?: string;
       };
       if (!res.ok || !json.ok || !json.title) {
@@ -875,16 +899,55 @@ function SettingsTab({
         setErrorMsg(json.error ?? `request failed (${res.status})`);
         setIsActive(initialIsActive);
         setIsPublic(initialIsPublic);
-        return;
+        return null;
       }
       setIsActive(json.title.is_active);
       setIsPublic(json.title.is_public);
       setState("idle");
+      return json.title;
     } catch (err) {
       setState("error");
       setErrorMsg(err instanceof Error ? err.message : String(err));
       setIsActive(initialIsActive);
       setIsPublic(initialIsPublic);
+      return null;
+    }
+  }
+
+  async function changePartner(nextId: string) {
+    if (partnerBusy) return;
+    if (nextId === partnerId) {
+      setPickerOpen(false);
+      return;
+    }
+    const target = allPartners.find((p) => p.id === nextId);
+    if (!target) return;
+    setPartnerBusy(true);
+    setErrorMsg(null);
+    const updated = await patch({ partner_id: nextId });
+    setPartnerBusy(false);
+    if (updated) {
+      setPartnerId(target.id);
+      setPartnerName(target.name);
+      setPartnerSlug(target.slug);
+      setPickerOpen(false);
+    }
+  }
+
+  async function detachPartner() {
+    if (partnerBusy || !partnerId) return;
+    const ok = window.confirm(
+      `Detach "${titleName}" from ${partnerName ?? "its partner"}?\n\nThe title leaves the /admin titles list and ${partnerName ?? "the partner"}'s CPM rate for it is soft-deleted (no new earnings accrue). Re-attach any time via /admin → "+ Activate new title".`,
+    );
+    if (!ok) return;
+    setPartnerBusy(true);
+    setErrorMsg(null);
+    const updated = await patch({ partner_id: null });
+    setPartnerBusy(false);
+    if (updated) {
+      setPartnerId(null);
+      setPartnerName(null);
+      setPartnerSlug(null);
     }
   }
 
@@ -986,24 +1049,102 @@ function SettingsTab({
         <h2 className="m-0 text-body font-medium text-moonbeem-ink">
           Partner attribution
         </h2>
-        {hasPartner ? (
-          <p className="mt-3 text-body-sm text-moonbeem-ink-muted">
-            Attached to{" "}
-            <Link
-              href={`/p/${partnerSlug}`}
-              className="text-moonbeem-pink hover:opacity-90"
-            >
-              {partnerName ?? partnerSlug}
-            </Link>
-            . Detaching is a SQL operation today (set{" "}
-            <code className="font-mono">titles.partner_id</code> to null).
-          </p>
+        {partnerId && partnerSlug ? (
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <p className="m-0 text-body-sm text-moonbeem-ink-muted">
+              Attached to{" "}
+              <Link
+                href={`/p/${partnerSlug}`}
+                className="text-moonbeem-pink hover:opacity-90"
+              >
+                {partnerName ?? partnerSlug}
+              </Link>
+              .
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPickerChoice(partnerId);
+                  setPickerOpen(true);
+                }}
+                disabled={partnerBusy}
+                className="rounded-md border border-white/15 px-3 py-1 text-caption text-moonbeem-ink hover:border-moonbeem-pink/40 hover:text-moonbeem-pink disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Change
+              </button>
+              <button
+                type="button"
+                onClick={detachPartner}
+                disabled={partnerBusy}
+                className="rounded-md border border-moonbeem-magenta/30 px-3 py-1 text-caption text-moonbeem-magenta hover:bg-moonbeem-magenta/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {partnerBusy ? "Detaching…" : "Detach"}
+              </button>
+            </div>
+          </div>
         ) : (
-          <p className="mt-3 text-body-sm text-moonbeem-ink-muted">
-            No partner attached. Set{" "}
-            <code className="font-mono">titles.partner_id</code> via SQL to
-            link this title to a partner.
-          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <p className="m-0 text-body-sm text-moonbeem-ink-muted">
+              No partner attached.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setPickerChoice("");
+                setPickerOpen(true);
+              }}
+              className="rounded-md bg-moonbeem-pink px-3 py-1 text-caption font-semibold text-moonbeem-navy hover:opacity-90"
+            >
+              Attach to partner
+            </button>
+          </div>
+        )}
+
+        {pickerOpen && (
+          <div className="mt-4 rounded-lg border border-white/10 bg-black/30 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-body-sm font-medium text-moonbeem-ink">
+                Pick a partner
+              </span>
+              <button
+                type="button"
+                onClick={() => setPickerOpen(false)}
+                className="text-caption text-moonbeem-ink-muted hover:text-moonbeem-pink"
+              >
+                Cancel
+              </button>
+            </div>
+            <select
+              value={pickerChoice}
+              onChange={(e) => setPickerChoice(e.target.value)}
+              className="mt-3 w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none"
+            >
+              <option value="">— select a partner —</option>
+              {allPartners.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.slug})
+                </option>
+              ))}
+            </select>
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => changePartner(pickerChoice)}
+                disabled={!pickerChoice || partnerBusy || pickerChoice === partnerId}
+                className="rounded-md bg-moonbeem-pink px-4 py-1.5 text-body-sm font-semibold text-moonbeem-navy hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {partnerBusy ? "Saving…" : "Save"}
+              </button>
+            </div>
+            {partnerId && (
+              <p className="mt-3 text-caption text-moonbeem-ink-subtle">
+                Reassigning soft-deletes {partnerName ?? "the prior partner"}
+                &apos;s CPM rate for this title — they stop accruing new
+                earnings (history is preserved).
+              </p>
+            )}
+          </div>
         )}
       </section>
     </div>
