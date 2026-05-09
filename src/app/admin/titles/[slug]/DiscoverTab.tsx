@@ -7,16 +7,17 @@ import { useRouter } from "next/navigation";
 type Candidate = {
   post_id: string;
   post_url: string;
-  handle: string;
-  caption: string | null;
-  view_count: number | null;
-  like_count: number | null;
-  comment_count: number | null;
-  share_count: number | null;
+  caption: string;
+  posted_at: number; // Unix seconds (TikTok create_time); 0 = unknown
+  view_count: number;
+  like_count: number;
+  comment_count: number;
+  share_count: number;
+  save_count: number;
+  author_handle: string;
+  author_display_name: string | null;
+  author_avatar_url: string | null;
   thumbnail_url: string | null;
-  posted_at: string | null;
-  duration_seconds: number | null;
-  aspect_ratio: string | null;
   hashtags: string[];
   is_video: boolean;
   already_in_library: boolean;
@@ -29,6 +30,7 @@ type SearchResponse = {
   pages_fetched: number;
   results_count: number;
   warning: string | null;
+  debug?: { raw_payload_truncated: string };
   error?: string;
 };
 
@@ -77,6 +79,7 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
     count: number;
     units: number;
     warning: string | null;
+    debug: { raw_payload_truncated: string } | null;
   } | null>(null);
 
   const [rowState, setRowState] = useState<Record<string, RowState>>({});
@@ -100,23 +103,16 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
       }
       switch (sortKey) {
         case "views":
-          return (b.view_count ?? 0) - (a.view_count ?? 0);
-        case "posted_at": {
-          const aT = a.posted_at ? Date.parse(a.posted_at) : 0;
-          const bT = b.posted_at ? Date.parse(b.posted_at) : 0;
-          return bT - aT;
-        }
+          return b.view_count - a.view_count;
+        case "posted_at":
+          return b.posted_at - a.posted_at;
         case "engagement": {
           // Simple ratio: (likes+comments+shares) / views. Posts with
           // no views fall to the bottom.
           const r = (c: Candidate): number => {
-            const v = c.view_count ?? 0;
-            if (v <= 0) return -1;
-            const eng =
-              (c.like_count ?? 0) +
-              (c.comment_count ?? 0) +
-              (c.share_count ?? 0);
-            return eng / v;
+            if (c.view_count <= 0) return -1;
+            return (c.like_count + c.comment_count + c.share_count) /
+              c.view_count;
           };
           return r(b) - r(a);
         }
@@ -196,6 +192,7 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
         count: json.results_count,
         units: json.units_estimated,
         warning: json.warning,
+        debug: json.debug ?? null,
       });
     } catch (err) {
       setSearchError(err instanceof Error ? err.message : String(err));
@@ -390,13 +387,26 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
         </div>
 
         {lastSearch && (
-          <p className="mt-3 text-caption text-moonbeem-ink-subtle">
-            Last search {formatRelative(lastSearch.at)} · {lastSearch.count}{" "}
-            {lastSearch.count === 1 ? "result" : "results"} ·{" "}
-            ~{lastSearch.units}{" "}
-            {lastSearch.units === 1 ? "unit" : "units"} estimated
-            {lastSearch.warning ? ` · warning: ${lastSearch.warning}` : ""}
-          </p>
+          <>
+            <p className="mt-3 text-caption text-moonbeem-ink-subtle">
+              Last search {formatRelativeIso(lastSearch.at)} ·{" "}
+              {lastSearch.count}{" "}
+              {lastSearch.count === 1 ? "result" : "results"} ·{" "}
+              ~{lastSearch.units}{" "}
+              {lastSearch.units === 1 ? "unit" : "units"} estimated
+              {lastSearch.warning ? ` · warning: ${lastSearch.warning}` : ""}
+            </p>
+            {lastSearch.debug && (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-caption text-moonbeem-ink-muted hover:text-moonbeem-pink">
+                  Show raw EnsembleData payload (truncated to 5KB)
+                </summary>
+                <pre className="mt-2 max-h-72 overflow-auto rounded-md border border-white/10 bg-black/40 p-3 font-mono text-caption text-moonbeem-ink-muted">
+                  {lastSearch.debug.raw_payload_truncated}
+                </pre>
+              </details>
+            )}
+          </>
         )}
         {searchError && (
           <p className="mt-3 text-caption text-moonbeem-magenta">
@@ -491,13 +501,18 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <a
-                        href={`https://www.tiktok.com/@${c.handle}`}
+                        href={`https://www.tiktok.com/@${c.author_handle}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-body-sm font-medium text-moonbeem-ink hover:text-moonbeem-pink"
                       >
-                        @{c.handle}
+                        @{c.author_handle}
                       </a>
+                      {c.author_display_name && (
+                        <span className="text-caption text-moonbeem-ink-subtle">
+                          {c.author_display_name}
+                        </span>
+                      )}
                       <RowStatusPill state={state} />
                       <a
                         href={c.post_url}
@@ -514,19 +529,12 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
                       </p>
                     )}
                     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-caption tabular-nums text-moonbeem-ink-subtle">
-                      <span>
-                        {formatStat(c.view_count)} views
-                      </span>
-                      <span>
-                        {formatStat(c.like_count)} likes
-                      </span>
-                      <span>
-                        {formatStat(c.comment_count)} comments
-                      </span>
-                      <span>
-                        {formatStat(c.share_count)} shares
-                      </span>
-                      <span>{c.posted_at ? formatRelative(c.posted_at) : "—"}</span>
+                      <span>{formatStat(c.view_count)} views</span>
+                      <span>{formatStat(c.like_count)} likes</span>
+                      <span>{formatStat(c.comment_count)} comments</span>
+                      <span>{formatStat(c.share_count)} shares</span>
+                      <span>{formatStat(c.save_count)} saves</span>
+                      <span>{formatRelativeUnix(c.posted_at)}</span>
                     </div>
                     {rowError[c.post_id] && (
                       <p className="mt-1 text-caption text-moonbeem-magenta">
@@ -631,10 +639,18 @@ function formatStat(n: number | null): string {
   return n.toLocaleString();
 }
 
-function formatRelative(iso: string): string {
-  const then = new Date(iso).getTime();
-  const diff = Date.now() - then;
-  if (diff < 0) return new Date(iso).toLocaleString();
+function formatRelativeIso(iso: string): string {
+  return relativeFromMs(new Date(iso).getTime());
+}
+
+function formatRelativeUnix(unixSeconds: number): string {
+  if (!unixSeconds || unixSeconds <= 0) return "—";
+  return relativeFromMs(unixSeconds * 1000);
+}
+
+function relativeFromMs(ms: number): string {
+  const diff = Date.now() - ms;
+  if (diff < 0) return new Date(ms).toLocaleString();
   const sec = Math.round(diff / 1000);
   if (sec < 60) return `${sec}s ago`;
   const min = Math.round(sec / 60);

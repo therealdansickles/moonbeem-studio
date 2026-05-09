@@ -16,15 +16,17 @@
 //     units_estimated: number,
 //     pages_fetched: number,
 //     results_count: number,
-//     warning?: string                  // when search returned non-fatal error
+//     warning?: string,                // missing_token / parse_error / etc.
+//     debug?: { raw_payload_truncated: string }
+//                                       // only on warning or 0 results
 //   }
 //
-// Side-effect: inserts one row into discovery_searches for cost
-// monitoring (followup will surface this on /admin/usage).
+// Side-effect: inserts one row into discovery_searches per call for
+// cost monitoring.
 //
-// Super-admin gated. Vercel Node runtime (default) — no Edge crypto
-// concerns and we want full Node fetch behaviour for the EnsembleData
-// call.
+// Super-admin gated. The route is super_admin-only end-to-end, so
+// the debug raw_payload return is always safe to include — there's
+// no non-admin caller to leak to.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
@@ -42,6 +44,8 @@ const VALID_PERIODS: ReadonlyArray<SearchPeriod> = [
   "180d",
   "all",
 ];
+
+const RAW_PAYLOAD_MAX_BYTES = 5 * 1024;
 
 export async function POST(
   request: NextRequest,
@@ -64,9 +68,6 @@ export async function POST(
 
   const platform = typeof body.platform === "string" ? body.platform : "";
   if (platform !== "tiktok") {
-    // IG/Twitter are surfaced in the UI as "coming soon" but the
-    // server still rejects defensively in case the client gets out
-    // of sync with the v1 platform whitelist.
     return NextResponse.json(
       { error: "platform_not_supported", supported: ["tiktok"] },
       { status: 400 },
@@ -106,13 +107,14 @@ export async function POST(
     period,
   });
 
-  // Filter image-only posts — we only want videos in fan_edits.
-  const videoOnly = result.candidates.filter((c) => c.is_video);
+  // parsePage already drops non-video (type !== 1) entries, so no
+  // additional is_video filter needed here.
+  const fetched = result.candidates;
 
   // Dedupe against existing fan_edits for THIS title only. A TikTok
   // attached to a different title still surfaces as available so
   // multi-title attribution is possible.
-  const candidateUrls = videoOnly.map((c) => c.post_url);
+  const candidateUrls = fetched.map((c) => c.post_url);
   let alreadyUrls = new Set<string>();
   if (candidateUrls.length > 0) {
     const { data: existing } = await supabase
@@ -127,7 +129,7 @@ export async function POST(
     );
   }
 
-  const enriched = videoOnly
+  const enriched = fetched
     .map((c) => ({ ...c, already_in_library: alreadyUrls.has(c.post_url) }))
     .sort((a, b) => (b.view_count ?? 0) - (a.view_count ?? 0));
 
@@ -144,6 +146,17 @@ export async function POST(
     units_estimated: result.units_estimated,
   });
 
+  // Surface a truncated raw payload for in-DevTools debugging when
+  // the parser couldn't extract candidates or zero results came back
+  // — these are the cases where field-path drift is the likely
+  // cause. Route is super_admin gated so this never reaches a
+  // non-admin caller.
+  const includeDebug =
+    result.error === "parse_error" || enriched.length === 0;
+  const debug = includeDebug
+    ? { raw_payload_truncated: truncatePayload(result.raw_payload) }
+    : undefined;
+
   return NextResponse.json({
     ok: true,
     candidates: enriched,
@@ -151,5 +164,18 @@ export async function POST(
     pages_fetched: result.pages_fetched,
     results_count: enriched.length,
     warning: result.error ?? null,
+    debug,
   });
+}
+
+function truncatePayload(payload: unknown): string {
+  if (payload === undefined || payload === null) return "(empty)";
+  let s: string;
+  try {
+    s = JSON.stringify(payload, null, 2);
+  } catch {
+    s = String(payload);
+  }
+  if (s.length <= RAW_PAYLOAD_MAX_BYTES) return s;
+  return s.slice(0, RAW_PAYLOAD_MAX_BYTES) + "\n…(truncated)";
 }

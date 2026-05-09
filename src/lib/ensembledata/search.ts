@@ -1,61 +1,84 @@
 // EnsembleData TikTok keyword-search wrapper for the Discover tab.
 //
-// Kept in src/lib/ensembledata/ alongside the existing client.ts
-// (post-info, used by view-tracking). Single new public function:
+// Endpoint: GET https://ensembledata.com/apis/tt/keyword/search
+// Auth:     ?token=...   (query param, not header)
+// Required: name, period
+// Optional: cursor (integer), sorting ('0'|'1'|'2'), country, match_exactly
 //
-//   searchTikTokKeyword({ query, max_results, period })
-//     → { candidates, units_estimated, pages_fetched }
+// Response shape (verified against EnsembleData docs sample +
+// canonical fixture, 2026-05-09):
 //
-// EnsembleData's TikTok keyword search endpoint returns ~20 results
-// per page; pagination is via cursor. We page until we have at least
-// max_results candidates or the API signals has_more=false.
+//   {
+//     data: {
+//       nextCursor?: number,        // absent → end of results
+//       data: [
+//         {
+//           type: 1,                // 1 = video; non-1 = images/etc.
+//           aweme_info: {
+//             aweme_id, desc, create_time (unix seconds),
+//             statistics: { play_count, digg_count, comment_count,
+//                           share_count, collect_count },
+//             author: { unique_id, nickname, uid, sec_uid,
+//                       follower_count, avatar_medium: { url_list } },
+//             video:  { cover: { url_list }, origin_cover: { url_list },
+//                       duration?, width?, height? },
+//             text_extra: [{ type, hashtag_name }],
+//             share_url, ...
+//           }
+//         },
+//         ...
+//       ]
+//     }
+//   }
 //
-// Response field-mapping is BEST EFFORT against EnsembleData's
-// documented shape — the same "verify on first prod call" caveat as
-// client.ts (see the inline reference cases there). The fields below
-// map the shape we observe in the existing /tt/post/info responses;
-// keyword search nests one level deeper (data.aweme_list[].statistics.*
-// vs the post-info data[].statistics.*) but the per-aweme inner shape
-// is the same. If the field paths drift, fix here AND mirror in
-// client.ts where applicable.
+// Pagination terminates when `nextCursor` is undefined on a response
+// (NOT when `has_more` is false — that field doesn't exist here).
+//
+// Cost: 1 unit per page on Wood plan. We cap at ~5 pages for our
+// max_results=100 ceiling.
 
 const ENSEMBLEDATA_BASE = "https://ensembledata.com/apis";
 const FETCH_TIMEOUT_MS = 15000;
-const RESULTS_PER_PAGE = 20;
 
 export type SearchPeriod = "1d" | "7d" | "30d" | "90d" | "180d" | "all";
 
-// EnsembleData period encoding: integer days, 0 = all-time.
-const PERIOD_TO_DAYS: Record<SearchPeriod, number> = {
-  "1d": 1,
-  "7d": 7,
-  "30d": 30,
-  "90d": 90,
-  "180d": 180,
-  all: 0,
+// EnsembleData period encoding: integer-as-string in days. 0 = all-time.
+const PERIOD_TO_DAYS: Record<SearchPeriod, string> = {
+  "1d": "1",
+  "7d": "7",
+  "30d": "30",
+  "90d": "90",
+  "180d": "180",
+  all: "0",
 };
 
 export type Candidate = {
-  post_id: string; // numeric aweme id
-  post_url: string; // canonical https://www.tiktok.com/@user/video/<id>
-  handle: string; // @-stripped, lowercased
-  caption: string | null;
-  view_count: number | null;
-  like_count: number | null;
-  comment_count: number | null;
-  share_count: number | null;
+  post_id: string;
+  post_url: string; // canonical desktop URL constructed from handle + id
+  caption: string;
+  posted_at: number; // Unix seconds (TikTok create_time)
+  view_count: number;
+  like_count: number;
+  comment_count: number;
+  share_count: number;
+  save_count: number;
+  author_handle: string;
+  author_display_name: string | null;
+  author_avatar_url: string | null;
   thumbnail_url: string | null;
-  posted_at: string | null; // ISO
-  duration_seconds: number | null;
-  aspect_ratio: string | null;
   hashtags: string[];
-  is_video: boolean; // false for image-only / slideshow
+  // Video-only marker. type:1 entries map to true; non-video (image
+  // slideshow, etc.) entries are dropped at parse time so they never
+  // surface as candidates. Field is kept on the type for callers that
+  // want to assert.
+  is_video: true;
 };
 
 export type SearchResult = {
   candidates: Candidate[];
-  units_estimated: number; // 1 per page on Wood plan; we count pages
+  units_estimated: number;
   pages_fetched: number;
+  raw_payload?: unknown; // last response body, for parse_error debugging
   error?:
     | "missing_token"
     | "rate_limited"
@@ -78,23 +101,25 @@ export async function searchTikTokKeyword(args: {
       error: "missing_token",
     };
   }
-  const days = PERIOD_TO_DAYS[args.period] ?? 180;
+  const periodDays = PERIOD_TO_DAYS[args.period] ?? "180";
   const wanted = Math.max(1, Math.min(args.max_results, 100));
 
   const candidates: Candidate[] = [];
   const seenIds = new Set<string>();
-  let cursor: number | string | null = 0;
+  let cursor: number | null = null;
   let pages = 0;
   let lastError: SearchResult["error"];
+  let lastBody: unknown = null;
 
-  while (candidates.length < wanted && pages < 10) {
+  // Hard cap on pages for safety. Wanted=100 → 5 pages of 20.
+  const MAX_PAGES = 6;
+
+  while (candidates.length < wanted && pages < MAX_PAGES) {
     const url = new URL(`${ENSEMBLEDATA_BASE}/tt/keyword/search`);
     url.searchParams.set("name", args.query);
-    url.searchParams.set("period", String(days));
+    url.searchParams.set("period", periodDays);
     url.searchParams.set("token", token);
-    if (cursor !== null && cursor !== 0) {
-      url.searchParams.set("cursor", String(cursor));
-    }
+    if (cursor !== null) url.searchParams.set("cursor", String(cursor));
 
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
@@ -115,6 +140,7 @@ export async function searchTikTokKeyword(args: {
     } catch {
       body = null;
     }
+    lastBody = body;
 
     if (res.status === 429) {
       lastError = "rate_limited";
@@ -140,150 +166,125 @@ export async function searchTikTokKeyword(args: {
       candidates.push(c);
       if (candidates.length >= wanted) break;
     }
-    if (page.cursor === null || page.has_more === false) break;
-    cursor = page.cursor;
+    if (page.nextCursor === undefined) break;
+    cursor = page.nextCursor;
+  }
+
+  // Surface parse_error when we got responses but no candidates,
+  // since that's the exact case Dan needs to debug field-path drift.
+  if (!lastError && pages > 0 && candidates.length === 0) {
+    lastError = "parse_error";
   }
 
   return {
     candidates: candidates.slice(0, wanted),
-    units_estimated: pages, // 1 unit per page on Wood plan
+    units_estimated: pages,
     pages_fetched: pages,
+    raw_payload: lastBody,
     error: lastError,
   };
 }
 
 // ---------------------------------------------------------------------
-// Internal: page parsing
+// Parser — canonical EnsembleData TikTok keyword-search shape.
+// Exported for fixture-based testing.
 // ---------------------------------------------------------------------
 
-type ParsedPage = {
+export type ParsedPage = {
   candidates: Candidate[];
-  cursor: number | string | null;
-  has_more: boolean;
+  nextCursor?: number;
 };
 
-function parsePage(body: unknown): ParsedPage | null {
+export function parsePage(body: unknown): ParsedPage | null {
   if (!body || typeof body !== "object") return null;
   const root = body as Record<string, unknown>;
-  // EnsembleData's keyword search wraps results under `data`. The
-  // search variant returns aweme entries either as data.aweme_list or
-  // (older shape) as a list of {aweme_info: {...}} wrappers. Try both.
-  const data = (root.data ?? root) as Record<string, unknown>;
-  let entries: unknown[] = [];
-  const list = data.aweme_list;
-  if (Array.isArray(list)) {
-    entries = list;
-  } else if (Array.isArray(data)) {
-    entries = data as unknown[];
-  } else {
-    return null;
-  }
-
-  const cursorRaw = data.cursor;
-  const cursor =
-    typeof cursorRaw === "number" || typeof cursorRaw === "string"
-      ? cursorRaw
-      : null;
-  const hasMoreRaw = data.has_more;
-  const has_more = hasMoreRaw === 1 || hasMoreRaw === true;
+  const inner = root.data;
+  if (!inner || typeof inner !== "object") return null;
+  const innerObj = inner as Record<string, unknown>;
+  const items = innerObj.data;
+  if (!Array.isArray(items)) return null;
 
   const candidates: Candidate[] = [];
-  for (const raw of entries) {
+  for (const raw of items) {
     const c = parseCandidate(raw);
     if (c) candidates.push(c);
   }
-  return { candidates, cursor, has_more };
+
+  const nc = innerObj.nextCursor;
+  const nextCursor = typeof nc === "number" ? nc : undefined;
+
+  return { candidates, nextCursor };
 }
 
-function parseCandidate(raw: unknown): Candidate | null {
-  if (!raw || typeof raw !== "object") return null;
-  // Some search responses wrap the post under .aweme_info; others
-  // expose fields at the entry root. Support both.
-  const r = raw as Record<string, unknown>;
-  const inner =
-    (r.aweme_info && typeof r.aweme_info === "object"
-      ? (r.aweme_info as Record<string, unknown>)
-      : r);
+function parseCandidate(item: unknown): Candidate | null {
+  if (!item || typeof item !== "object") return null;
+  const wrapper = item as Record<string, unknown>;
 
-  const post_id = stringOrNull(inner.aweme_id ?? inner.id);
-  if (!post_id) return null;
+  // Drop image slideshows / non-video items. TikTok keyword search
+  // returns mixed-type entries; only type:1 is a regular video post.
+  if (wrapper.type !== 1) return null;
 
-  const author = (inner.author ?? {}) as Record<string, unknown>;
-  const handle = stringOrNull(author.unique_id ?? author.uniqueId);
-  if (!handle) return null;
-  const cleanHandle = handle.replace(/^@+/, "").trim().toLowerCase();
-  if (!cleanHandle) return null;
+  const a = wrapper.aweme_info;
+  if (!a || typeof a !== "object") return null;
+  const aw = a as Record<string, unknown>;
 
-  const post_url = `https://www.tiktok.com/@${cleanHandle}/video/${post_id}`;
+  const author = (aw.author ?? {}) as Record<string, unknown>;
+  const stats = (aw.statistics ?? {}) as Record<string, unknown>;
+  const video = (aw.video ?? {}) as Record<string, unknown>;
+  const cover = (video.cover ?? {}) as Record<string, unknown>;
+  const avatarMedium = (author.avatar_medium ?? {}) as Record<string, unknown>;
 
-  const stats = (inner.statistics ?? {}) as Record<string, unknown>;
-  const video = (inner.video ?? {}) as Record<string, unknown>;
-  const imagePost = inner.image_post_info;
-  const is_video = !imagePost && Object.keys(video).length > 0;
+  const aweme_id = stringValue(aw.aweme_id);
+  const unique_id = stringValue(author.unique_id);
+  if (!aweme_id || !unique_id) return null;
 
-  const caption =
-    typeof inner.desc === "string" && inner.desc ? inner.desc : null;
+  const create_time = numberValue(aw.create_time) ?? 0;
+  const desc = stringValue(aw.desc) ?? stringValue(aw.content_desc) ?? "";
 
+  const textExtra = aw.text_extra;
   const hashtags: string[] = [];
-  const textExtra = inner.text_extra;
   if (Array.isArray(textExtra)) {
     for (const t of textExtra) {
       if (t && typeof t === "object") {
-        const name = (t as Record<string, unknown>).hashtag_name;
-        if (typeof name === "string" && name) hashtags.push(name);
+        const te = t as Record<string, unknown>;
+        if (te.type === 1 && typeof te.hashtag_name === "string" && te.hashtag_name) {
+          hashtags.push(te.hashtag_name);
+        }
       }
     }
   }
 
-  const createTime = inner.create_time;
-  const posted_at =
-    typeof createTime === "number" && createTime > 0
-      ? new Date(createTime * 1000).toISOString()
-      : null;
-
-  const thumb =
-    firstUrl(get(video, ["origin_cover", "url_list"])) ??
-      firstUrl(get(video, ["cover", "url_list"]));
-
-  const duration_seconds = msToSeconds(video.duration);
-  const aspect_ratio = simplifyAspectRatio(
-    intOrNull(video.width),
-    intOrNull(video.height),
-  );
-
   return {
-    post_id,
-    post_url,
-    handle: cleanHandle,
-    caption,
-    view_count: intOrNull(stats.play_count),
-    like_count: intOrNull(stats.digg_count),
-    comment_count: intOrNull(stats.comment_count),
-    share_count: intOrNull(stats.share_count),
-    thumbnail_url: thumb,
-    posted_at,
-    duration_seconds,
-    aspect_ratio,
+    post_id: aweme_id,
+    post_url: `https://www.tiktok.com/@${unique_id}/video/${aweme_id}`,
+    caption: desc,
+    posted_at: create_time,
+    view_count: numberValue(stats.play_count) ?? 0,
+    like_count: numberValue(stats.digg_count) ?? 0,
+    comment_count: numberValue(stats.comment_count) ?? 0,
+    share_count: numberValue(stats.share_count) ?? 0,
+    save_count: numberValue(stats.collect_count) ?? 0,
+    author_handle: unique_id,
+    author_display_name: stringValue(author.nickname) ?? null,
+    author_avatar_url: firstUrl(avatarMedium.url_list),
+    thumbnail_url: firstUrl(cover.url_list),
     hashtags,
-    is_video,
+    is_video: true,
   };
 }
 
-// Small typed helpers (kept local to avoid importing client.ts internals).
-
-function intOrNull(v: unknown): number | null {
-  if (v === null || v === undefined) return null;
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string") {
-    const n = parseInt(v, 10);
-    return Number.isFinite(n) ? n : null;
-  }
+function stringValue(v: unknown): string | null {
+  if (typeof v === "string" && v !== "") return v;
+  if (typeof v === "number") return String(v);
   return null;
 }
 
-function stringOrNull(v: unknown): string | null {
-  if (typeof v === "string" && v.trim() !== "") return v.trim();
-  if (typeof v === "number") return String(v);
+function numberValue(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
   return null;
 }
 
@@ -292,36 +293,4 @@ function firstUrl(v: unknown): string | null {
     return v[0];
   }
   return null;
-}
-
-function msToSeconds(v: unknown): number | null {
-  const n = intOrNull(v);
-  if (n === null) return null;
-  // TikTok video.duration historically reported in milliseconds; some
-  // older responses report seconds. Heuristic: > 1000 → ms.
-  return n > 1000 ? Math.round(n / 1000) : n;
-}
-
-function simplifyAspectRatio(
-  width: number | null,
-  height: number | null,
-): string | null {
-  if (!width || !height || width <= 0 || height <= 0) return null;
-  const w = Math.round(width);
-  const h = Math.round(height);
-  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
-  const g = gcd(w, h);
-  return `${w / g}:${h / g}`;
-}
-
-function get(obj: unknown, path: string[]): unknown {
-  let cur: unknown = obj;
-  for (const k of path) {
-    if (cur && typeof cur === "object" && k in (cur as Record<string, unknown>)) {
-      cur = (cur as Record<string, unknown>)[k];
-    } else {
-      return undefined;
-    }
-  }
-  return cur;
 }

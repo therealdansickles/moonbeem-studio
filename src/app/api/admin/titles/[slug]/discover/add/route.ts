@@ -37,16 +37,16 @@ import {
 type SearchCandidatePayload = {
   post_id?: unknown;
   post_url?: unknown;
-  handle?: unknown;
+  author_handle?: unknown;
   caption?: unknown;
   view_count?: unknown;
   like_count?: unknown;
   comment_count?: unknown;
   share_count?: unknown;
   thumbnail_url?: unknown;
+  // Unix seconds per TikTok create_time. Converted to ISO before
+  // insert into fan_edits.posted_at (timestamptz).
   posted_at?: unknown;
-  duration_seconds?: unknown;
-  aspect_ratio?: unknown;
 };
 
 type ResultEntry = {
@@ -212,27 +212,33 @@ function candidateFromSearchPayload(
   p: SearchCandidatePayload,
 ): FanEditCandidate | null {
   const post_url = typeof p.post_url === "string" ? p.post_url : null;
-  const handle = typeof p.handle === "string" ? p.handle : null;
+  const handle =
+    typeof p.author_handle === "string" ? p.author_handle : null;
   if (!post_url || !handle) return null;
   return {
     platform: "tiktok",
     embed_url: post_url,
     creator_handle: handle,
-    caption: typeof p.caption === "string" ? p.caption : null,
-    posted_at: typeof p.posted_at === "string" ? p.posted_at : null,
+    caption: typeof p.caption === "string" && p.caption ? p.caption : null,
+    posted_at: unixSecondsToIso(p.posted_at),
     thumbnail_url:
       typeof p.thumbnail_url === "string" ? p.thumbnail_url : null,
     view_count: numberOrNull(p.view_count),
     like_count: numberOrNull(p.like_count),
     comment_count: numberOrNull(p.comment_count),
     share_count: numberOrNull(p.share_count),
-    duration_seconds: numberOrNull(p.duration_seconds),
-    aspect_ratio: typeof p.aspect_ratio === "string" ? p.aspect_ratio : undefined,
   };
 }
 
 function numberOrNull(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+// TikTok aweme.create_time → ISO string. Returns null when missing
+// or not a positive number — fan_edits.posted_at is nullable.
+function unixSecondsToIso(v: unknown): string | null {
+  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return null;
+  return new Date(v * 1000).toISOString();
 }
 
 function inferPlatformFromHost(
