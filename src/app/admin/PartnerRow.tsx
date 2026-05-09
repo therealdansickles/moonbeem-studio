@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import EditPartnerModal from "./EditPartnerModal";
+import ManageMembersModal from "./ManageMembersModal";
 
 type Props = {
   id: string;
@@ -14,7 +15,8 @@ type Props = {
 };
 
 export default function PartnerRow(props: Props) {
-  const [open, setOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
   return (
     <>
       <li className="flex items-center gap-4 py-3">
@@ -30,18 +32,23 @@ export default function PartnerRow(props: Props) {
         <span className="text-body-sm tabular-nums text-moonbeem-ink-muted">
           {props.title_count} {props.title_count === 1 ? "title" : "titles"}
         </span>
-        <span className="text-body-sm tabular-nums text-moonbeem-ink-muted">
-          {props.member_count} {props.member_count === 1 ? "member" : "members"}
-        </span>
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={() => setMembersOpen(true)}
+          className="rounded-md border border-white/10 px-3 py-1 text-caption tabular-nums text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
+        >
+          {props.member_count}{" "}
+          {props.member_count === 1 ? "member" : "members"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditOpen(true)}
           className="rounded-md border border-white/10 px-3 py-1 text-caption text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
         >
           Edit
         </button>
       </li>
-      {open && (
+      {editOpen && (
         <EditPartnerModal
           partner={{
             id: props.id,
@@ -50,7 +57,14 @@ export default function PartnerRow(props: Props) {
             logo_url: props.logo_url,
             title_count: props.title_count,
           }}
-          onClose={() => setOpen(false)}
+          onClose={() => setEditOpen(false)}
+        />
+      )}
+      {membersOpen && (
+        <ManageMembersModal
+          partnerId={props.id}
+          partnerName={props.name}
+          onClose={() => setMembersOpen(false)}
         />
       )}
     </>
