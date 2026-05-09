@@ -407,6 +407,27 @@ async function loadModalOpensMap(
   return out;
 }
 
+// Earliest captured_at across the partner's fan_edits, returned as
+// a YYYY-MM-DD string. Used to annotate the growth chart so partners
+// understand why the chart is short — view-tracking history starts
+// at this date, not at fan_edit creation. Returns null when there
+// are no snapshots yet.
+async function loadTrackingStartDay(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  fanEditIds: string[],
+): Promise<string | null> {
+  if (fanEditIds.length === 0) return null;
+  const { data } = await supabase
+    .from("view_tracking_snapshots")
+    .select("captured_at")
+    .in("fan_edit_id", fanEditIds)
+    .order("captured_at", { ascending: true })
+    .limit(1);
+  const first = data?.[0];
+  if (!first) return null;
+  return (first.captured_at as string).slice(0, 10);
+}
+
 // Daily-summed total views across all of partner's fan_edits. Per
 // (fan_edit_id, day) we keep the day's max view_count, then forward-
 // fill so days without a snapshot for a given edit still contribute
@@ -628,10 +649,11 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
     loadTopCreators(supabase, titleIds, 10),
     loadAllEdits(supabase, titleIds),
   ]);
-  const dailyGrowth = await loadDailyGrowth(
-    supabase,
-    allEdits.map((r) => r.id),
-  );
+  const fanEditIdsForTracking = allEdits.map((r) => r.id);
+  const [dailyGrowth, trackingStartDay] = await Promise.all([
+    loadDailyGrowth(supabase, fanEditIdsForTracking),
+    loadTrackingStartDay(supabase, fanEditIdsForTracking),
+  ]);
 
   // Per-title CPM rates + this-month earnings rollup for the
   // "Pay creators" card.
@@ -713,8 +735,8 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
           />
           <HeroTile
             value={formatMetric(metrics.modal_opens)}
-            label="Moonbeem modal opens"
-            sub="on-platform engagement"
+            label="Moonbeem plays"
+            sub="opens in Moonbeem's player"
           />
           <HeroTile
             value={metrics.ticket_clicks.toLocaleString()}
@@ -753,6 +775,17 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
           <div className="mt-4">
             <GrowthChart data={dailyGrowth} />
           </div>
+          {trackingStartDay && (
+            <p className="mt-3 text-caption text-moonbeem-ink-subtle">
+              View tracking began{" "}
+              {new Date(trackingStartDay + "T00:00:00Z").toLocaleDateString(
+                undefined,
+                { year: "numeric", month: "long", day: "numeric" },
+              )}
+              ; chart reflects views accumulated since then, not the
+              full lifetime of each fan edit.
+            </p>
+          )}
         </div>
 
         <div className="mt-10">

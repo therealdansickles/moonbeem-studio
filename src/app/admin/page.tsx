@@ -22,6 +22,11 @@ import type { Metadata } from "next";
 import { requireSuperAdminOr404 } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { formatMetric } from "@/lib/format";
+import {
+  getLatestAdminActionRuns,
+  type AdminActionKey,
+  type AdminActionRun,
+} from "@/lib/admin-action-runs";
 import AdminQuickActions from "./AdminQuickActions";
 import AttachTitleButton from "./AttachTitleButton";
 import PartnerRow from "./PartnerRow";
@@ -352,12 +357,19 @@ export default async function AdminLanding() {
   const supabase = createServiceRoleClient();
 
   const partners = await loadPartners(supabase);
-  const [titles, catalogCounts, withdrawals, earnings] = await Promise.all([
-    loadTitles(supabase, partners),
-    loadCatalogCounts(supabase),
-    loadRecentWithdrawals(supabase),
-    loadRecentEarnings(supabase),
-  ]);
+  const [titles, catalogCounts, withdrawals, earnings, latestRunsMap] =
+    await Promise.all([
+      loadTitles(supabase, partners),
+      loadCatalogCounts(supabase),
+      loadRecentWithdrawals(supabase),
+      loadRecentEarnings(supabase),
+      getLatestAdminActionRuns([
+        "earnings_calculate",
+        "view_tracking_trigger",
+      ]),
+    ]);
+  const lastRuns: Partial<Record<AdminActionKey, AdminActionRun>> = {};
+  for (const [k, v] of latestRunsMap) lastRuns[k] = v;
 
   return (
     <div className="min-h-screen px-6 py-12 bg-[radial-gradient(ellipse_at_top,_#1a0f3a_0%,_#0a0a14_60%)]">
@@ -387,7 +399,7 @@ export default async function AdminLanding() {
             pillTone="violet"
             title="ops triggers"
           />
-          <AdminQuickActions />
+          <AdminQuickActions lastRuns={lastRuns} />
         </div>
 
         {/* Partners */}

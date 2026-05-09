@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 type TitleRate = {
@@ -95,16 +96,20 @@ function RateRow({
   titleName: string;
   initialRate: number | null;
 }) {
+  const router = useRouter();
   // Display state: rate as dollars (string), what user types.
   const [rateInput, setRateInput] = useState<string>(
     initialRate === null ? "" : (initialRate / 100).toFixed(2),
   );
   const [savedRate, setSavedRate] = useState<number | null>(initialRate);
-  const [saving, setSaving] = useState(false);
+  const [phase, setPhase] = useState<
+    "idle" | "saving" | "recalculating" | "done"
+  >("idle");
   const [error, setError] = useState<string | null>(null);
-  const [savedJustNow, setSavedJustNow] = useState(false);
+  const [recalcMessage, setRecalcMessage] = useState<string | null>(null);
 
   const dirty = parseDollars(rateInput) !== savedRate;
+  const busy = phase === "saving" || phase === "recalculating";
 
   async function save() {
     const cents = parseDollars(rateInput);
@@ -112,8 +117,9 @@ function RateRow({
       setError("Enter a non-negative dollar amount.");
       return;
     }
-    setSaving(true);
     setError(null);
+    setRecalcMessage(null);
+    setPhase("saving");
     try {
       const res = await fetch(`/api/p/${partnerSlug}/title-rates`, {
         method: "PUT",
@@ -123,16 +129,47 @@ function RateRow({
           rate_cents_per_thousand: cents,
         }),
       });
-      const json = await res.json().catch(() => ({}));
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        recalc?: {
+          rows_upserted: number;
+          total_earnings_cents: number;
+          error: string | null;
+        };
+      };
       if (!res.ok) {
         setError(json.error ?? `request failed (${res.status})`);
+        setPhase("idle");
         return;
       }
       setSavedRate(cents);
-      setSavedJustNow(true);
-      setTimeout(() => setSavedJustNow(false), 1500);
-    } finally {
-      setSaving(false);
+
+      // The PUT response already includes recalc results — the work
+      // happened server-side inline. The "recalculating" phase is a
+      // brief UI marker so the partner sees the cause-effect; we
+      // refresh server data immediately so the "calculated this
+      // month" tile updates.
+      setPhase("recalculating");
+      const recalc = json.recalc;
+      if (recalc?.error) {
+        setRecalcMessage(`Recalc failed: ${recalc.error}`);
+      } else if (recalc) {
+        const dollarsAdded = (recalc.total_earnings_cents / 100).toFixed(2);
+        setRecalcMessage(
+          `Recalculated · ${recalc.rows_upserted} row${
+            recalc.rows_upserted === 1 ? "" : "s"
+          } · $${dollarsAdded} accrued today`,
+        );
+      }
+      router.refresh();
+      setPhase("done");
+      setTimeout(() => {
+        setPhase("idle");
+        setRecalcMessage(null);
+      }, 4000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setPhase("idle");
     }
   }
 
@@ -153,7 +190,7 @@ function RateRow({
           inputMode="decimal"
           value={rateInput}
           onChange={(e) => setRateInput(e.target.value)}
-          disabled={!isAdmin || saving}
+          disabled={!isAdmin || busy}
           placeholder="0.00"
           className="w-24 rounded-md border border-white/10 bg-black/30 px-2 py-1.5 text-right text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none disabled:opacity-60"
         />
@@ -161,13 +198,24 @@ function RateRow({
           <button
             type="button"
             onClick={save}
-            disabled={!dirty || saving}
+            disabled={!dirty || busy}
             className="rounded-md bg-moonbeem-pink px-3 py-1.5 text-caption font-semibold text-moonbeem-navy hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-30"
           >
-            {saving ? "Saving…" : savedJustNow ? "Saved" : "Save"}
+            {phase === "saving"
+              ? "Saving…"
+              : phase === "recalculating"
+                ? "Recalculating…"
+                : phase === "done"
+                  ? "Saved"
+                  : "Save"}
           </button>
         )}
       </div>
+      {recalcMessage && (
+        <p className="basis-full text-caption text-emerald-300">
+          {recalcMessage}
+        </p>
+      )}
       {error && (
         <p className="basis-full text-caption text-moonbeem-magenta">
           {error}

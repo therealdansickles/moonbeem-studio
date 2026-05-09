@@ -26,7 +26,7 @@ export default function TitleTabs({
   const sections: Section[] = [
     { id: "about", label: "About", content: aboutContent },
     { id: "fan-edits", label: "Fan Edits", content: fanEditsContent },
-    { id: "videos", label: "Videos", content: videosContent },
+    { id: "videos", label: "Clips", content: videosContent },
     { id: "stills", label: "Stills", content: stillsContent },
   ];
 

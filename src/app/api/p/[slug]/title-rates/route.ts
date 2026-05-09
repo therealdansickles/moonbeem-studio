@@ -13,6 +13,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentProfile, getUser } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { calculateEarningsForRate } from "@/lib/earnings-calc";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -121,10 +122,31 @@ export async function PUT(
     }
   }
 
+  // Auto-recalc earnings for this (partner, title) scope so the
+  // partner sees the new rate reflected in the dashboard's
+  // "calculated this month" tile without a separate ops trigger.
+  // Idempotent on the (creator, edit, day) unique index — re-running
+  // overwrites today's row rather than double-paying.
+  const today = new Date().toISOString().slice(0, 10);
+  const recalc = await calculateEarningsForRate(
+    supabase,
+    {
+      partner_id: partner.id,
+      title_id: titleId,
+      rate_cents_per_thousand: rate,
+    },
+    today,
+  );
+
   return NextResponse.json({
     ok: true,
     partner_id: partner.id,
     title_id: titleId,
     rate_cents_per_thousand: rate,
+    recalc: {
+      rows_upserted: recalc.rows_upserted,
+      total_earnings_cents: recalc.total_earnings_cents,
+      error: recalc.error ?? null,
+    },
   });
 }

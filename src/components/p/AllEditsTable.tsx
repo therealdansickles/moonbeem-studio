@@ -29,7 +29,7 @@ const HEADERS: Array<{ key: SortKey; label: string; align: "left" | "right" }> =
   { key: "platform", label: "Platform", align: "left" },
   { key: "view_count", label: "Views", align: "right" },
   { key: "growth_24h", label: "24h growth", align: "right" },
-  { key: "modal_opens", label: "Modal opens", align: "right" },
+  { key: "modal_opens", label: "Moonbeem plays", align: "right" },
 ];
 
 const platformLabel: Record<Row["platform"], string> = {

@@ -10,18 +10,36 @@
 import { NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { logAdminActionRun } from "@/lib/admin-action-runs";
 
 export async function POST() {
-  await requireSuperAdmin();
+  const session = await requireSuperAdmin();
+  const startedAt = Date.now();
   const supabase = createServiceRoleClient();
   const { data, error } = await supabase.functions.invoke("view-tracking", {
     body: {},
   });
   if (error) {
+    await logAdminActionRun({
+      action_key: "view_tracking_trigger",
+      triggered_by: session.userId,
+      started_at: startedAt,
+      ok: false,
+      result: null,
+      error_message: error.message,
+    });
     return NextResponse.json(
       { ok: false, error: error.message },
       { status: 500 },
     );
   }
-  return NextResponse.json({ ok: true, result: data });
+  const payload = { ok: true, result: data };
+  await logAdminActionRun({
+    action_key: "view_tracking_trigger",
+    triggered_by: session.userId,
+    started_at: startedAt,
+    ok: true,
+    result: payload,
+  });
+  return NextResponse.json(payload);
 }
