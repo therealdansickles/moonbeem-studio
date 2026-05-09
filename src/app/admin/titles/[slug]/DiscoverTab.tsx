@@ -1,0 +1,646 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
+
+type Candidate = {
+  post_id: string;
+  post_url: string;
+  handle: string;
+  caption: string | null;
+  view_count: number | null;
+  like_count: number | null;
+  comment_count: number | null;
+  share_count: number | null;
+  thumbnail_url: string | null;
+  posted_at: string | null;
+  duration_seconds: number | null;
+  aspect_ratio: string | null;
+  hashtags: string[];
+  is_video: boolean;
+  already_in_library: boolean;
+};
+
+type SearchResponse = {
+  ok: boolean;
+  candidates: Candidate[];
+  units_estimated: number;
+  pages_fetched: number;
+  results_count: number;
+  warning: string | null;
+  error?: string;
+};
+
+type AddResponse = {
+  ok: boolean;
+  added: number;
+  duplicate: number;
+  failed: number;
+  results: Array<{
+    embed_url: string;
+    outcome: "added" | "duplicate" | "failed";
+    inserted_id?: string;
+    existing_id?: string;
+    error?: string;
+  }>;
+  error?: string;
+};
+
+type RowState = "new" | "adding" | "added" | "duplicate" | "failed";
+type SortKey = "views" | "posted_at" | "engagement";
+
+type Props = {
+  titleSlug: string;
+  titleName: string;
+};
+
+const PLATFORMS = [
+  { id: "tiktok", label: "TikTok", enabled: true },
+  { id: "instagram", label: "Instagram", enabled: false },
+  { id: "twitter", label: "Twitter / X", enabled: false },
+] as const;
+
+const MAX_RESULTS_OPTIONS = [20, 30, 50] as const;
+
+export default function DiscoverTab({ titleSlug, titleName }: Props) {
+  const router = useRouter();
+  const [query, setQuery] = useState(titleName);
+  const [platform, setPlatform] = useState<"tiktok">("tiktok");
+  const [maxResults, setMaxResults] = useState<20 | 30 | 50>(30);
+
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [lastSearch, setLastSearch] = useState<{
+    at: string;
+    count: number;
+    units: number;
+    warning: string | null;
+  } | null>(null);
+
+  const [rowState, setRowState] = useState<Record<string, RowState>>({});
+  const [rowError, setRowError] = useState<Record<string, string>>({});
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [sortKey, setSortKey] = useState<SortKey>("views");
+
+  const [urlInput, setUrlInput] = useState("");
+  const [urlBusy, setUrlBusy] = useState(false);
+  const [urlMessage, setUrlMessage] = useState<
+    { kind: "ok" | "error"; text: string } | null
+  >(null);
+
+  // Re-rank when sort changes; keep already_in_library at the end.
+  const sortedCandidates = useMemo(() => {
+    const copy = [...candidates];
+    copy.sort((a, b) => {
+      if (a.already_in_library !== b.already_in_library) {
+        return a.already_in_library ? 1 : -1;
+      }
+      switch (sortKey) {
+        case "views":
+          return (b.view_count ?? 0) - (a.view_count ?? 0);
+        case "posted_at": {
+          const aT = a.posted_at ? Date.parse(a.posted_at) : 0;
+          const bT = b.posted_at ? Date.parse(b.posted_at) : 0;
+          return bT - aT;
+        }
+        case "engagement": {
+          // Simple ratio: (likes+comments+shares) / views. Posts with
+          // no views fall to the bottom.
+          const r = (c: Candidate): number => {
+            const v = c.view_count ?? 0;
+            if (v <= 0) return -1;
+            const eng =
+              (c.like_count ?? 0) +
+              (c.comment_count ?? 0) +
+              (c.share_count ?? 0);
+            return eng / v;
+          };
+          return r(b) - r(a);
+        }
+      }
+    });
+    return copy;
+  }, [candidates, sortKey]);
+
+  // When candidates change, reset selection but preserve added/dup
+  // markers from prior runs (shouldn't normally collide; the search
+  // returns fresh post_ids each time).
+  useEffect(() => {
+    setSelected(new Set());
+  }, [candidates]);
+
+  function toggleSelected(id: string) {
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectableCandidates(): Candidate[] {
+    return sortedCandidates.filter(
+      (c) =>
+        !c.already_in_library &&
+        rowState[c.post_id] !== "added" &&
+        rowState[c.post_id] !== "adding",
+    );
+  }
+
+  function toggleSelectAll() {
+    const usable = selectableCandidates();
+    if (selected.size === usable.length && usable.length > 0) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(usable.map((c) => c.post_id)));
+    }
+  }
+
+  async function runSearch() {
+    setSearching(true);
+    setSearchError(null);
+    setRowError({});
+    try {
+      const res = await fetch(
+        `/api/admin/titles/${titleSlug}/discover/search`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            platform,
+            query: query.trim(),
+            max_results: maxResults,
+            // Period not exposed in UI; server defaults to 180d.
+          }),
+        },
+      );
+      const json = (await res.json().catch(() => ({}))) as SearchResponse;
+      if (!res.ok || !json.ok) {
+        setSearchError(json.error ?? `request failed (${res.status})`);
+        return;
+      }
+      setCandidates(json.candidates);
+      setRowState((s) => {
+        const next: Record<string, RowState> = { ...s };
+        for (const c of json.candidates) {
+          if (c.already_in_library) next[c.post_id] = "duplicate";
+          else if (!next[c.post_id]) next[c.post_id] = "new";
+        }
+        return next;
+      });
+      setLastSearch({
+        at: new Date().toISOString(),
+        count: json.results_count,
+        units: json.units_estimated,
+        warning: json.warning,
+      });
+    } catch (err) {
+      setSearchError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function addCandidates(toAdd: Candidate[]) {
+    if (toAdd.length === 0) return;
+    setBulkBusy(true);
+    setRowError({});
+    setRowState((s) => {
+      const next = { ...s };
+      for (const c of toAdd) next[c.post_id] = "adding";
+      return next;
+    });
+    try {
+      const res = await fetch(
+        `/api/admin/titles/${titleSlug}/discover/add`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ posts: toAdd }),
+        },
+      );
+      const json = (await res.json().catch(() => ({}))) as AddResponse;
+      if (!res.ok && !json.results) {
+        setSearchError(json.error ?? `request failed (${res.status})`);
+        setRowState((s) => {
+          const next = { ...s };
+          for (const c of toAdd) next[c.post_id] = "new";
+          return next;
+        });
+        return;
+      }
+      setRowState((s) => {
+        const next = { ...s };
+        const byUrl = new Map(toAdd.map((c) => [c.post_url, c.post_id]));
+        for (const r of json.results ?? []) {
+          const id = byUrl.get(r.embed_url);
+          if (!id) continue;
+          if (r.outcome === "added") next[id] = "added";
+          else if (r.outcome === "duplicate") next[id] = "duplicate";
+          else next[id] = "failed";
+        }
+        return next;
+      });
+      setRowError((s) => {
+        const next = { ...s };
+        const byUrl = new Map(toAdd.map((c) => [c.post_url, c.post_id]));
+        for (const r of json.results ?? []) {
+          const id = byUrl.get(r.embed_url);
+          if (id && r.outcome === "failed" && r.error) next[id] = r.error;
+        }
+        return next;
+      });
+      // Refresh the server-rendered Fan edits tab counter in the
+      // header by re-rendering the page — cheap given the size.
+      router.refresh();
+      setSelected(new Set());
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function addByUrl() {
+    const trimmed = urlInput.trim();
+    if (!trimmed) return;
+    setUrlBusy(true);
+    setUrlMessage(null);
+    try {
+      const res = await fetch(
+        `/api/admin/titles/${titleSlug}/discover/add`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: trimmed }),
+        },
+      );
+      const json = (await res.json().catch(() => ({}))) as AddResponse;
+      if (!res.ok && !json.results) {
+        setUrlMessage({
+          kind: "error",
+          text: json.error ?? `request failed (${res.status})`,
+        });
+        return;
+      }
+      const r = json.results?.[0];
+      if (!r) {
+        setUrlMessage({
+          kind: "error",
+          text: "No result returned for that URL.",
+        });
+        return;
+      }
+      if (r.outcome === "added") {
+        setUrlMessage({ kind: "ok", text: `Added ${trimmed}.` });
+        setUrlInput("");
+        router.refresh();
+      } else if (r.outcome === "duplicate") {
+        setUrlMessage({
+          kind: "error",
+          text: "Already in this title's fan edits.",
+        });
+      } else {
+        setUrlMessage({
+          kind: "error",
+          text: r.error ?? "Add failed.",
+        });
+      }
+    } finally {
+      setUrlBusy(false);
+    }
+  }
+
+  const selectedCandidates = sortedCandidates.filter((c) =>
+    selected.has(c.post_id),
+  );
+  const usableCount = selectableCandidates().length;
+  const selectAllChecked = usableCount > 0 && selected.size === usableCount;
+
+  return (
+    <div className="flex flex-col gap-8">
+      {/* SEARCH */}
+      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="rounded-full bg-moonbeem-pink/15 px-2.5 py-0.5 text-caption font-medium text-moonbeem-pink">
+            Discover
+          </span>
+          <span className="text-caption text-moonbeem-ink-subtle">
+            search EnsembleData for fan edits to attribute
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[120px_1fr_120px_auto]">
+          <label className="flex flex-col gap-1 text-caption text-moonbeem-ink-subtle">
+            Platform
+            <select
+              value={platform}
+              onChange={(e) => {
+                if (e.target.value === "tiktok") setPlatform("tiktok");
+              }}
+              className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none"
+            >
+              {PLATFORMS.map((p) => (
+                <option
+                  key={p.id}
+                  value={p.id}
+                  disabled={!p.enabled}
+                >
+                  {p.label}
+                  {p.enabled ? "" : " — coming soon"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-caption text-moonbeem-ink-subtle">
+            Query
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={titleName}
+              className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-caption text-moonbeem-ink-subtle">
+            Max results
+            <select
+              value={maxResults}
+              onChange={(e) =>
+                setMaxResults(Number(e.target.value) as 20 | 30 | 50)
+              }
+              className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none"
+            >
+              {MAX_RESULTS_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={runSearch}
+            disabled={searching || query.trim().length === 0}
+            className="self-end rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {searching ? "Searching…" : "Search"}
+          </button>
+        </div>
+
+        {lastSearch && (
+          <p className="mt-3 text-caption text-moonbeem-ink-subtle">
+            Last search {formatRelative(lastSearch.at)} · {lastSearch.count}{" "}
+            {lastSearch.count === 1 ? "result" : "results"} ·{" "}
+            ~{lastSearch.units}{" "}
+            {lastSearch.units === 1 ? "unit" : "units"} estimated
+            {lastSearch.warning ? ` · warning: ${lastSearch.warning}` : ""}
+          </p>
+        )}
+        {searchError && (
+          <p className="mt-3 text-caption text-moonbeem-magenta">
+            {searchError}
+          </p>
+        )}
+      </section>
+
+      {/* RESULTS */}
+      {sortedCandidates.length > 0 && (
+        <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-caption text-moonbeem-ink-subtle">
+                <input
+                  type="checkbox"
+                  checked={selectAllChecked}
+                  onChange={toggleSelectAll}
+                  disabled={usableCount === 0}
+                  className="accent-moonbeem-pink"
+                />
+                Select all ({usableCount} selectable)
+              </label>
+              <button
+                type="button"
+                onClick={() => addCandidates(selectedCandidates)}
+                disabled={bulkBusy || selectedCandidates.length === 0}
+                className="rounded-md bg-moonbeem-pink px-3 py-1.5 text-caption font-semibold text-moonbeem-navy hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {bulkBusy
+                  ? "Adding…"
+                  : `Add selected (${selectedCandidates.length})`}
+              </button>
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-caption text-moonbeem-ink-subtle">
+                Sort
+                <select
+                  value={sortKey}
+                  onChange={(e) => setSortKey(e.target.value as SortKey)}
+                  className="rounded-md border border-white/10 bg-black/30 px-2 py-1 text-caption text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none"
+                >
+                  <option value="views">Views desc</option>
+                  <option value="posted_at">Posted at desc</option>
+                  <option value="engagement">Engagement rate desc</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={runSearch}
+                disabled={searching}
+                className="rounded-md border border-white/15 px-3 py-1 text-caption text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {searching ? "Refreshing…" : "Refresh search"}
+              </button>
+            </div>
+          </div>
+
+          <ul className="flex flex-col divide-y divide-white/5">
+            {sortedCandidates.map((c) => {
+              const state = rowState[c.post_id] ?? "new";
+              const disabledRow =
+                c.already_in_library ||
+                state === "added" ||
+                state === "adding";
+              return (
+                <li
+                  key={c.post_id}
+                  className={`flex flex-wrap items-start gap-4 py-4 ${
+                    disabledRow ? "opacity-60" : ""
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(c.post_id)}
+                    disabled={disabledRow}
+                    onChange={() => toggleSelected(c.post_id)}
+                    className="mt-2 accent-moonbeem-pink"
+                  />
+                  <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-md bg-moonbeem-navy/40">
+                    {c.thumbnail_url ? (
+                      <Image
+                        src={c.thumbnail_url}
+                        alt=""
+                        fill
+                        sizes="80px"
+                        unoptimized
+                        className="object-cover"
+                      />
+                    ) : null}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <a
+                        href={`https://www.tiktok.com/@${c.handle}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-body-sm font-medium text-moonbeem-ink hover:text-moonbeem-pink"
+                      >
+                        @{c.handle}
+                      </a>
+                      <RowStatusPill state={state} />
+                      <a
+                        href={c.post_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-caption text-moonbeem-ink-subtle hover:text-moonbeem-pink"
+                      >
+                        View on TikTok ↗
+                      </a>
+                    </div>
+                    {c.caption && (
+                      <p className="mt-1 line-clamp-2 text-caption text-moonbeem-ink-muted">
+                        {c.caption}
+                      </p>
+                    )}
+                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-caption tabular-nums text-moonbeem-ink-subtle">
+                      <span>
+                        {formatStat(c.view_count)} views
+                      </span>
+                      <span>
+                        {formatStat(c.like_count)} likes
+                      </span>
+                      <span>
+                        {formatStat(c.comment_count)} comments
+                      </span>
+                      <span>
+                        {formatStat(c.share_count)} shares
+                      </span>
+                      <span>{c.posted_at ? formatRelative(c.posted_at) : "—"}</span>
+                    </div>
+                    {rowError[c.post_id] && (
+                      <p className="mt-1 text-caption text-moonbeem-magenta">
+                        {rowError[c.post_id]}
+                      </p>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {/* ADD BY URL */}
+      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="rounded-full bg-moonbeem-violet/20 px-2.5 py-0.5 text-caption font-medium text-moonbeem-violet-soft">
+            Add by URL
+          </span>
+          <span className="text-caption text-moonbeem-ink-subtle">
+            paste a TikTok / Instagram / Twitter post URL — fetches metadata
+            and adds it
+          </span>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex min-w-0 flex-1 flex-col gap-1 text-caption text-moonbeem-ink-subtle">
+            URL
+            <input
+              type="text"
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              placeholder="https://www.tiktok.com/@user/video/..."
+              className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={addByUrl}
+            disabled={urlBusy || urlInput.trim().length === 0}
+            className="rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {urlBusy ? "Adding…" : "Add"}
+          </button>
+        </div>
+        {urlMessage && (
+          <p
+            className={`mt-3 text-caption ${
+              urlMessage.kind === "ok"
+                ? "text-emerald-300"
+                : "text-moonbeem-magenta"
+            }`}
+          >
+            {urlMessage.text}
+          </p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function RowStatusPill({ state }: { state: RowState }) {
+  if (state === "added") {
+    return (
+      <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-caption font-medium text-emerald-300">
+        Added ✓
+      </span>
+    );
+  }
+  if (state === "duplicate") {
+    return (
+      <span className="rounded-full bg-white/10 px-2 py-0.5 text-caption font-medium text-moonbeem-ink-muted">
+        Already in library
+      </span>
+    );
+  }
+  if (state === "adding") {
+    return (
+      <span className="rounded-full bg-moonbeem-pink/15 px-2 py-0.5 text-caption font-medium text-moonbeem-pink">
+        Adding…
+      </span>
+    );
+  }
+  if (state === "failed") {
+    return (
+      <span className="rounded-full bg-moonbeem-magenta/20 px-2 py-0.5 text-caption font-medium text-moonbeem-magenta">
+        Failed
+      </span>
+    );
+  }
+  return (
+    <span className="rounded-full bg-white/5 px-2 py-0.5 text-caption text-moonbeem-ink-subtle">
+      New
+    </span>
+  );
+}
+
+function formatStat(n: number | null): string {
+  if (n === null) return "—";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
+}
+
+function formatRelative(iso: string): string {
+  const then = new Date(iso).getTime();
+  const diff = Date.now() - then;
+  if (diff < 0) return new Date(iso).toLocaleString();
+  const sec = Math.round(diff / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 48) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  return `${day}d ago`;
+}

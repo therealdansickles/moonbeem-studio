@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import FanEditsUploadCard from "@/components/admin/FanEditsUploadCard";
 import UploadClient from "./upload/UploadClient";
+import DiscoverTab from "./DiscoverTab";
 
 export type FanEditRow = {
   id: string;
@@ -53,7 +54,13 @@ export type StillRow = {
   created_at: string;
 };
 
-type Tab = "fan-edits" | "clips" | "stills" | "upload" | "settings";
+type Tab =
+  | "fan-edits"
+  | "clips"
+  | "stills"
+  | "discover"
+  | "upload"
+  | "settings";
 
 type PartnerOption = { id: string; slug: string; name: string };
 
@@ -78,6 +85,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "fan-edits", label: "Fan edits" },
   { id: "clips", label: "Clips" },
   { id: "stills", label: "Stills" },
+  { id: "discover", label: "Discover" },
   { id: "upload", label: "Upload" },
   { id: "settings", label: "Settings" },
 ];
@@ -232,6 +240,12 @@ export default function TitleDetailTabs(props: Props) {
           )}
           {tab === "stills" && (
             <StillsList rows={props.stills} titleSlug={props.titleSlug} />
+          )}
+          {tab === "discover" && (
+            <DiscoverTab
+              titleSlug={props.titleSlug}
+              titleName={props.titleName}
+            />
           )}
           {tab === "upload" && (
             <UploadTab

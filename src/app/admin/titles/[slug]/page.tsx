@@ -38,6 +38,7 @@ const ALLOWED_TABS = [
   "fan-edits",
   "clips",
   "stills",
+  "discover",
   "upload",
   "settings",
 ] as const;
