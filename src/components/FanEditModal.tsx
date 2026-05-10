@@ -399,6 +399,8 @@ function EmbedFor({ fanEdit }: { fanEdit: FanEdit }) {
       return (
         <XEmbed url={normalizeTwitterUrl(fanEdit.embed_url)} width="100%" />
       );
+    case "youtube":
+      return <YouTubeEmbed embedUrl={fanEdit.embed_url} />;
     default:
       return (
         <div className="py-12 text-center text-body-sm text-moonbeem-ink-subtle">
@@ -406,4 +408,54 @@ function EmbedFor({ fanEdit }: { fanEdit: FanEdit }) {
         </div>
       );
   }
+}
+
+// YouTube standard iframe embed. Works for both regular videos
+// (/watch?v=ID) and Shorts (/shorts/ID) — both use the same
+// /embed/{ID} player URL. Aspect 16:9 keeps the modal compact;
+// Shorts get letterboxed center-frame, acceptable for v1 since the
+// modal max-width is 440px on desktop and a 9:16 frame would push
+// the modal taller than viewport.
+function YouTubeEmbed({ embedUrl }: { embedUrl: string }) {
+  const videoId = extractYouTubeVideoId(embedUrl);
+  if (!videoId) {
+    return (
+      <div className="py-12 text-center text-body-sm text-moonbeem-ink-subtle">
+        Couldn&apos;t parse this YouTube URL.
+      </div>
+    );
+  }
+  return (
+    <div className="aspect-video w-full bg-black">
+      <iframe
+        src={`https://www.youtube.com/embed/${videoId}`}
+        className="h-full w-full"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
+        title="YouTube video player"
+      />
+    </div>
+  );
+}
+
+// Extract the 11-char video ID from any YouTube URL form we ingest:
+// /watch?v=ID, /shorts/ID, youtu.be/ID, /embed/ID, /v/ID, /live/ID.
+function extractYouTubeVideoId(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (host === "youtu.be" || host.endsWith(".youtu.be")) {
+    const m = parsed.pathname.match(/^\/([A-Za-z0-9_-]{11})(?:\/|$|\?)/);
+    return m ? m[1] : null;
+  }
+  const v = parsed.searchParams.get("v");
+  if (v && /^[A-Za-z0-9_-]{11}$/.test(v)) return v;
+  const m = parsed.pathname.match(
+    /^\/(?:shorts|embed|v|live)\/([A-Za-z0-9_-]{11})(?:\/|$|\?)/,
+  );
+  return m ? m[1] : null;
 }
