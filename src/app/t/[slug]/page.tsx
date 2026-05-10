@@ -45,7 +45,14 @@ export async function generateMetadata({
     openGraph: {
       title: title.title,
       description,
-      images: title.poster_url ? [title.poster_url] : [],
+      // images intentionally omitted — opengraph-image.tsx in this
+      // segment auto-generates a branded 1200x630 card (poster +
+      // title meta) that supersedes any here.
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: title.title,
+      description,
     },
   };
 }
