@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { FanEdit } from "@/lib/queries/titles";
 import FanEditThumbnail from "./FanEditThumbnail";
 import FanEditModal from "./FanEditModal";
+import { trackFanEditClick } from "@/lib/analytics/track";
 
 type Props = {
   // Already sorted view_count DESC (then created_at DESC) by the
@@ -97,7 +98,18 @@ export default function FanEditsTab({
                     key={fe.id}
                     fanEdit={fe}
                     eager={eagerIds.has(fe.id)}
-                    onOpen={() => setOpenIndex(indexById.get(fe.id) ?? -1)}
+                    onOpen={() => {
+                      trackFanEditClick({
+                        title_id: fe.title_id,
+                        fan_edit_id: fe.id,
+                        platform: fe.platform,
+                        creator_handle:
+                          fe.creator_moonbeem_handle ??
+                          fe.creator_handle_displayed ??
+                          null,
+                      });
+                      setOpenIndex(indexById.get(fe.id) ?? -1);
+                    }}
                   />
                 ))}
               </div>

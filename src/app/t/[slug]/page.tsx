@@ -16,6 +16,7 @@ import StillsTab from "@/components/StillsTab";
 import RequestFanEditsCTA from "@/components/RequestFanEditsCTA";
 import RequestSubmittedToast from "@/components/RequestSubmittedToast";
 import AboutCredits from "@/components/AboutCredits";
+import OfferButtonClient from "@/components/OfferButtonClient";
 import { createClient } from "@/lib/supabase/server";
 import { canViewTitle } from "@/lib/title-access";
 import { Suspense } from "react";
@@ -73,15 +74,18 @@ function OfferButton({
   // external_clicks for clicks that originate on moonbeem.studio.
   // noopener stays for security (prevents the destination from
   // accessing window.opener).
+  // OfferButtonClient adds the gtag external_click event on click;
+  // the visual + redirect behaviour is unchanged from the prior
+  // <a href> implementation.
   return (
-    <a
+    <OfferButtonClient
       href={href}
-      target="_blank"
-      rel="noopener"
+      label={label}
       className={className}
-    >
-      {label}
-    </a>
+      titleId={titleId}
+      offerType={offer.offer_type ?? null}
+      destinationUrl={offer.provider_url}
+    />
   );
 }
 

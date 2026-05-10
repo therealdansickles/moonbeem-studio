@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { trackSigninStart } from "@/lib/analytics/track";
 
 type Status = "idle" | "sending" | "sent" | "error";
 
@@ -35,6 +36,7 @@ function LoginForm() {
     e.preventDefault();
     setStatus("sending");
     setErrorMsg("");
+    trackSigninStart({ method: "email_otp" });
 
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOtp({
@@ -56,6 +58,7 @@ function LoginForm() {
   async function onGoogleSignIn() {
     setStatus("sending");
     setErrorMsg("");
+    trackSigninStart({ method: "google" });
 
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOAuth({

@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { SearchResult } from "@/lib/queries/titles";
+import { trackCreatorSearch } from "@/lib/analytics/track";
 
 const DEBOUNCE_MS = 300;
 const MIN_QUERY_LEN = 2;
@@ -72,6 +73,7 @@ export default function SearchBar() {
       e.preventDefault();
       const trimmed = query.trim();
       if (trimmed.length >= MIN_QUERY_LEN) {
+        trackCreatorSearch({ query: trimmed, source: "topnav" });
         setOpen(false);
         router.push(`/search?q=${encodeURIComponent(trimmed)}`);
       }
@@ -183,6 +185,7 @@ export default function SearchBar() {
             <button
               type="button"
               onClick={() => {
+                trackCreatorSearch({ query: trimmed, source: "topnav" });
                 setOpen(false);
                 router.push(`/search?q=${encodeURIComponent(trimmed)}`);
               }}

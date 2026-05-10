@@ -68,14 +68,18 @@ export async function GET(request: Request) {
     .eq("id", exchange.user.id)
     .maybeSingle();
 
+  // signin=1 is appended to the post-auth redirect so the
+  // GoogleAnalytics client component can fire signin_complete on
+  // first render of the destination page, then strip the param via
+  // router.replace so back/forward doesn't re-fire.
   const toastQuery = (() => {
     const p = new URLSearchParams();
     if (requestSubmitted) {
       p.set("request_submitted", "1");
       if (resolvedTitleName) p.set("title", resolvedTitleName);
     }
-    const s = p.toString();
-    return s ? `?${s}` : "";
+    p.set("signin", "1");
+    return `?${p.toString()}`;
   })();
 
   if (!profile?.handle) {
@@ -85,11 +89,9 @@ export async function GET(request: Request) {
       onboardParams.set("request_submitted", "1");
       if (resolvedTitleName) onboardParams.set("title", resolvedTitleName);
     }
-    const onboardQuery = onboardParams.size
-      ? `?${onboardParams.toString()}`
-      : "";
+    onboardParams.set("signin", "1");
     return NextResponse.redirect(
-      `${origin}/onboarding/handle${onboardQuery}`,
+      `${origin}/onboarding/handle?${onboardParams.toString()}`,
     );
   }
 
