@@ -17,13 +17,22 @@ type Candidate = {
   // TikTok and YT shorts.
   posted_relative: string | null;
   view_count: number;
-  // Nullable: YouTube hashtag search doesn't return engagement counts.
+  // Nullable across platforms (YouTube search doesn't expose these
+  // server-side; YT parser sets 0 per spec). Type stays nullable for
+  // future platforms that legitimately return null.
   like_count: number | null;
   comment_count: number | null;
   share_count: number | null;
   save_count: number | null;
-  author_handle: string;
+  // Nullable: YouTube shorts have no channel info in search response.
+  author_handle: string | null;
   author_display_name: string | null;
+  // Pre-constructed channel URL from the source (YouTube provides this
+  // via canonicalBaseUrl). When present, UI uses it directly for the
+  // author link instead of building from author_handle — necessary
+  // because YT display name (e.g. "Rotten Tomatoes Trailers") differs
+  // from the URL-safe @-handle.
+  author_url: string | null;
   author_avatar_url: string | null;
   thumbnail_url: string | null;
   hashtags: string[];
@@ -553,20 +562,27 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      {c.author_handle ? (
-                        <a
-                          href={authorUrl(c.platform, c.author_handle)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-body-sm font-medium text-moonbeem-ink hover:text-moonbeem-pink"
-                        >
-                          @{c.author_handle}
-                        </a>
-                      ) : (
-                        <span className="text-body-sm font-medium text-moonbeem-ink-subtle">
-                          (channel unattributed)
-                        </span>
-                      )}
+                      {c.author_handle
+                        ? (
+                          <a
+                            href={c.author_url ??
+                              authorUrl(c.platform, c.author_handle)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-body-sm font-medium text-moonbeem-ink hover:text-moonbeem-pink"
+                          >
+                            {/* Display name only — TikTok @-handles are
+                                URL-safe; YT puts display text here. */}
+                            {c.platform === "tiktok"
+                              ? `@${c.author_handle}`
+                              : c.author_handle}
+                          </a>
+                        )
+                        : (
+                          <span className="text-body-sm font-medium text-moonbeem-ink-subtle">
+                            (channel unattributed)
+                          </span>
+                        )}
                       {c.author_display_name && (
                         <span className="text-caption text-moonbeem-ink-subtle">
                           {c.author_display_name}

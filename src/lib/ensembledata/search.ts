@@ -101,13 +101,28 @@ export type Candidate = {
   posted_relative: string | null;
   view_count: number;
   // Nullable across platforms — YouTube hashtag search doesn't return
-  // engagement counts in its base response. TikTok always populates.
+  // engagement counts in its base response. TikTok always populates;
+  // YouTube parser sets these to 0 (per Dan's 2026-05-10 spec) so
+  // formatStat renders "0" rather than "—" for visual consistency.
   like_count: number | null;
   comment_count: number | null;
   share_count: number | null;
   save_count: number | null;
-  author_handle: string;
+  // For TikTok this is the canonical @-handle (URL-safe, no spaces).
+  // For YouTube regular videos this is the channel display NAME from
+  // longBylineText.runs[0].text per Dan's 2026-05-10 spec — may
+  // contain spaces and is NOT URL-safe; pair with author_url for
+  // navigation. YouTube shorts: null (search response doesn't carry
+  // channel info on reelItemRenderer).
+  author_handle: string | null;
   author_display_name: string | null;
+  // Pre-constructed channel URL when the source provides one. UI
+  // prefers this over computing https://platform/@handle from
+  // author_handle, since the display name and the URL-safe handle
+  // differ on YouTube (e.g. "Rotten Tomatoes Trailers" vs
+  // /@RottenTomatoesTrailers). Null when not available; UI falls
+  // back to platform-aware URL construction.
+  author_url: string | null;
   author_avatar_url: string | null;
   thumbnail_url: string | null;
   hashtags: string[];
@@ -311,6 +326,7 @@ function parseCandidate(item: unknown): Candidate | null {
     save_count: numberValue(stats.collect_count) ?? 0,
     author_handle: unique_id,
     author_display_name: stringValue(author.nickname) ?? null,
+    author_url: null, // UI builds tiktok.com/@<handle> from author_handle
     author_avatar_url: firstUrl(avatarMedium.url_list),
     thumbnail_url: firstUrl(cover.url_list),
     hashtags,
@@ -470,21 +486,35 @@ function parseYouTubeItem(item: unknown): Candidate | null {
   if (!item || typeof item !== "object") return null;
   const obj = item as Record<string, unknown>;
 
-  // Two renderer flavors. Try regular videoRenderer first (longer
-  // form, has channel info), then reelItemRenderer (shorts).
-  const videoRenderer = obj.videoRenderer;
-  if (videoRenderer && typeof videoRenderer === "object") {
-    return parseYouTubeVideoRenderer(videoRenderer as Record<string, unknown>);
-  }
+  // Real production shape (verified against /admin captured payload
+  // 2026-05-10): every video is wrapped under
+  // richItemRenderer.content.{videoRenderer | reelItemRenderer}.
+  // The OpenAPI doc sample (top-level videoRenderer / reelItemRenderer)
+  // appears to be a different/older shape — kept as defensive
+  // fallback in case YT toggles back.
   const richItem = obj.richItemRenderer;
   if (richItem && typeof richItem === "object") {
     const content = (richItem as Record<string, unknown>).content;
     if (content && typeof content === "object") {
-      const reel = (content as Record<string, unknown>).reelItemRenderer;
-      if (reel && typeof reel === "object") {
-        return parseYouTubeReelRenderer(reel as Record<string, unknown>);
+      const c = content as Record<string, unknown>;
+      const vr = c.videoRenderer;
+      if (vr && typeof vr === "object") {
+        return parseYouTubeVideoRenderer(vr as Record<string, unknown>);
+      }
+      const rr = c.reelItemRenderer;
+      if (rr && typeof rr === "object") {
+        return parseYouTubeReelRenderer(rr as Record<string, unknown>);
       }
     }
+  }
+  // Top-level fallbacks — rare in current prod responses but defensive.
+  const topVR = obj.videoRenderer;
+  if (topVR && typeof topVR === "object") {
+    return parseYouTubeVideoRenderer(topVR as Record<string, unknown>);
+  }
+  const topRR = obj.reelItemRenderer;
+  if (topRR && typeof topRR === "object") {
+    return parseYouTubeReelRenderer(topRR as Record<string, unknown>);
   }
   return null;
 }
@@ -498,10 +528,16 @@ function parseYouTubeVideoRenderer(
   const titleRunsText = firstRunText(r.title);
   const caption = titleRunsText ?? "";
 
-  // Channel name + handle.
+  // Per Dan's 2026-05-10 spec: author_handle holds the display NAME
+  // ("Rotten Tomatoes Trailers"), not the URL-safe @-handle. URL
+  // construction uses canonicalBaseUrl (e.g. /@RottenTomatoesTrailers)
+  // when present.
   const longByline = r.longBylineText;
   const channelName = firstRunText(longByline);
-  const channelHandle = handleFromBrowseEndpoint(longByline);
+  const channelUrlPath = canonicalBaseUrlFromRuns(longByline);
+  const author_url = channelUrlPath
+    ? `https://www.youtube.com${channelUrlPath}`
+    : null;
 
   // viewCountText.simpleText is "133,744 views"; accessibility.label
   // sometimes carries fuller "133,744 views" too. Either parses fine.
@@ -526,12 +562,16 @@ function parseYouTubeVideoRenderer(
     posted_at: 0, // YouTube search returns relative time only
     posted_relative,
     view_count: viewCount ?? 0,
-    like_count: null,
-    comment_count: null,
-    share_count: null,
-    save_count: null,
-    author_handle: channelHandle ?? "",
+    // Engagement counts are not in the hashtag-search response. Set
+    // 0 (per Dan's spec) so the UI renders "0" rather than "—" — a
+    // real refresh path via YT Data API v3 will overwrite later.
+    like_count: 0,
+    comment_count: 0,
+    share_count: 0,
+    save_count: 0,
+    author_handle: channelName,
     author_display_name: channelName,
+    author_url,
     author_avatar_url: null,
     thumbnail_url: thumb,
     hashtags: [],
@@ -567,17 +607,17 @@ function parseYouTubeReelRenderer(
     // null so UI shows blank.
     posted_relative: null,
     view_count: viewCount ?? 0,
-    like_count: null,
-    comment_count: null,
-    share_count: null,
-    save_count: null,
+    like_count: 0,
+    comment_count: 0,
+    share_count: 0,
+    save_count: 0,
     // Shorts in YouTube hashtag pages don't carry channel info in the
-    // search response. The downstream insertFanEditCandidate accepts
-    // creator_handle=null and inserts with creator_id=null; left blank
-    // here. Backfill is a separate concern (YT view-tracking is gapped
-    // per memory).
-    author_handle: "",
+    // search response. Per Dan's spec: author_handle = null. Downstream
+    // insertFanEditCandidate accepts null and inserts with
+    // creator_id=null.
+    author_handle: null,
     author_display_name: null,
+    author_url: null,
     author_avatar_url: null,
     thumbnail_url: thumb,
     hashtags: [],
@@ -658,9 +698,11 @@ function firstRunText(v: unknown): string | null {
   return null;
 }
 
-// runs[0].navigationEndpoint.browseEndpoint.canonicalBaseUrl is "/@handle".
-// Strip leading "/@" → handle. Returns null on shape mismatch.
-function handleFromBrowseEndpoint(v: unknown): string | null {
+// Returns the raw canonicalBaseUrl path (e.g. "/@RottenTomatoesTrailers"
+// or "/channel/UC...") from
+// runs[0].navigationEndpoint.browseEndpoint.canonicalBaseUrl. Caller
+// concatenates with "https://www.youtube.com" for the final URL.
+function canonicalBaseUrlFromRuns(v: unknown): string | null {
   if (!v || typeof v !== "object") return null;
   const runs = (v as Record<string, unknown>).runs;
   if (!Array.isArray(runs) || runs.length === 0) return null;
@@ -670,13 +712,61 @@ function handleFromBrowseEndpoint(v: unknown): string | null {
   if (!navEnd || typeof navEnd !== "object") return null;
   const browse = (navEnd as Record<string, unknown>).browseEndpoint;
   if (!browse || typeof browse !== "object") return null;
-  const canonical = stringValue(
-    (browse as Record<string, unknown>).canonicalBaseUrl,
-  );
-  if (!canonical) return null;
-  const m = canonical.match(/^\/@([^/]+)/);
-  return m ? m[1] : null;
+  return stringValue((browse as Record<string, unknown>).canonicalBaseUrl);
 }
+
+// Reference fixture for parseYouTubeItem (regular video flavor).
+// Verified against Dan's captured /admin payload 2026-05-10 for
+// hashtag "erupcja", videos[0]:
+//
+// Input shape:
+//   {
+//     richItemRenderer: {
+//       content: {
+//         videoRenderer: {
+//           videoId: "OiHk3tFSK84",
+//           title: { runs: [{ text: "Erupcja Trailer #1 (2026)" }] },
+//           longBylineText: {
+//             runs: [{
+//               text: "Rotten Tomatoes Trailers",
+//               navigationEndpoint: {
+//                 browseEndpoint: {
+//                   browseId: "UCi8e0iOVk1fEOogdfu4YgfA",
+//                   canonicalBaseUrl: "/@RottenTomatoesTrailers"
+//                 }
+//               }
+//             }]
+//           },
+//           publishedTimeText: { simpleText: "2 months ago" },
+//           viewCountText: { simpleText: "41,980 views" },
+//           thumbnail: { thumbnails: [
+//             { url: "...sqp=mq...", width: 320, height: 180 },
+//             { url: "...hqdefault.jpg?...", width: 480, height: 270 }
+//           ] },
+//           lengthText: { simpleText: "2:06" }
+//         }
+//       }
+//     }
+//   }
+//
+// Expected Candidate output:
+//   {
+//     platform: "youtube",
+//     post_id: "OiHk3tFSK84",
+//     post_url: "https://www.youtube.com/watch?v=OiHk3tFSK84",
+//     caption: "Erupcja Trailer #1 (2026)",
+//     posted_at: 0,
+//     posted_relative: "2 months ago",
+//     view_count: 41980,
+//     like_count: 0, comment_count: 0, share_count: 0, save_count: 0,
+//     author_handle: "Rotten Tomatoes Trailers",
+//     author_display_name: "Rotten Tomatoes Trailers",
+//     author_url: "https://www.youtube.com/@RottenTomatoesTrailers",
+//     author_avatar_url: null,
+//     thumbnail_url: "...hqdefault.jpg?..." (largest by width),
+//     hashtags: [],
+//     is_video: true
+//   }
 
 function pickLargestThumbnail(v: unknown): string | null {
   if (!v || typeof v !== "object") return null;
