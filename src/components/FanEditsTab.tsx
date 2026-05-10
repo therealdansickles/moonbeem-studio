@@ -46,12 +46,20 @@ export default function FanEditsTab({
     return g;
   }, [fanEdits]);
 
-  // Modal arrow-nav uses the full sorted list, indexed by id.
+  // Modal arrow-nav should match the visible bucketed order, not
+  // the flat view-count-DESC source. A user on the TikTok section
+  // arrow-naving forward expects the next TikTok row, not whichever
+  // fan_edit has the next-highest view count globally (which could
+  // be from a different platform section that renders below).
+  const displayOrder = useMemo(
+    () => platformOrder.flatMap((p) => grouped[p]),
+    [grouped],
+  );
   const indexById = useMemo(() => {
     const m = new Map<string, number>();
-    fanEdits.forEach((fe, i) => m.set(fe.id, i));
+    displayOrder.forEach((fe, i) => m.set(fe.id, i));
     return m;
-  }, [fanEdits]);
+  }, [displayOrder]);
 
   // First-N thumbnails across DOM order (platform sections in
   // platformOrder) get loading="eager" so the above-the-fold tiles
@@ -109,7 +117,7 @@ export default function FanEditsTab({
                           null,
                       });
                       open({
-                        fanEdits,
+                        fanEdits: displayOrder,
                         index: indexById.get(fe.id) ?? -1,
                         titleSlug,
                         titleName,
