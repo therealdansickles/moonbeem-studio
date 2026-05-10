@@ -70,11 +70,19 @@ async function loadHeroMetrics(
     };
   }
 
+  // deleted_at filter required — service-role bypasses the public
+  // RLS policy that filters soft-deleted rows for anon/authenticated
+  // callers. Without this, soft-deleted duplicate fan_edits inflate
+  // total_views, unique_creators, and (transitively) modal_opens
+  // since fanEditIds derived here feed fan_edit_events lookups.
+  // Same fix applied to loadTopPerformers, loadTopCreators,
+  // loadAllEdits below.
   const { data: fanEdits } = await supabase
     .from("fan_edits")
     .select("id, view_count, creator_id")
     .in("title_id", titleIds)
-    .eq("view_tracking_status", "active");
+    .eq("view_tracking_status", "active")
+    .is("deleted_at", null);
 
   const fanEditRows = fanEdits ?? [];
   const totalViews = fanEditRows.reduce(
@@ -177,6 +185,7 @@ async function loadTopPerformers(
     .select("id, platform, view_count, thumbnail_url, creator_id")
     .in("title_id", titleIds)
     .eq("view_tracking_status", "active")
+    .is("deleted_at", null)
     .order("view_count", { ascending: false })
     .limit(limit);
   const fanEdits = rows ?? [];
@@ -231,6 +240,7 @@ async function loadTopCreators(
     .select("creator_id, view_count")
     .in("title_id", titleIds)
     .eq("view_tracking_status", "active")
+    .is("deleted_at", null)
     .not("creator_id", "is", null);
 
   const aggs = new Map<string, { views: number; edits: number }>();
@@ -498,6 +508,7 @@ async function loadAllEdits(
     .select("id, platform, view_count, thumbnail_url, creator_id")
     .in("title_id", titleIds)
     .eq("view_tracking_status", "active")
+    .is("deleted_at", null)
     .order("view_count", { ascending: false });
 
   const fanEdits = rows ?? [];

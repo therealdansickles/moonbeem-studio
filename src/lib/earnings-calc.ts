@@ -46,11 +46,19 @@ export async function calculateEarningsForRate(
   rate: Rate,
   today: string,
 ): Promise<RateCalcResult> {
+  // deleted_at IS NULL is required: pre-existing duplicate rows
+  // exist on Erupcja and were soft-deleted in 20260509000006. Without
+  // this filter, earnings calc credits both rows of each duplicate
+  // pair (which is exactly the over-credit cleaned up by
+  // 20260509000007). Defense-in-depth: the (title_id, post_id)
+  // unique index prevents new duplicates; this filter prevents
+  // earnings on whatever soft-deletes appear in the future.
   const { data: edits, error: editsErr } = await supabase
     .from("fan_edits")
     .select("id, creator_id, view_count")
     .eq("title_id", rate.title_id)
     .eq("view_tracking_status", "active")
+    .is("deleted_at", null)
     .not("creator_id", "is", null);
   if (editsErr) {
     return { rows_upserted: 0, total_earnings_cents: 0, error: editsErr.message };
