@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
   const insert = {
     title_id: body.title_id,
     file_url: buildPublicUrl(body.key),
-    alt_text: body.alt_text ?? null,
+    alt_text: body.alt_text?.trim() || null,
     content_type: body.content_type ?? null,
     file_size_bytes: body.file_size_bytes ?? null,
     width: body.width ?? null,

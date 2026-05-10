@@ -240,7 +240,7 @@ function candidateFromSearchPayload(
     platform: platformRaw as FanEditCandidate["platform"],
     embed_url: post_url,
     creator_handle: handle,
-    caption: typeof p.caption === "string" && p.caption ? p.caption : null,
+    caption: typeof p.caption === "string" ? (p.caption.trim() || null) : null,
     posted_at: unixSecondsToIso(p.posted_at),
     thumbnail_url:
       typeof p.thumbnail_url === "string" ? p.thumbnail_url : null,

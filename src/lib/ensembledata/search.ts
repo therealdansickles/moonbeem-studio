@@ -316,7 +316,7 @@ function parseCandidate(item: unknown): Candidate | null {
     platform: "tiktok",
     post_id: aweme_id,
     post_url: `https://www.tiktok.com/@${unique_id}/video/${aweme_id}`,
-    caption: desc,
+    caption: desc.trim(),
     posted_at: create_time,
     posted_relative: null,
     view_count: numberValue(stats.play_count) ?? 0,
@@ -526,7 +526,7 @@ function parseYouTubeVideoRenderer(
   if (!videoId) return null;
 
   const titleRunsText = firstRunText(r.title);
-  const caption = titleRunsText ?? "";
+  const caption = (titleRunsText ?? "").trim();
 
   // Per Dan's 2026-05-10 spec: author_handle holds the display NAME
   // ("Rotten Tomatoes Trailers"), not the URL-safe @-handle. URL
@@ -586,9 +586,9 @@ function parseYouTubeReelRenderer(
   if (!videoId) return null;
 
   const headline = r.headline;
-  const caption = (headline && typeof headline === "object"
+  const caption = ((headline && typeof headline === "object"
     ? stringValue((headline as Record<string, unknown>).simpleText)
-    : null) ?? "";
+    : null) ?? "").trim();
 
   const viewCount = parseViewCountText(r.viewCountText);
   const thumb = pickLargestThumbnail(r.thumbnail);
