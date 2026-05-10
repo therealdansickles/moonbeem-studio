@@ -80,7 +80,7 @@ export default function FanEditsTab({
     <>
       <div className="flex flex-col gap-12">
         <p className="text-body-sm text-moonbeem-ink-muted">
-          Authorized fan edits across TikTok, Instagram, and X.
+          Authorized fan edits across TikTok, Instagram, X, and YouTube.
         </p>
 
         {platformOrder.map((platform) => {
