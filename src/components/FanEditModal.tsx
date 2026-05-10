@@ -4,10 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { InstagramEmbed, TikTokEmbed, XEmbed } from "react-social-media-embed";
-import type { FanEdit } from "@/lib/queries/titles";
+import type { FanEditForModal } from "./FanEditModalProvider";
 import { trackModalEvent } from "@/lib/analytics/modal-event";
 import { vibrate } from "@/lib/haptics";
 import PlatformIcon from "./PlatformIcon";
+
+// Modal type alias kept local for back-compat with the existing
+// `FanEdit` (titles.ts) and `FanEditWithTitle` callers — both satisfy
+// FanEditForModal structurally. New callers (AllEditsTable rows,
+// TopPerformer entries) just need to expose the minimal shape.
+type FanEdit = FanEditForModal;
 
 type Props = {
   // Full list, already sorted view_count DESC. Arrow-nav cycles through

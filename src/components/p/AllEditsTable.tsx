@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import PlatformIcon from "@/components/PlatformIcon";
+import { useFanEditModal } from "@/components/FanEditModalProvider";
 import { formatMetric } from "@/lib/format";
 
 type Row = {
@@ -11,6 +12,9 @@ type Row = {
   platform: "tiktok" | "instagram" | "twitter" | "youtube";
   thumbnail_url: string | null;
   creator_handle: string | null;
+  // Modal-compat fields from the /p/[slug] loader.
+  embed_url: string;
+  creator_handle_displayed: string | null;
   view_count: number;
   growth_24h: number | null;
   modal_opens: number;
@@ -19,6 +23,7 @@ type Row = {
 type Props = {
   rows: Row[];
   titleSlug: string;
+  titleName: string;
 };
 
 type SortKey = "view_count" | "growth_24h" | "creator_handle" | "platform" | "modal_opens";
@@ -52,7 +57,8 @@ function compareNullable<T>(a: T | null, b: T | null, dir: SortDir): number {
   return dir === "asc" ? sa.localeCompare(sb) : sb.localeCompare(sa);
 }
 
-export default function AllEditsTable({ rows, titleSlug }: Props) {
+export default function AllEditsTable({ rows, titleSlug, titleName }: Props) {
+  const { open } = useFanEditModal();
   const [sortKey, setSortKey] = useState<SortKey>("view_count");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -75,6 +81,24 @@ export default function AllEditsTable({ rows, titleSlug }: Props) {
     copy.sort((a, b) => compareNullable(a[sortKey], b[sortKey], sortDir));
     return copy;
   }, [rows, sortKey, sortDir]);
+
+  // Modal-compat list mirrors the user-visible sort so arrow-nav in
+  // the modal follows the same ordering as the table.
+  const modalList = useMemo(
+    () =>
+      sorted.map((r) => ({
+        id: r.id,
+        platform: r.platform,
+        embed_url: r.embed_url,
+        creator_handle_displayed: r.creator_handle_displayed,
+        creator_moonbeem_handle: r.creator_handle,
+      })),
+    [sorted],
+  );
+
+  function openAt(i: number) {
+    open({ fanEdits: modalList, index: i, titleSlug, titleName });
+  }
 
   return (
     <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
@@ -122,9 +146,13 @@ export default function AllEditsTable({ rows, titleSlug }: Props) {
                   {i + 1}
                 </td>
                 <td className="px-2 py-3 align-middle">
-                  <Link
-                    href={`/t/${titleSlug}#fan-edits`}
-                    className="relative block h-12 w-12 overflow-hidden rounded-md bg-moonbeem-navy/40"
+                  <button
+                    type="button"
+                    onClick={() => openAt(i)}
+                    aria-label={`Open fan edit by @${
+                      r.creator_handle ?? "anon"
+                    }`}
+                    className="relative block h-12 w-12 overflow-hidden rounded-md bg-moonbeem-navy/40 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
                   >
                     {r.thumbnail_url
                       ? (
@@ -138,7 +166,7 @@ export default function AllEditsTable({ rows, titleSlug }: Props) {
                         />
                       )
                       : null}
-                  </Link>
+                  </button>
                 </td>
                 <td className="px-4 py-3 align-middle">
                   {r.creator_handle

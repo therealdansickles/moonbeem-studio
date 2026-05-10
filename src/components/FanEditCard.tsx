@@ -1,9 +1,10 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { FanEditWithTitle } from "@/lib/queries/titles";
+import { useFanEditModal } from "./FanEditModalProvider";
+import { trackFanEditClick } from "@/lib/analytics/track";
 import PlatformIcon from "./PlatformIcon";
 
 type Props = {
@@ -12,6 +13,7 @@ type Props = {
 
 export default function FanEditCard({ fanEdit }: Props) {
   const router = useRouter();
+  const { open } = useFanEditModal();
   // Prefer the canonical moonbeem_handle for both display and the
   // /c/[handle] link target. Falls back to the platform-side handle
   // for the small set of legacy null-creator rows.
@@ -19,10 +21,33 @@ export default function FanEditCard({ fanEdit }: Props) {
   const displayHandle =
     moonbeemHandle ?? fanEdit.creator_handle_displayed ?? null;
 
+  // Recent Remixes carousel is cross-title — opening with a
+  // single-item list disables arrow-nav inside the modal (arrow-nav
+  // across unrelated titles would be confusing). The byline link in
+  // the modal header still goes to the correct title page.
+  function openModal() {
+    trackFanEditClick({
+      title_id: fanEdit.title_id,
+      fan_edit_id: fanEdit.id,
+      platform: fanEdit.platform,
+      creator_handle:
+        fanEdit.creator_moonbeem_handle ??
+        fanEdit.creator_handle_displayed ??
+        null,
+    });
+    open({
+      fanEdits: [fanEdit],
+      index: 0,
+      titleSlug: fanEdit.title_slug,
+      titleName: fanEdit.title_name,
+    });
+  }
+
   return (
-    <Link
-      href={`/t/${fanEdit.title_slug}`}
-      className="group relative block aspect-[3/4] w-full overflow-hidden rounded-xl bg-moonbeem-navy/40 transition-[transform,box-shadow] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] hover:scale-[1.03] hover:shadow-[0_20px_40px_rgba(245,197,225,0.3)] focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
+    <button
+      type="button"
+      onClick={openModal}
+      className="group relative block aspect-[3/4] w-full cursor-pointer overflow-hidden rounded-xl bg-moonbeem-navy/40 text-left transition-[transform,box-shadow] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] hover:scale-[1.03] hover:shadow-[0_20px_40px_rgba(245,197,225,0.3)] focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
     >
       <Image
         src={fanEdit.thumbnail_url ?? fanEdit.title_poster_url}
@@ -49,22 +74,32 @@ export default function FanEditCard({ fanEdit }: Props) {
         <p className="mt-0.5 text-caption text-moonbeem-ink-subtle">
           by{" "}
           {moonbeemHandle ? (
-            <button
-              type="button"
+            // Byline link still goes to /c/[handle]; click-stop
+            // prevents the outer button's modal-open from firing.
+            <span
+              role="link"
+              tabIndex={0}
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 router.push(`/c/${moonbeemHandle}`);
               }}
-              className="pointer-events-auto hover:text-moonbeem-pink hover:underline"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  router.push(`/c/${moonbeemHandle}`);
+                }
+              }}
+              className="pointer-events-auto cursor-pointer hover:text-moonbeem-pink hover:underline"
             >
               @{displayHandle}
-            </button>
+            </span>
           ) : (
             <span>@{displayHandle ?? "anon"}</span>
           )}
         </p>
       </div>
-    </Link>
+    </button>
   );
 }

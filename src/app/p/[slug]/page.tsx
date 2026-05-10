@@ -10,26 +10,18 @@
 // view_tracking_snapshots) doesn't have public SELECT policies, so
 // service role is required.
 
-import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getCurrentProfile, getUser } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import PlatformIcon from "@/components/PlatformIcon";
 import GrowthChart from "@/components/p/GrowthChart";
 import AllEditsTable from "@/components/p/AllEditsTable";
 import PartnerRatesCard from "@/components/p/PartnerRatesCard";
+import TopPerformersCardClient from "@/components/p/TopPerformersCardClient";
 import { formatMetric } from "@/lib/format";
 
 type SocialPlatform = "tiktok" | "instagram" | "twitter" | "youtube";
-
-const platformLabel: Record<SocialPlatform, string> = {
-  tiktok: "TikTok",
-  instagram: "Instagram",
-  twitter: "X",
-  youtube: "YouTube",
-};
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -169,7 +161,16 @@ type TopPerformer = {
   view_count: number;
   thumbnail_url: string | null;
   creator_id: string | null;
+  // creator_handle = canonical moonbeem_handle (joined via
+  // public_creators). Mapped to creator_moonbeem_handle when the
+  // row is fed into the fan-edit modal.
   creator_handle: string | null;
+  // Extra modal-compat fields. embed_url is the platform post URL
+  // the modal embeds; creator_handle_displayed is the per-fan_edit
+  // platform-side handle preserved verbatim from import. Both come
+  // straight off the fan_edits row.
+  embed_url: string;
+  creator_handle_displayed: string | null;
   growth_24h: number | null;
   growth_pct_24h: number | null;
 };
@@ -182,7 +183,9 @@ async function loadTopPerformers(
   if (titleIds.length === 0) return [];
   const { data: rows } = await supabase
     .from("fan_edits")
-    .select("id, platform, view_count, thumbnail_url, creator_id")
+    .select(
+      "id, platform, view_count, thumbnail_url, creator_id, embed_url, creator_handle_displayed",
+    )
     .in("title_id", titleIds)
     .eq("view_tracking_status", "active")
     .is("deleted_at", null)
@@ -216,6 +219,8 @@ async function loadTopPerformers(
       creator_handle: r.creator_id
         ? handles.get(r.creator_id as string) ?? null
         : null,
+      embed_url: r.embed_url as string,
+      creator_handle_displayed: r.creator_handle_displayed as string | null,
       growth_24h: delta,
       growth_pct_24h: pct,
     };
@@ -292,108 +297,34 @@ function InitialAvatar({ handle }: { handle: string }) {
   );
 }
 
-function GrowthBadge({
-  delta,
-  pct,
-}: {
-  delta: number | null;
-  pct: number | null;
-}) {
-  if (delta === null) {
-    return (
-      <span className="text-caption text-moonbeem-ink-subtle tabular-nums">
-        —
-      </span>
-    );
-  }
-  const positive = delta >= 0;
-  const sign = positive ? "+" : "";
-  const pctTxt = pct !== null
-    ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(pct >= 10 || pct <= -10 ? 0 : 1)}%)`
-    : "";
-  return (
-    <span
-      className={`text-caption tabular-nums ${
-        positive ? "text-emerald-300" : "text-moonbeem-magenta"
-      }`}
-    >
-      {sign}
-      {formatMetric(Math.abs(delta))}
-      {pctTxt}
-    </span>
-  );
-}
+// GrowthBadge moved to @/components/p/GrowthBadge for reuse by the
+// client-side TopPerformersCardClient.
 
 function TopPerformersCard({
   performers,
   titleSlug,
+  titleName,
 }: {
   performers: TopPerformer[];
   titleSlug: string;
+  titleName: string;
 }) {
+  // Pre-build the modal-compat list once; passing { fanEdits, index }
+  // on every row click is cheaper than rebuilding inside the handler.
+  const modalList = performers.map((p) => ({
+    id: p.id,
+    platform: p.platform,
+    embed_url: p.embed_url,
+    creator_handle_displayed: p.creator_handle_displayed,
+    creator_moonbeem_handle: p.creator_handle,
+  }));
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
-      <div className="flex items-center gap-3">
-        <span className="rounded-full bg-moonbeem-pink/15 px-2.5 py-0.5 text-caption font-medium text-moonbeem-pink">
-          Top performers
-        </span>
-        <span className="text-caption text-moonbeem-ink-subtle">
-          by view count
-        </span>
-      </div>
-      <ol className="mt-4 flex flex-col divide-y divide-white/5">
-        {performers.map((fe, i) => (
-          <li key={fe.id} className="flex items-center gap-3 py-3">
-            <span className="w-5 shrink-0 text-caption tabular-nums text-moonbeem-ink-subtle">
-              {i + 1}
-            </span>
-            <Link
-              href={`/t/${titleSlug}#fan-edits`}
-              className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-moonbeem-navy/40"
-            >
-              {fe.thumbnail_url
-                ? (
-                  <Image
-                    src={fe.thumbnail_url}
-                    alt=""
-                    fill
-                    sizes="48px"
-                    unoptimized
-                    className="object-cover"
-                  />
-                )
-                : null}
-            </Link>
-            <div className="flex min-w-0 flex-1 flex-col">
-              {fe.creator_handle
-                ? (
-                  <Link
-                    href={`/c/${fe.creator_handle}`}
-                    className="truncate text-body-sm font-medium text-moonbeem-ink hover:text-moonbeem-pink"
-                  >
-                    @{fe.creator_handle}
-                  </Link>
-                )
-                : (
-                  <span className="text-body-sm text-moonbeem-ink-subtle">
-                    @anon
-                  </span>
-                )}
-              <span className="flex items-center gap-1.5 text-caption text-moonbeem-ink-subtle">
-                <PlatformIcon platform={fe.platform} className="h-3 w-3" />
-                {platformLabel[fe.platform]}
-              </span>
-            </div>
-            <div className="flex flex-col items-end">
-              <span className="text-body-sm font-semibold tabular-nums text-moonbeem-ink">
-                {formatMetric(fe.view_count)}
-              </span>
-              <GrowthBadge delta={fe.growth_24h} pct={fe.growth_pct_24h} />
-            </div>
-          </li>
-        ))}
-      </ol>
-    </div>
+    <TopPerformersCardClient
+      performers={performers}
+      modalList={modalList}
+      titleSlug={titleSlug}
+      titleName={titleName}
+    />
   );
 }
 
@@ -493,6 +424,9 @@ type AllEditRow = {
   platform: SocialPlatform;
   thumbnail_url: string | null;
   creator_handle: string | null;
+  // Modal-compat fields, same rationale as TopPerformer.
+  embed_url: string;
+  creator_handle_displayed: string | null;
   view_count: number;
   growth_24h: number | null;
   modal_opens: number;
@@ -505,7 +439,9 @@ async function loadAllEdits(
   if (titleIds.length === 0) return [];
   const { data: rows } = await supabase
     .from("fan_edits")
-    .select("id, platform, view_count, thumbnail_url, creator_id")
+    .select(
+      "id, platform, view_count, thumbnail_url, creator_id, embed_url, creator_handle_displayed",
+    )
     .in("title_id", titleIds)
     .eq("view_tracking_status", "active")
     .is("deleted_at", null)
@@ -535,6 +471,8 @@ async function loadAllEdits(
       creator_handle: r.creator_id
         ? handles.get(r.creator_id as string) ?? null
         : null,
+      embed_url: r.embed_url as string,
+      creator_handle_displayed: r.creator_handle_displayed as string | null,
       view_count: current,
       growth_24h: delta,
       modal_opens: modalOpens.get(id) ?? 0,
@@ -715,6 +653,7 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
     ? titleRows[0].title
     : `${titleRows.length} titles`;
   const primarySlug = (titleRows[0]?.slug as string | undefined) ?? "";
+  const primaryName = (titleRows[0]?.title as string | undefined) ?? "";
 
   return (
     <div className="min-h-screen px-6 py-12 bg-[radial-gradient(ellipse_at_top,_#1a0f3a_0%,_#0a0a14_60%)]">
@@ -773,6 +712,7 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
           <TopPerformersCard
             performers={topPerformers}
             titleSlug={primarySlug}
+            titleName={primaryName}
           />
           <TopCreatorsCard creators={topCreators} />
         </div>
@@ -821,7 +761,11 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
               {allEdits.length} active · click columns to sort
             </span>
           </div>
-          <AllEditsTable rows={allEdits} titleSlug={primarySlug} />
+          <AllEditsTable
+            rows={allEdits}
+            titleSlug={primarySlug}
+            titleName={primaryName}
+          />
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { inter, jost } from "./fonts";
 import TopNav from "@/components/TopNav";
+import FanEditModalProvider from "@/components/FanEditModalProvider";
 import GoogleAnalytics from "@/components/analytics/GoogleAnalytics";
 import VercelAnalytics from "@/components/analytics/VercelAnalytics";
 import MicrosoftClarity from "@/components/analytics/MicrosoftClarity";
@@ -49,8 +50,10 @@ export default function RootLayout({
         <GoogleAnalytics />
         <VercelAnalytics />
         <MicrosoftClarity />
-        <TopNav />
-        <main className="flex-1 flex flex-col">{children}</main>
+        <FanEditModalProvider>
+          <TopNav />
+          <main className="flex-1 flex flex-col">{children}</main>
+        </FanEditModalProvider>
       </body>
     </html>
   );

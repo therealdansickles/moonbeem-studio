@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { FanEdit } from "@/lib/queries/titles";
 import FanEditThumbnail from "./FanEditThumbnail";
-import FanEditModal from "./FanEditModal";
+import { useFanEditModal } from "./FanEditModalProvider";
 import { trackFanEditClick } from "@/lib/analytics/track";
 
 type Props = {
@@ -31,7 +31,7 @@ export default function FanEditsTab({
   titleSlug,
   titleName,
 }: Props) {
-  const [openIndex, setOpenIndex] = useState(-1);
+  const { open } = useFanEditModal();
 
   // Group by platform while preserving each platform's relative
   // view-count-DESC order (the input is already sorted).
@@ -108,7 +108,12 @@ export default function FanEditsTab({
                           fe.creator_handle_displayed ??
                           null,
                       });
-                      setOpenIndex(indexById.get(fe.id) ?? -1);
+                      open({
+                        fanEdits,
+                        index: indexById.get(fe.id) ?? -1,
+                        titleSlug,
+                        titleName,
+                      });
                     }}
                   />
                 ))}
@@ -117,15 +122,6 @@ export default function FanEditsTab({
           );
         })}
       </div>
-
-      <FanEditModal
-        fanEdits={fanEdits}
-        openIndex={openIndex}
-        titleSlug={titleSlug}
-        titleName={titleName}
-        onClose={() => setOpenIndex(-1)}
-        onNavigate={setOpenIndex}
-      />
     </>
   );
 }
