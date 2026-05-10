@@ -114,14 +114,14 @@ const PLATFORMS: ReadonlyArray<PlatformOption> = [
     label: "Instagram",
     enabled: false,
     disabledReason:
-      "EnsembleData doesn't currently support hashtag/keyword search for Instagram. Roadmap item pending vendor evaluation.",
+      "Coming soon. EnsembleData doesn't currently support hashtag/keyword search for these platforms. We're evaluating alternative vendors to fill the gap.",
   },
   {
     id: "twitter",
     label: "Twitter / X",
     enabled: false,
     disabledReason:
-      "EnsembleData doesn't currently support keyword search for Twitter. Roadmap item pending vendor evaluation.",
+      "Coming soon. EnsembleData doesn't currently support hashtag/keyword search for these platforms. We're evaluating alternative vendors to fill the gap.",
   },
 ];
 
