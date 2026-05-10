@@ -364,6 +364,11 @@ export async function POST(request: NextRequest): Promise<Response> {
       creator_handle_displayed: displayedHandle,
       platform,
       embed_url: rawEmbedUrl,
+      // post_id derived from rawEmbedUrl via parseShortcodeFromUrl
+      // above. Required for the (title_id, post_id) unique index +
+      // for Discover-tab dedupe — both expect every import path to
+      // populate this column.
+      post_id: shortcode,
       caption,
       posted_at: postedAt,
       thumbnail_url: thumbnailUrl,

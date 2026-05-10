@@ -101,6 +101,10 @@ export async function insertFanEditCandidate(
     creator_handle_displayed: displayedHandle,
     platform: c.platform,
     embed_url: c.embed_url,
+    // post_id derived from URL via parseShortcodeFromUrl above.
+    // Stored to enable canonical (title_id, post_id) dedupe across
+    // import paths — embed_url alone leaks across URL variants.
+    post_id: shortcode,
     caption: c.caption ? c.caption.slice(0, CAPTION_MAX) : null,
     posted_at: c.posted_at,
     thumbnail_url: c.thumbnail_url,

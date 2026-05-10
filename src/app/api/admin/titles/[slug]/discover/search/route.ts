@@ -111,26 +111,34 @@ export async function POST(
   // additional is_video filter needed here.
   const fetched = result.candidates;
 
-  // Dedupe against existing fan_edits for THIS title only. A TikTok
-  // attached to a different title still surfaces as available so
-  // multi-title attribution is possible.
-  const candidateUrls = fetched.map((c) => c.post_url);
-  let alreadyUrls = new Set<string>();
-  if (candidateUrls.length > 0) {
+  // Dedupe by platform-native post_id (TikTok aweme_id) scoped to
+  // THIS title only. embed_url string-equality leaks because legacy
+  // / CSV-imported rows carry query strings (?_t=, ?q=erupcja, ?s=46
+  // …) and mobile hosts that don't match the canonical desktop URLs
+  // the parser constructs. post_id is the canonical identifier and
+  // is now backfilled + uniquely indexed at the DB level (migration
+  // 20260509000006). A TikTok attached to a DIFFERENT title still
+  // surfaces as available — multi-title attribution from 2.2's
+  // dedupe-within-title decision.
+  const candidatePostIds = fetched.map((c) => c.post_id);
+  let alreadyPostIds = new Set<string>();
+  if (candidatePostIds.length > 0) {
     const { data: existing } = await supabase
       .from("fan_edits")
-      .select("embed_url")
+      .select("post_id")
       .eq("title_id", titleId)
-      .in("embed_url", candidateUrls);
-    alreadyUrls = new Set(
+      .is("deleted_at", null)
+      .not("post_id", "is", null)
+      .in("post_id", candidatePostIds);
+    alreadyPostIds = new Set(
       (existing ?? [])
-        .map((r) => r.embed_url as string | null)
-        .filter((u): u is string => !!u),
+        .map((r) => r.post_id as string | null)
+        .filter((p): p is string => !!p),
     );
   }
 
   const enriched = fetched
-    .map((c) => ({ ...c, already_in_library: alreadyUrls.has(c.post_url) }))
+    .map((c) => ({ ...c, already_in_library: alreadyPostIds.has(c.post_id) }))
     .sort((a, b) => (b.view_count ?? 0) - (a.view_count ?? 0));
 
   // Log the search regardless of error — partial pages still cost
