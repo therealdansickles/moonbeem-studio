@@ -38,7 +38,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
-  searchThreadsKeyword,
   searchTikTokKeyword,
   searchYouTubeHashtag,
   type SearchPeriod,
@@ -54,11 +53,7 @@ const VALID_PERIODS: ReadonlyArray<SearchPeriod> = [
   "all",
 ];
 
-// Threads is in smell-test mode — search side returns candidates but
-// add side intentionally rejects them (SUPPORTED_SEARCH_PLATFORMS in
-// /discover/add still excludes 'threads'). Promote to full support
-// once signal is validated.
-const SUPPORTED_PLATFORMS = ["tiktok", "youtube", "threads"] as const;
+const SUPPORTED_PLATFORMS = ["tiktok", "youtube"] as const;
 type SupportedPlatform = (typeof SUPPORTED_PLATFORMS)[number];
 
 const RAW_PAYLOAD_MAX_BYTES = 5 * 1024;
@@ -130,18 +125,10 @@ export async function POST(
       max_results: maxResults,
       period,
     });
-  } else if (platform === "youtube") {
-    // /youtube/hashtag/search doesn't accept a period filter — ignore
-    // silently. The UI also doesn't expose it for YT.
-    result = await searchYouTubeHashtag({
-      query,
-      max_results: maxResults,
-    });
   } else {
-    // threads — keyword (text) search; smell-test mode (no add support
-    // until signal is validated). /threads/keyword/search caps at ~20
-    // posts per call and runs on a daily-quota model, not cursor.
-    result = await searchThreadsKeyword({
+    // youtube — /youtube/hashtag/search doesn't accept a period
+    // filter. The UI also doesn't expose period for YT.
+    result = await searchYouTubeHashtag({
       query,
       max_results: maxResults,
     });

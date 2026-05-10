@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 
-type CandidatePlatform = "tiktok" | "youtube" | "threads";
+type CandidatePlatform = "tiktok" | "youtube";
 
 type Candidate = {
   platform: CandidatePlatform;
@@ -75,13 +75,9 @@ type Props = {
 };
 
 type PlatformOption = {
-  id: "tiktok" | "youtube" | "threads" | "instagram" | "twitter";
+  id: "tiktok" | "youtube" | "instagram" | "twitter";
   label: string;
   enabled: boolean;
-  // True when search is enabled but Add is intentionally blocked
-  // pending validation. Surfaces a banner + disables row checkboxes
-  // and bulk-Add for these platforms.
-  smellTest?: boolean;
   // Hint shown for disabled platforms — tooltip on hover.
   disabledReason?: string;
   // Hint shown above the query input when this platform is selected
@@ -103,13 +99,6 @@ const PLATFORMS: ReadonlyArray<PlatformOption> = [
     queryHint: "hashtag (with or without leading #)",
   },
   {
-    id: "threads",
-    label: "Threads",
-    enabled: true,
-    smellTest: true,
-    queryHint: "keyword (smell-test mode — Add disabled)",
-  },
-  {
     id: "instagram",
     label: "Instagram",
     enabled: false,
@@ -124,8 +113,6 @@ const PLATFORMS: ReadonlyArray<PlatformOption> = [
       "Coming soon. EnsembleData doesn't currently support hashtag/keyword search for these platforms. We're evaluating alternative vendors to fill the gap.",
   },
 ];
-
-const SMELL_TEST_PLATFORMS = new Set<CandidatePlatform>(["threads"]);
 
 const MAX_RESULTS_OPTIONS = [20, 30, 50] as const;
 
@@ -211,8 +198,7 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
       (c) =>
         !c.already_in_library &&
         rowState[c.post_id] !== "added" &&
-        rowState[c.post_id] !== "adding" &&
-        !SMELL_TEST_PLATFORMS.has(c.platform),
+        rowState[c.post_id] !== "adding",
     );
   }
 
@@ -405,9 +391,7 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
               value={platform}
               onChange={(e) => {
                 const v = e.target.value;
-                if (v === "tiktok" || v === "youtube" || v === "threads") {
-                  setPlatform(v);
-                }
+                if (v === "tiktok" || v === "youtube") setPlatform(v);
               }}
               className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none"
             >
@@ -491,16 +475,6 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
             {searchError}
           </p>
         )}
-        {SMELL_TEST_PLATFORMS.has(platform) && (
-          <div className="mt-4 rounded-md border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2 text-caption text-amber-200">
-            <strong className="font-semibold">Smell-test mode.</strong>{" "}
-            Search runs but Add is intentionally disabled. The goal is
-            to evaluate whether {platformLabel(platform)} has any film
-            fan_edit signal worth the schema/RPC widening work.
-            If signal looks promising after a few searches, we promote
-            this platform to full Add support.
-          </div>
-        )}
       </section>
 
       {/* RESULTS */}
@@ -556,12 +530,10 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
           <ul className="flex flex-col divide-y divide-white/5">
             {sortedCandidates.map((c) => {
               const state = rowState[c.post_id] ?? "new";
-              const isSmellTest = SMELL_TEST_PLATFORMS.has(c.platform);
               const disabledRow =
                 c.already_in_library ||
                 state === "added" ||
-                state === "adding" ||
-                isSmellTest;
+                state === "adding";
               return (
                 <li
                   key={c.post_id}
@@ -616,16 +588,7 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
                           {c.author_display_name}
                         </span>
                       )}
-                      {isSmellTest
-                        ? (
-                          <span
-                            className="rounded-full bg-amber-500/15 px-2 py-0.5 text-caption font-medium text-amber-300"
-                            title="Search-only smell test for Threads. Add path is intentionally disabled until we validate film fan_edit signal."
-                          >
-                            Smell-test only
-                          </span>
-                        )
-                        : <RowStatusPill state={state} />}
+                      <RowStatusPill state={state} />
                       <a
                         href={c.post_url}
                         target="_blank"
@@ -754,14 +717,12 @@ function formatStat(n: number | null): string {
 function platformLabel(p: CandidatePlatform): string {
   if (p === "tiktok") return "TikTok";
   if (p === "youtube") return "YouTube";
-  if (p === "threads") return "Threads";
   return p;
 }
 
 function authorUrl(p: CandidatePlatform, handle: string): string {
   if (p === "tiktok") return `https://www.tiktok.com/@${handle}`;
   if (p === "youtube") return `https://www.youtube.com/@${handle}`;
-  if (p === "threads") return `https://www.threads.net/@${handle}`;
   return "#";
 }
 
