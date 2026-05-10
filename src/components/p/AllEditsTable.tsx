@@ -97,7 +97,16 @@ export default function AllEditsTable({ rows, titleSlug, titleName }: Props) {
   );
 
   function openAt(i: number) {
-    open({ fanEdits: modalList, index: i, titleSlug, titleName });
+    // track:false suppresses fan_edit_events writes from this admin
+    // surface so internal browsing doesn't pollute the partner-
+    // visible "Moonbeem plays" count (see Finding 3 audit, 2026-05-10).
+    open({
+      fanEdits: modalList,
+      index: i,
+      titleSlug,
+      titleName,
+      track: false,
+    });
   }
 
   return (

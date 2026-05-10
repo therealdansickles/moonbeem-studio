@@ -47,6 +47,12 @@ type OpenArgs = {
   // modal byline always wants a title-page jump-link.
   titleSlug: string;
   titleName: string;
+  // When false, the modal suppresses ALL fan_edit_events writes
+  // (modal_open, modal_close, view_on_platform_click). Set on admin
+  // surfaces (/p/[slug] partner dashboard) so internal browsing
+  // doesn't pollute the partner-visible "Moonbeem plays" count or
+  // the outbound-CTA metric. Defaults to true on public surfaces.
+  track?: boolean;
 };
 
 type ContextValue = {
@@ -71,6 +77,7 @@ type State = {
   openIndex: number;
   titleSlug: string;
   titleName: string;
+  track: boolean;
 };
 
 const CLOSED: State = {
@@ -78,6 +85,7 @@ const CLOSED: State = {
   openIndex: -1,
   titleSlug: "",
   titleName: "",
+  track: true,
 };
 
 export default function FanEditModalProvider({
@@ -100,6 +108,7 @@ export default function FanEditModalProvider({
       openIndex: args.index,
       titleSlug: args.titleSlug,
       titleName: args.titleName,
+      track: args.track !== false,
     });
   }, []);
 
@@ -124,6 +133,7 @@ export default function FanEditModalProvider({
         openIndex={state.openIndex}
         titleSlug={state.titleSlug}
         titleName={state.titleName}
+        track={state.track}
         onClose={close}
         onNavigate={onNavigate}
       />

@@ -55,7 +55,16 @@ export default function TopPerformersCardClient({
   const { open } = useFanEditModal();
 
   function openAt(i: number) {
-    open({ fanEdits: modalList, index: i, titleSlug, titleName });
+    // track:false — same rationale as AllEditsTable. /p/[slug] is
+    // admin; internal opens shouldn't increment partner-visible
+    // counts or the outbound-CTA metric.
+    open({
+      fanEdits: modalList,
+      index: i,
+      titleSlug,
+      titleName,
+      track: false,
+    });
   }
 
   // titleSlug not used today (rows open the modal in place rather

@@ -23,6 +23,13 @@ type Props = {
   openIndex: number;
   titleSlug: string;
   titleName: string;
+  // When false, suppress all fan_edit_events writes (modal_open,
+  // modal_close, view_on_platform_click). Used by /p/[slug] admin
+  // surfaces so internal browsing doesn't pollute partner-visible
+  // "Moonbeem plays" or outbound-CTA metrics. Public surfaces
+  // (/t/[slug], homepage carousel) leave track=true (default in the
+  // provider) so user-facing measurement keeps working.
+  track: boolean;
   onClose: () => void;
   onNavigate: (newIndex: number) => void;
 };
@@ -47,6 +54,7 @@ export default function FanEditModal({
   openIndex,
   titleSlug,
   titleName,
+  track,
   onClose,
   onNavigate,
 }: Props) {
@@ -94,30 +102,34 @@ export default function FanEditModal({
     setSessionId(sid);
     const fanEditId = fanEdit.id;
     const openedAt = Date.now();
-    trackModalEvent({
-      fan_edit_id: fanEditId,
-      event_type: "modal_open",
-      session_id: sid,
-      metadata: typeof window !== "undefined"
-        ? {
-          platform: fanEdit.platform,
-          viewport: { w: window.innerWidth, h: window.innerHeight },
-          referrer: document.referrer || null,
-        }
-        : undefined,
-    });
+    if (track) {
+      trackModalEvent({
+        fan_edit_id: fanEditId,
+        event_type: "modal_open",
+        session_id: sid,
+        metadata: typeof window !== "undefined"
+          ? {
+            platform: fanEdit.platform,
+            viewport: { w: window.innerWidth, h: window.innerHeight },
+            referrer: document.referrer || null,
+          }
+          : undefined,
+      });
+    }
 
     return () => {
       document.body.style.overflow = prevOverflow;
       document.removeEventListener("keydown", onKey);
-      trackModalEvent({
-        fan_edit_id: fanEditId,
-        event_type: "modal_close",
-        session_id: sid,
-        duration_ms: Date.now() - openedAt,
-      });
+      if (track) {
+        trackModalEvent({
+          fan_edit_id: fanEditId,
+          event_type: "modal_close",
+          session_id: sid,
+          duration_ms: Date.now() - openedAt,
+        });
+      }
     };
-  }, [isOpen, openIndex, fanEdits.length, onClose, onNavigate, fanEdit]);
+  }, [isOpen, openIndex, fanEdits.length, onClose, onNavigate, fanEdit, track]);
 
   // Both axes draggable. Intent is decided by which offset dominates
   // at release time. Horizontal-dominant → nav (left=next, right=prev,
@@ -155,6 +167,7 @@ export default function FanEditModal({
           titleSlug={titleSlug}
           titleName={titleName}
           sessionId={sessionId}
+          track={track}
           onClose={onClose}
           onPrev={() => onNavigate(openIndex - 1)}
           onNext={() => onNavigate(openIndex + 1)}
@@ -173,6 +186,7 @@ type ContentProps = {
   titleSlug: string;
   titleName: string;
   sessionId: string | null;
+  track: boolean;
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
@@ -190,6 +204,7 @@ function ModalContent({
   titleSlug,
   titleName,
   sessionId,
+  track,
   onClose,
   onPrev,
   onNext,
@@ -311,7 +326,7 @@ function ModalContent({
             rel="noopener noreferrer"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => {
-              if (sessionId) {
+              if (track && sessionId) {
                 trackModalEvent({
                   fan_edit_id: fanEdit.id,
                   event_type: "view_on_platform_click",
