@@ -1,12 +1,18 @@
 // POST /api/admin/titles/[slug]/discover/search
 //
-// Server-side proxy to EnsembleData TikTok keyword search for the
-// Discover tab on /admin/titles/[slug]. Body:
+// Server-side proxy to EnsembleData search for the Discover tab on
+// /admin/titles/[slug]. Body:
 //   {
-//     platform: 'tiktok'              // v1 hard-restricts to tiktok
-//     query: string                    // keyword(s)
-//     max_results?: number = 30        // clamped 1..100
+//     platform: 'tiktok' | 'youtube',  // dispatched per-platform
+//     query: string,                   // keyword(s) for tiktok,
+//                                      // hashtag (with or without #)
+//                                      // for youtube
+//     max_results?: number = 30,       // clamped 1..100
 //     period?: '1d'|'7d'|'30d'|'90d'|'180d'|'all' = '180d'
+//                                      // tiktok-only; ignored for
+//                                      // platforms whose endpoint
+//                                      // doesn't accept a period
+//                                      // filter (youtube hashtag).
 //   }
 //
 // Returns:
@@ -33,7 +39,9 @@ import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   searchTikTokKeyword,
+  searchYouTubeHashtag,
   type SearchPeriod,
+  type SearchResult,
 } from "@/lib/ensembledata/search";
 
 const VALID_PERIODS: ReadonlyArray<SearchPeriod> = [
@@ -44,6 +52,9 @@ const VALID_PERIODS: ReadonlyArray<SearchPeriod> = [
   "180d",
   "all",
 ];
+
+const SUPPORTED_PLATFORMS = ["tiktok", "youtube"] as const;
+type SupportedPlatform = (typeof SUPPORTED_PLATFORMS)[number];
 
 const RAW_PAYLOAD_MAX_BYTES = 5 * 1024;
 
@@ -66,13 +77,19 @@ export async function POST(
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const platform = typeof body.platform === "string" ? body.platform : "";
-  if (platform !== "tiktok") {
+  const platformRaw = typeof body.platform === "string" ? body.platform : "";
+  if (
+    !(SUPPORTED_PLATFORMS as ReadonlyArray<string>).includes(platformRaw)
+  ) {
     return NextResponse.json(
-      { error: "platform_not_supported", supported: ["tiktok"] },
+      {
+        error: "platform_not_supported",
+        supported: SUPPORTED_PLATFORMS,
+      },
       { status: 400 },
     );
   }
+  const platform = platformRaw as SupportedPlatform;
   const query = typeof body.query === "string" ? body.query.trim() : "";
   if (!query) {
     return NextResponse.json({ error: "missing_query" }, { status: 400 });
@@ -101,25 +118,36 @@ export async function POST(
   }
   const titleId = title.id as string;
 
-  const result = await searchTikTokKeyword({
-    query,
-    max_results: maxResults,
-    period,
-  });
+  let result: SearchResult;
+  if (platform === "tiktok") {
+    result = await searchTikTokKeyword({
+      query,
+      max_results: maxResults,
+      period,
+    });
+  } else {
+    // youtube — period is not supported by /youtube/hashtag/search;
+    // ignore silently. The UI also doesn't expose it for YT.
+    result = await searchYouTubeHashtag({
+      query,
+      max_results: maxResults,
+    });
+  }
 
   // parsePage already drops non-video (type !== 1) entries, so no
   // additional is_video filter needed here.
   const fetched = result.candidates;
 
-  // Dedupe by platform-native post_id (TikTok aweme_id) scoped to
-  // THIS title only. embed_url string-equality leaks because legacy
-  // / CSV-imported rows carry query strings (?_t=, ?q=erupcja, ?s=46
-  // …) and mobile hosts that don't match the canonical desktop URLs
-  // the parser constructs. post_id is the canonical identifier and
-  // is now backfilled + uniquely indexed at the DB level (migration
-  // 20260509000006). A TikTok attached to a DIFFERENT title still
-  // surfaces as available — multi-title attribution from 2.2's
-  // dedupe-within-title decision.
+  // Dedupe by platform-native post_id scoped to THIS title + platform.
+  // embed_url string-equality leaks because legacy / CSV-imported rows
+  // carry query strings (?_t=, ?q=erupcja, ?s=46 …) and mobile hosts
+  // that don't match the canonical desktop URLs the parser constructs.
+  // post_id is the canonical identifier and is backfilled + uniquely
+  // indexed at the DB level (migration 20260509000006). A post
+  // attached to a DIFFERENT title still surfaces as available —
+  // multi-title attribution from 2.2's dedupe-within-title decision.
+  // Platform filter prevents collision in the (extremely unlikely)
+  // case that a TikTok aweme_id numerically matches a YouTube video_id.
   const candidatePostIds = fetched.map((c) => c.post_id);
   let alreadyPostIds = new Set<string>();
   if (candidatePostIds.length > 0) {
@@ -127,6 +155,7 @@ export async function POST(
       .from("fan_edits")
       .select("post_id")
       .eq("title_id", titleId)
+      .eq("platform", platform)
       .is("deleted_at", null)
       .not("post_id", "is", null)
       .in("post_id", candidatePostIds);

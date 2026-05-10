@@ -4,16 +4,20 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 
+type CandidatePlatform = "tiktok" | "youtube";
+
 type Candidate = {
+  platform: CandidatePlatform;
   post_id: string;
   post_url: string;
   caption: string;
-  posted_at: number; // Unix seconds (TikTok create_time); 0 = unknown
+  posted_at: number; // Unix seconds; 0 = unknown (YouTube only)
   view_count: number;
-  like_count: number;
-  comment_count: number;
-  share_count: number;
-  save_count: number;
+  // Nullable: YouTube hashtag search doesn't return engagement counts.
+  like_count: number | null;
+  comment_count: number | null;
+  share_count: number | null;
+  save_count: number | null;
   author_handle: string;
   author_display_name: string | null;
   author_avatar_url: string | null;
@@ -57,18 +61,52 @@ type Props = {
   titleName: string;
 };
 
-const PLATFORMS = [
-  { id: "tiktok", label: "TikTok", enabled: true },
-  { id: "instagram", label: "Instagram", enabled: false },
-  { id: "twitter", label: "Twitter / X", enabled: false },
-] as const;
+type PlatformOption = {
+  id: "tiktok" | "youtube" | "instagram" | "twitter";
+  label: string;
+  enabled: boolean;
+  // Hint shown for disabled platforms — tooltip on hover.
+  disabledReason?: string;
+  // Hint shown above the query input when this platform is selected
+  // (e.g. "Type a hashtag for YouTube" vs "Type keyword(s) for TikTok").
+  queryHint?: string;
+};
+
+const PLATFORMS: ReadonlyArray<PlatformOption> = [
+  {
+    id: "tiktok",
+    label: "TikTok",
+    enabled: true,
+    queryHint: "keyword (e.g. film name)",
+  },
+  {
+    id: "youtube",
+    label: "YouTube",
+    enabled: true,
+    queryHint: "hashtag (with or without leading #)",
+  },
+  {
+    id: "instagram",
+    label: "Instagram",
+    enabled: false,
+    disabledReason:
+      "EnsembleData doesn't currently support hashtag/keyword search for Instagram. Roadmap item pending vendor evaluation.",
+  },
+  {
+    id: "twitter",
+    label: "Twitter / X",
+    enabled: false,
+    disabledReason:
+      "EnsembleData doesn't currently support keyword search for Twitter. Roadmap item pending vendor evaluation.",
+  },
+];
 
 const MAX_RESULTS_OPTIONS = [20, 30, 50] as const;
 
 export default function DiscoverTab({ titleSlug, titleName }: Props) {
   const router = useRouter();
   const [query, setQuery] = useState(titleName);
-  const [platform, setPlatform] = useState<"tiktok">("tiktok");
+  const [platform, setPlatform] = useState<CandidatePlatform>("tiktok");
   const [maxResults, setMaxResults] = useState<20 | 30 | 50>(30);
 
   const [searching, setSearching] = useState(false);
@@ -108,11 +146,16 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
           return b.posted_at - a.posted_at;
         case "engagement": {
           // Simple ratio: (likes+comments+shares) / views. Posts with
-          // no views fall to the bottom.
+          // no views fall to the bottom. YouTube has null engagement
+          // counts (search response doesn't expose them) — those rows
+          // sort below TikTok rows that have full data.
           const r = (c: Candidate): number => {
             if (c.view_count <= 0) return -1;
-            return (c.like_count + c.comment_count + c.share_count) /
-              c.view_count;
+            const l = c.like_count;
+            const cm = c.comment_count;
+            const s = c.share_count;
+            if (l === null && cm === null && s === null) return -0.5;
+            return ((l ?? 0) + (cm ?? 0) + (s ?? 0)) / c.view_count;
           };
           return r(b) - r(a);
         }
@@ -334,7 +377,8 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
             <select
               value={platform}
               onChange={(e) => {
-                if (e.target.value === "tiktok") setPlatform("tiktok");
+                const v = e.target.value;
+                if (v === "tiktok" || v === "youtube") setPlatform(v);
               }}
               className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none"
             >
@@ -343,6 +387,7 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
                   key={p.id}
                   value={p.id}
                   disabled={!p.enabled}
+                  title={p.disabledReason}
                 >
                   {p.label}
                   {p.enabled ? "" : " — coming soon"}
@@ -356,7 +401,11 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={titleName}
+              placeholder={
+                platform === "youtube"
+                  ? `${titleName} (hashtag — # optional)`
+                  : titleName
+              }
               className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none"
             />
           </label>
@@ -500,14 +549,20 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <a
-                        href={`https://www.tiktok.com/@${c.author_handle}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-body-sm font-medium text-moonbeem-ink hover:text-moonbeem-pink"
-                      >
-                        @{c.author_handle}
-                      </a>
+                      {c.author_handle ? (
+                        <a
+                          href={authorUrl(c.platform, c.author_handle)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-body-sm font-medium text-moonbeem-ink hover:text-moonbeem-pink"
+                        >
+                          @{c.author_handle}
+                        </a>
+                      ) : (
+                        <span className="text-body-sm font-medium text-moonbeem-ink-subtle">
+                          (channel unattributed)
+                        </span>
+                      )}
                       {c.author_display_name && (
                         <span className="text-caption text-moonbeem-ink-subtle">
                           {c.author_display_name}
@@ -520,7 +575,7 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
                         rel="noopener noreferrer"
                         className="text-caption text-moonbeem-ink-subtle hover:text-moonbeem-pink"
                       >
-                        View on TikTok ↗
+                        View on {platformLabel(c.platform)} ↗
                       </a>
                     </div>
                     {c.caption && (
@@ -637,6 +692,18 @@ function formatStat(n: number | null): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString();
+}
+
+function platformLabel(p: CandidatePlatform): string {
+  if (p === "tiktok") return "TikTok";
+  if (p === "youtube") return "YouTube";
+  return p;
+}
+
+function authorUrl(p: CandidatePlatform, handle: string): string {
+  if (p === "tiktok") return `https://www.tiktok.com/@${handle}`;
+  if (p === "youtube") return `https://www.youtube.com/@${handle}`;
+  return "#";
 }
 
 function formatRelativeIso(iso: string): string {

@@ -35,6 +35,10 @@ import {
 } from "@/lib/ensembledata/client";
 
 type SearchCandidatePayload = {
+  // Platform tag from the search response. Falls back to "tiktok"
+  // when missing, preserving v1 behavior for any older client that
+  // still POSTs without the field.
+  platform?: unknown;
   post_id?: unknown;
   post_url?: unknown;
   author_handle?: unknown;
@@ -44,10 +48,13 @@ type SearchCandidatePayload = {
   comment_count?: unknown;
   share_count?: unknown;
   thumbnail_url?: unknown;
-  // Unix seconds per TikTok create_time. Converted to ISO before
-  // insert into fan_edits.posted_at (timestamptz).
+  // Unix seconds. TikTok populates from aweme.create_time; YouTube
+  // hashtag-search returns relative time only and sends 0 (unknown).
+  // Converted to ISO (or null) before insert into fan_edits.posted_at.
   posted_at?: unknown;
 };
+
+const SUPPORTED_SEARCH_PLATFORMS = ["tiktok", "youtube"] as const;
 
 type ResultEntry = {
   embed_url: string;
@@ -212,11 +219,25 @@ function candidateFromSearchPayload(
   p: SearchCandidatePayload,
 ): FanEditCandidate | null {
   const post_url = typeof p.post_url === "string" ? p.post_url : null;
-  const handle =
-    typeof p.author_handle === "string" ? p.author_handle : null;
-  if (!post_url || !handle) return null;
+  if (!post_url) return null;
+  const handleRaw =
+    typeof p.author_handle === "string" ? p.author_handle.trim() : "";
+  // Empty-string handle (YouTube shorts have no channel info in
+  // search) → null. insertFanEditCandidate accepts null and inserts
+  // the row with creator_id=null, which is the correct degraded state.
+  const handle = handleRaw === "" ? null : handleRaw;
+  const platformRaw = typeof p.platform === "string" ? p.platform : "tiktok";
+  if (
+    !(SUPPORTED_SEARCH_PLATFORMS as ReadonlyArray<string>).includes(platformRaw)
+  ) {
+    return null;
+  }
+  // YouTube candidates carry no channel info for shorts and require
+  // handle-nullable insertion. TikTok candidates always have a handle
+  // — but if a future search returns one without, this still inserts
+  // (creator_id stays null, can be backfilled later).
   return {
-    platform: "tiktok",
+    platform: platformRaw as FanEditCandidate["platform"],
     embed_url: post_url,
     creator_handle: handle,
     caption: typeof p.caption === "string" && p.caption ? p.caption : null,
