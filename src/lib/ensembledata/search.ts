@@ -93,6 +93,12 @@ export type Candidate = {
   post_url: string; // canonical desktop URL constructed from handle + id
   caption: string;
   posted_at: number; // Unix seconds; 0 = unknown (YouTube only knows "1d ago")
+  // Pre-formatted relative-time string when the source has only that
+  // (e.g. YouTube hashtag-search returns publishedTimeText "1 day ago"
+  // with no underlying timestamp). UI prefers posted_relative over
+  // computing from posted_at when both are present and posted_at=0.
+  // Always null for TikTok (posted_at is precise).
+  posted_relative: string | null;
   view_count: number;
   // Nullable across platforms — YouTube hashtag search doesn't return
   // engagement counts in its base response. TikTok always populates.
@@ -297,6 +303,7 @@ function parseCandidate(item: unknown): Candidate | null {
     post_url: `https://www.tiktok.com/@${unique_id}/video/${aweme_id}`,
     caption: desc,
     posted_at: create_time,
+    posted_relative: null,
     view_count: numberValue(stats.play_count) ?? 0,
     like_count: numberValue(stats.digg_count) ?? 0,
     comment_count: numberValue(stats.comment_count) ?? 0,
@@ -503,12 +510,21 @@ function parseYouTubeVideoRenderer(
   // Pick the largest thumbnail by width.
   const thumb = pickLargestThumbnail(r.thumbnail);
 
+  // publishedTimeText.simpleText is YouTube's only timestamp signal in
+  // search responses ("1 day ago", "3 weeks ago"). UI uses this in
+  // place of computing from posted_at when posted_at is 0.
+  const ptt = r.publishedTimeText;
+  const posted_relative = (ptt && typeof ptt === "object")
+    ? stringValue((ptt as Record<string, unknown>).simpleText)
+    : null;
+
   return {
     platform: "youtube",
     post_id: videoId,
     post_url: `https://www.youtube.com/watch?v=${videoId}`,
     caption,
     posted_at: 0, // YouTube search returns relative time only
+    posted_relative,
     view_count: viewCount ?? 0,
     like_count: null,
     comment_count: null,
@@ -546,6 +562,10 @@ function parseYouTubeReelRenderer(
     post_url: `https://www.youtube.com/shorts/${videoId}`,
     caption,
     posted_at: 0,
+    // Shorts in hashtag-search responses don't carry publishedTimeText
+    // (the field exists on videoRenderer, not reelItemRenderer). Leave
+    // null so UI shows blank.
+    posted_relative: null,
     view_count: viewCount ?? 0,
     like_count: null,
     comment_count: null,

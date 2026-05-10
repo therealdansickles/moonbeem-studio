@@ -12,6 +12,10 @@ type Candidate = {
   post_url: string;
   caption: string;
   posted_at: number; // Unix seconds; 0 = unknown (YouTube only)
+  // Pre-formatted relative time from sources that don't return a
+  // timestamp (YouTube videoRenderer's publishedTimeText). Null for
+  // TikTok and YT shorts.
+  posted_relative: string | null;
   view_count: number;
   // Nullable: YouTube hashtag search doesn't return engagement counts.
   like_count: number | null;
@@ -589,7 +593,7 @@ export default function DiscoverTab({ titleSlug, titleName }: Props) {
                       <span>{formatStat(c.comment_count)} comments</span>
                       <span>{formatStat(c.share_count)} shares</span>
                       <span>{formatStat(c.save_count)} saves</span>
-                      <span>{formatRelativeUnix(c.posted_at)}</span>
+                      <span>{formatPostedAt(c)}</span>
                     </div>
                     {rowError[c.post_id] && (
                       <p className="mt-1 text-caption text-moonbeem-magenta">
@@ -713,6 +717,16 @@ function formatRelativeIso(iso: string): string {
 function formatRelativeUnix(unixSeconds: number): string {
   if (!unixSeconds || unixSeconds <= 0) return "—";
   return relativeFromMs(unixSeconds * 1000);
+}
+
+// Per-row posted-at cell. Prefers the source's pre-formatted relative
+// string (YouTube's "1 day ago") when posted_at is missing; falls back
+// to the unix-derived relative ("4h ago") for sources with timestamps.
+// Empty string when neither is available — cleaner than a stray "—".
+function formatPostedAt(c: Candidate): string {
+  if (c.posted_at && c.posted_at > 0) return formatRelativeUnix(c.posted_at);
+  if (c.posted_relative) return c.posted_relative;
+  return "";
 }
 
 function relativeFromMs(ms: number): string {

@@ -93,10 +93,15 @@ export async function loadOrStartRun(
       Date.now() - refreshIntervalHours * 60 * 60 * 1000,
     ).toISOString();
 
+    // Mirror the orchestrator's picker exclusion: YouTube rows have
+    // no EnsembleData refresh path (see view-tracking/index.ts comment
+    // on the picker query). Counting them as "eligible" would falsely
+    // restart drained runs that have nothing actionable to do.
     const { count: eligibleCount, error: eligErr } = await supabase
       .from("fan_edits")
       .select("id", { count: "exact", head: true })
       .eq("view_tracking_status", "active")
+      .neq("platform", "youtube")
       .or(
         `last_refreshed_at.is.null,last_refreshed_at.lt.${refreshCutoff}`,
       );
