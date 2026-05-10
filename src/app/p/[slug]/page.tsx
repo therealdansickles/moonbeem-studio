@@ -591,8 +591,21 @@ function HeroTile({
   sub?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
-      <div className="font-wordmark text-display-md text-moonbeem-pink leading-none">
+    <div
+      className="rounded-2xl border border-white/10 p-5"
+      // Diagonal deep-purple → soft-pink gradient at ~70-85% over a
+      // near-black base so the saturation reads premium without
+      // overwhelming the white number text on top. Subtle inner-top
+      // highlight (1px) gives a slight 3D lift without competing
+      // with the gradient. No hover state — partner dashboards are
+      // presentation surfaces, not interactive tools.
+      style={{
+        background:
+          "linear-gradient(135deg, rgba(46,16,101,0.85) 0%, rgba(219,39,119,0.7) 100%), #0a0014",
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
+      }}
+    >
+      <div className="font-wordmark text-display-md text-white leading-none tabular-nums">
         {value}
       </div>
       <div className="mt-2 text-body font-medium text-moonbeem-ink">
