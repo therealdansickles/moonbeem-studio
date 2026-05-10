@@ -369,27 +369,49 @@ async function loadTrackingStartDay(
   return (first.captured_at as string).slice(0, 10);
 }
 
-// Daily-summed total views across all of partner's fan_edits. Per
-// (fan_edit_id, day) we keep the day's max view_count, then forward-
-// fill so days without a snapshot for a given edit still contribute
-// the most recent prior value to the daily sum. Fixes the
-// "Tuesday's total drops because we only refreshed half the catalog
-// on Tuesday" artefact.
+// Daily-summed total views + cumulative-as-of-day fan_edit count
+// across the partner's titles. Returned series anchors to the
+// earliest view_tracking_snapshot date for the partner's edits
+// (per Dan's 2026-05-10 spec — "when the data actually starts being
+// meaningful"). No lookback cutoff; the GrowthChart client component
+// owns period filtering (1D/1W/1M/All).
+//
+// Views: per (fan_edit_id, day) keep max view_count, forward-fill
+// across days so the daily sum doesn't dip on days where only some
+// edits got refreshed.
+//
+// edit_count: cumulative count of fan_edits where created_at <= day
+// AND deleted_at IS NULL. Provides context for sparse view-tracking
+// history — when there are only 5 days of view data but 20 edits
+// were added over 14 days, the edit-count line shows catalog growth
+// the view-count line can't.
 async function loadDailyGrowth(
   supabase: ReturnType<typeof createServiceRoleClient>,
   fanEditIds: string[],
-  lookbackDays = 30,
-): Promise<Array<{ day: string; views: number }>> {
-  if (fanEditIds.length === 0) return [];
-  const cutoff = new Date(
-    Date.now() - lookbackDays * 24 * 60 * 60 * 1000,
-  ).toISOString();
-  const { data: snaps } = await supabase
-    .from("view_tracking_snapshots")
-    .select("fan_edit_id, view_count, captured_at")
-    .in("fan_edit_id", fanEditIds)
-    .gte("captured_at", cutoff)
-    .order("captured_at", { ascending: true });
+  titleIds: string[],
+): Promise<
+  Array<{
+    day: string;
+    views: number;
+    edit_count: number;
+    views_delta: number | null;
+    edit_count_delta: number | null;
+  }>
+> {
+  if (fanEditIds.length === 0 || titleIds.length === 0) return [];
+
+  const [{ data: snaps }, { data: edits }] = await Promise.all([
+    supabase
+      .from("view_tracking_snapshots")
+      .select("fan_edit_id, view_count, captured_at")
+      .in("fan_edit_id", fanEditIds)
+      .order("captured_at", { ascending: true }),
+    supabase
+      .from("fan_edits")
+      .select("created_at")
+      .in("title_id", titleIds)
+      .is("deleted_at", null),
+  ]);
 
   const perEditPerDay = new Map<string, Map<string, number>>();
   const allDays = new Set<string>();
@@ -407,15 +429,55 @@ async function loadDailyGrowth(
     if (v > existing) editMap.set(day, v);
   }
 
-  const sortedDays = [...allDays].sort();
+  if (allDays.size === 0) return [];
+
+  // Walk every day from earliest snapshot to today so the edit_count
+  // line keeps progressing even on days where no snapshot ran.
+  const startDay = [...allDays].sort()[0];
+  const days: string[] = [];
+  const today = new Date().toISOString().slice(0, 10);
+  for (
+    let d = new Date(startDay + "T00:00:00Z");
+    d.toISOString().slice(0, 10) <= today;
+    d.setUTCDate(d.getUTCDate() + 1)
+  ) {
+    days.push(d.toISOString().slice(0, 10));
+  }
+
+  // Pre-sort fan_edit created days for a one-pass cumulative count.
+  const editCreatedDays = (edits ?? [])
+    .map((e) => (e.created_at as string).slice(0, 10))
+    .sort();
+
   const editLatest = new Map<string, number>();
-  return sortedDays.map((d) => {
-    for (const [fid, days] of perEditPerDay) {
-      if (days.has(d)) editLatest.set(fid, days.get(d)!);
+  let editCursor = 0;
+  let prevViews = 0;
+  let prevEditCount = 0;
+  return days.map((d, i) => {
+    for (const [fid, dayMap] of perEditPerDay) {
+      if (dayMap.has(d)) editLatest.set(fid, dayMap.get(d)!);
     }
-    let total = 0;
-    for (const v of editLatest.values()) total += v;
-    return { day: d, views: total };
+    let totalViews = 0;
+    for (const v of editLatest.values()) totalViews += v;
+    while (
+      editCursor < editCreatedDays.length &&
+      editCreatedDays[editCursor] <= d
+    ) {
+      editCursor += 1;
+    }
+    // First-day deltas are null (no "previous day" reference) so the
+    // tooltip renders an em-dash instead of misleading +N values.
+    const views_delta = i === 0 ? null : totalViews - prevViews;
+    const edit_count_delta = i === 0 ? null : editCursor - prevEditCount;
+    prevViews = totalViews;
+    prevEditCount = editCursor;
+    return {
+      day: d,
+      views: totalViews,
+      edit_count: editCursor,
+      views_delta,
+      edit_count_delta,
+    };
   });
 }
 
@@ -613,7 +675,7 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
   ]);
   const fanEditIdsForTracking = allEdits.map((r) => r.id);
   const [dailyGrowth, trackingStartDay] = await Promise.all([
-    loadDailyGrowth(supabase, fanEditIdsForTracking),
+    loadDailyGrowth(supabase, fanEditIdsForTracking, titleIds),
     loadTrackingStartDay(supabase, fanEditIdsForTracking),
   ]);
 
