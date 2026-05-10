@@ -314,7 +314,15 @@ function ModalContent({
         {/* Body — lazy embed (only mounts while modal is open) */}
         <div className="flex flex-1 items-start justify-center overflow-y-auto bg-moonbeem-navy/20 p-3">
           <div className="w-full max-w-[400px]">
-            <EmbedFor fanEdit={fanEdit} />
+            {/* key={fanEdit.id} forces remount on arrow-nav. Without
+                it, react-social-media-embed (TikTok/IG/X) loads its
+                scripts on first mount only — the iframe URL prop
+                changes but the embed doesn't reload, leaving the
+                modal stuck on the originally-opened clip. The
+                YouTube iframe reacts to src changes natively, so
+                the key is a no-op there but keeps the per-platform
+                behavior uniform. */}
+            <EmbedFor key={fanEdit.id} fanEdit={fanEdit} />
           </div>
         </div>
 
