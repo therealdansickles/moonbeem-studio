@@ -56,10 +56,18 @@ export default async function RootLayout({
       <body
         className={`${inter.variable} ${jost.variable} min-h-full flex flex-col font-sans antialiased`}
       >
-        <GoogleAnalytics />
+        {/*
+          GoogleAnalytics + MicrosoftClarity MUST render inside
+          <ConsentProvider> because they call useConsent() at render
+          time. Rendering them as siblings of the provider crashes
+          SSR with "useConsent must be called inside
+          <ConsentProvider>". VercelAnalytics doesn't read consent
+          (cookie-less) and is safe outside; kept here for symmetry.
+        */}
         <VercelAnalytics />
-        <MicrosoftClarity />
         <ConsentProvider initialCountry={country}>
+          <GoogleAnalytics />
+          <MicrosoftClarity />
           <FanEditModalProvider>
             <TopNav />
             <main className="flex-1 flex flex-col">{children}</main>
