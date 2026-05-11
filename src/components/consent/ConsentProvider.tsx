@@ -65,10 +65,50 @@ type ConsentContextValue = {
 
 const ConsentContext = createContext<ConsentContextValue | null>(null);
 
+// Safe default returned by useConsent when called outside a
+// <ConsentProvider>. Models "nothing loaded yet, opt-in region" —
+// gated components (GoogleAnalytics, MicrosoftClarity) return null
+// at `!isLoaded` so scripts don't fire and the page doesn't crash.
+//
+// Why return defaults instead of throwing: industry convention for
+// consent libraries. A misconfigured mount tree shouldn't crash a
+// user's page — it should fail quiet + safe. The console.warn in
+// useConsent surfaces the misconfiguration to engineers during dev
+// + browser inspection in prod. Discovered the hard way 2026-05-11
+// when GA/Clarity were rendered as siblings (not children) of the
+// provider and the original throw cascaded into a 500-ing SSR.
+const SAFE_DEFAULT_CONSENT: ConsentContextValue = {
+  state: {
+    analytics: false,
+    session_recording: false,
+    updated_at: null,
+    version: 1,
+  },
+  isLoaded: false,
+  isOptInRegion: true,
+  hasDecided: false,
+  acceptAll: () => {},
+  rejectAll: () => {},
+  setConsent: () => {},
+  openSettings: () => {},
+  closeSettings: () => {},
+  isSettingsOpen: false,
+};
+
 export function useConsent(): ConsentContextValue {
   const ctx = useContext(ConsentContext);
   if (!ctx) {
-    throw new Error("useConsent must be called inside <ConsentProvider>");
+    // Outside <ConsentProvider>. Surface a console warning so the
+    // misconfiguration is visible during dev + prod debugging,
+    // but return SAFE_DEFAULT_CONSENT so the calling component
+    // doesn't crash the page.
+    if (typeof console !== "undefined") {
+      console.warn(
+        "useConsent called outside <ConsentProvider> — returning safe default. " +
+          "Wrap the calling component inside <ConsentProvider> in app/layout.tsx.",
+      );
+    }
+    return SAFE_DEFAULT_CONSENT;
   }
   return ctx;
 }
