@@ -3,6 +3,7 @@
 import Script from "next/script";
 import { Suspense, useEffect, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useConsent } from "@/components/consent/ConsentProvider";
 
 // Routes that intentionally don't fire GA. Internal admin tooling
 // shouldn't shape product decisions; partner dashboards are not
@@ -64,12 +65,27 @@ function PageTracker({ gaId }: { gaId: string }) {
 // so gtag.js never loads there. On non-excluded routes, loads the
 // loader + init scripts and starts the PageTracker for client-side
 // route changes.
+//
+// Consent gate (added 2026-05-11): gtag.js never loads until the
+// consent provider has hydrated (isLoaded === true) AND the user's
+// state.analytics === true. Pre-hydration the component returns
+// null so no script fires during SSR or before the cookie has been
+// read on the client. Once the user toggles consent, the component
+// re-renders and the Script tag is injected on the page.
+//
+// Caveat: revoking consent mid-session doesn't tear down the gtag
+// global. New consent takes effect on next page navigation/refresh.
+// Acceptable per typical consent-banner UX; revisit if compliance
+// audit requires hard teardown.
 export default function GoogleAnalytics() {
   const gaId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
   const pathname = usePathname();
+  const { isLoaded, state } = useConsent();
 
   if (!gaId) return null; // dev / preview-without-key
   if (shouldSkip(pathname)) return null;
+  if (!isLoaded) return null; // consent state unknown — don't fire
+  if (!state.analytics) return null;
 
   return (
     <>

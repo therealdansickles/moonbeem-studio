@@ -2,16 +2,35 @@
 
 // Bottom-of-viewport consent banner. Shows when:
 //   - Provider has hydrated (isLoaded), AND
-//   - User hasn't decided on the current version yet
+//   - User hasn't decided on the current version yet, AND
+//   - Current route isn't an admin/api/partner-dashboard surface
+//     (these never load GA/Clarity per the analytics components'
+//     exclusion lists, so a consent banner there is noise).
 //
 // Three actions: Accept all / Reject all / Customize (opens the
 // ConsentSettingsModal). All three close the banner by writing a
 // decided state to the cookie + server.
 
+import { usePathname } from "next/navigation";
 import { useConsent } from "./ConsentProvider";
 import ConsentSettingsModal from "./ConsentSettingsModal";
 
+// Mirrors the exclusion lists in GoogleAnalytics + MicrosoftClarity.
+// Kept in sync by hand; if these surfaces ever start loading
+// analytics, the banner-skip here needs to relax too.
+const EXCLUDED_PREFIXES = ["/admin", "/api", "/p/"];
+
+function shouldSkipBanner(pathname: string | null): boolean {
+  if (!pathname) return false;
+  for (const p of EXCLUDED_PREFIXES) {
+    if (pathname === p || pathname.startsWith(p)) return true;
+  }
+  if (pathname === "/p") return true;
+  return false;
+}
+
 export default function ConsentBanner() {
+  const pathname = usePathname();
   const {
     isLoaded,
     hasDecided,
@@ -21,11 +40,13 @@ export default function ConsentBanner() {
     isSettingsOpen,
   } = useConsent();
 
-  // Render the modal regardless of banner state — user can reopen
-  // settings post-decision via a future footer link.
+  const skipBanner = shouldSkipBanner(pathname);
+
+  // Modal can still open post-decision (future footer link) even on
+  // excluded surfaces, so we don't suppress it here.
   return (
     <>
-      {isLoaded && !hasDecided && (
+      {isLoaded && !hasDecided && !skipBanner && (
         <div
           role="region"
           aria-label="Cookie consent"

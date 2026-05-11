@@ -2,6 +2,7 @@
 
 import Script from "next/script";
 import { usePathname } from "next/navigation";
+import { useConsent } from "@/components/consent/ConsentProvider";
 
 // Same exclusion list as GoogleAnalytics — internal admin and
 // partner dashboards shouldn't pollute session-replay data.
@@ -20,12 +21,23 @@ function shouldSkip(pathname: string | null): boolean {
 // Microsoft Clarity client snippet. afterInteractive matches the
 // GA loader strategy. Returns null on excluded routes so clarity.ms
 // never loads there.
+//
+// Consent gate (added 2026-05-11): clarity.ms IIFE doesn't run until
+// the consent provider has hydrated AND state.session_recording is
+// true. Pre-hydration the component returns null so no script fires
+// during SSR or before the cookie is read.
+//
+// Caveat: revoking consent mid-session leaves the Clarity global in
+// memory. New consent takes effect on next page nav/refresh.
 export default function MicrosoftClarity() {
   const projectId = process.env.NEXT_PUBLIC_CLARITY_PROJECT_ID;
   const pathname = usePathname();
+  const { isLoaded, state } = useConsent();
 
   if (!projectId) return null;
   if (shouldSkip(pathname)) return null;
+  if (!isLoaded) return null;
+  if (!state.session_recording) return null;
 
   return (
     <Script id="microsoft-clarity" strategy="afterInteractive">
