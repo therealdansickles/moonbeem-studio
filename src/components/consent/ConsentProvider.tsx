@@ -133,6 +133,45 @@ export default function ConsentProvider({ initialCountry, children }: Props) {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isSettingsOpen, setSettingsOpen] = useState(false);
 
+  // Hard teardown of analytics globals when user revokes consent.
+  // The component-level gating in GoogleAnalytics + MicrosoftClarity
+  // stops NEW <Script> tags from rendering, but scripts already
+  // loaded in the current tab keep beaconing until page reload.
+  // This effect signals the SDKs to stop actively tracking the
+  // moment consent flips false on a category.
+  //
+  // - window.clarity("stop") halts Clarity's session-recording
+  //   beacon loop. No-op if Clarity never loaded.
+  // - gtag('consent','update',{analytics_storage:'denied'}) sets
+  //   GA into "consent denied" mode — subsequent gtag calls drop
+  //   their analytics payload. No-op if gtag never loaded.
+  //
+  // Diagnosed 2026-05-11: confirmed in-memory beaconing post-reject
+  // via dual-tab test (mb_consent rejected in tab A; tab B opened
+  // fresh — Clarity correctly did NOT fire in tab B, but tab A
+  // continued beaconing until this teardown was wired).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!state.session_recording && typeof window.clarity === "function") {
+      try {
+        window.clarity("stop");
+      } catch {
+        // Swallow — teardown is best-effort. The component-level
+        // gating already prevented new Script injection.
+      }
+    }
+    if (!state.analytics && typeof window.gtag === "function") {
+      try {
+        window.gtag("consent", "update", {
+          analytics_storage: "denied",
+          ad_storage: "denied",
+        });
+      } catch {
+        // Same swallow rationale.
+      }
+    }
+  }, [state.analytics, state.session_recording]);
+
   // Mount: hydrate from cookie, then best-effort fetch server state
   // for signed-in users.
   useEffect(() => {
