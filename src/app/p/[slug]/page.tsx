@@ -19,6 +19,8 @@ import GrowthChart from "@/components/p/GrowthChart";
 import AllEditsTable from "@/components/p/AllEditsTable";
 import PartnerRatesCard from "@/components/p/PartnerRatesCard";
 import TopPerformersCardClient from "@/components/p/TopPerformersCardClient";
+import InitialAvatar from "@/components/p/InitialAvatar";
+import { rankTierClass } from "@/components/p/rankTier";
 import { formatMetric } from "@/lib/format";
 
 type SocialPlatform = "tiktok" | "instagram" | "twitter" | "youtube";
@@ -272,30 +274,8 @@ async function loadTopCreators(
   }));
 }
 
-// Stable per-handle background color for initial avatars.
-function avatarHueForHandle(handle: string): number {
-  let hash = 0;
-  for (let i = 0; i < handle.length; i++) {
-    hash = (hash * 31 + handle.charCodeAt(i)) >>> 0;
-  }
-  return hash % 360;
-}
-
-function InitialAvatar({ handle }: { handle: string }) {
-  const initial = handle[0]?.toUpperCase() ?? "?";
-  const hue = avatarHueForHandle(handle);
-  return (
-    <div
-      style={{
-        background:
-          `linear-gradient(135deg, hsl(${hue} 70% 50%), hsl(${(hue + 40) % 360} 70% 35%))`,
-      }}
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full font-wordmark text-body-sm font-semibold text-white"
-    >
-      {initial}
-    </div>
-  );
-}
+// InitialAvatar + rank-tier helper moved to /components/p/ for reuse
+// across TopPerformersCardClient + TopCreatorsCard.
 
 // GrowthBadge moved to @/components/p/GrowthBadge for reuse by the
 // client-side TopPerformersCardClient.
@@ -553,29 +533,38 @@ function TopCreatorsCard({ creators }: { creators: TopCreator[] }) {
           by total views
         </span>
       </div>
-      <ol className="mt-4 flex flex-col divide-y divide-white/5">
-        {creators.map((c, i) => (
-          <li key={c.creator_id} className="flex items-center gap-3 py-3">
-            <span className="w-5 shrink-0 text-caption tabular-nums text-moonbeem-ink-subtle">
-              {i + 1}
-            </span>
-            <InitialAvatar handle={c.handle} />
-            <div className="flex min-w-0 flex-1 flex-col">
+      <ol className="mt-4 flex flex-col">
+        {creators.map((c, i) => {
+          const rank = i + 1;
+          return (
+            <li key={c.creator_id}>
+              {/* Whole-row link: hover bg shift + cursor-pointer make
+                  the row's clickability obvious. */}
               <Link
                 href={`/c/${c.handle}`}
-                className="truncate text-body-sm font-medium text-moonbeem-ink hover:text-moonbeem-pink"
+                className="-mx-2 flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-white/[0.035]"
               >
-                @{c.handle}
+                <span
+                  className={`w-5 shrink-0 text-caption font-semibold tabular-nums ${rankTierClass(rank)}`}
+                >
+                  {rank}
+                </span>
+                <InitialAvatar handle={c.handle} />
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-body-sm font-medium text-moonbeem-ink">
+                    @{c.handle}
+                  </span>
+                  <span className="text-caption text-moonbeem-ink-subtle">
+                    {c.edit_count} {c.edit_count === 1 ? "edit" : "edits"}
+                  </span>
+                </div>
+                <span className="text-body-sm font-semibold tabular-nums text-moonbeem-ink">
+                  {formatMetric(c.total_views)}
+                </span>
               </Link>
-              <span className="text-caption text-moonbeem-ink-subtle">
-                {c.edit_count} {c.edit_count === 1 ? "edit" : "edits"}
-              </span>
-            </div>
-            <span className="text-body-sm font-semibold tabular-nums text-moonbeem-ink">
-              {formatMetric(c.total_views)}
-            </span>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ol>
     </div>
   );

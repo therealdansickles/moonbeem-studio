@@ -14,6 +14,8 @@ import Image from "next/image";
 import Link from "next/link";
 import PlatformIcon from "@/components/PlatformIcon";
 import GrowthBadge from "@/components/p/GrowthBadge";
+import InitialAvatar from "@/components/p/InitialAvatar";
+import { rankTierClass } from "@/components/p/rankTier";
 import { formatMetric } from "@/lib/format";
 import {
   useFanEditModal,
@@ -82,63 +84,81 @@ export default function TopPerformersCardClient({
           by view count
         </span>
       </div>
-      <ol className="mt-4 flex flex-col divide-y divide-white/5">
-        {performers.map((fe, i) => (
-          <li key={fe.id} className="flex items-center gap-3 py-3">
-            <span className="w-5 shrink-0 text-caption tabular-nums text-moonbeem-ink-subtle">
-              {i + 1}
-            </span>
-            <button
-              type="button"
+      <ol className="mt-4 flex flex-col">
+        {performers.map((fe, i) => {
+          const rank = i + 1;
+          return (
+            <li
+              key={fe.id}
+              className="-mx-2 flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-white/[0.035]"
               onClick={() => openAt(i)}
-              className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-moonbeem-navy/40 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
-              aria-label={`Open fan edit by @${fe.creator_handle ?? "anon"}`}
             >
-              {fe.thumbnail_url
-                ? (
-                  <Image
-                    src={fe.thumbnail_url}
-                    alt=""
-                    fill
-                    sizes="48px"
-                    unoptimized
-                    className="object-cover"
-                  />
-                )
-                : null}
-            </button>
-            <div className="flex min-w-0 flex-1 flex-col">
-              {fe.creator_handle
-                ? (
-                  <Link
-                    href={`/c/${fe.creator_handle}`}
-                    className="truncate text-body-sm font-medium text-moonbeem-ink hover:text-moonbeem-pink"
-                  >
-                    @{fe.creator_handle}
-                  </Link>
-                )
-                : (
-                  <span className="text-body-sm text-moonbeem-ink-subtle">
-                    @anon
-                  </span>
-                )}
-              <span className="flex items-center gap-1.5 text-caption text-moonbeem-ink-subtle">
-                <PlatformIcon platform={fe.platform} className="h-3 w-3" />
-                {platformLabel[fe.platform]}
+              <span
+                className={`w-5 shrink-0 text-caption font-semibold tabular-nums ${rankTierClass(rank)}`}
+              >
+                {rank}
               </span>
-            </div>
-            <div className="flex flex-col items-end">
+              {/* Fan-edit thumbnail — kept (not replaced by avatar)
+                  so two rows by the same creator stay distinguishable.
+                  Wrapped in a button for the screen-reader hook + so
+                  the click target is explicit; the outer row click
+                  handler covers visual clicks. */}
               <button
                 type="button"
-                onClick={() => openAt(i)}
-                className="text-body-sm font-semibold tabular-nums text-moonbeem-ink cursor-pointer hover:text-moonbeem-pink"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openAt(i);
+                }}
+                className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-moonbeem-navy/40 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
+                aria-label={`Open fan edit by @${fe.creator_handle ?? "anon"}`}
               >
-                {formatMetric(fe.view_count)}
+                {fe.thumbnail_url
+                  ? (
+                    <Image
+                      src={fe.thumbnail_url}
+                      alt=""
+                      fill
+                      sizes="48px"
+                      unoptimized
+                      className="object-cover"
+                    />
+                  )
+                  : null}
               </button>
-              <GrowthBadge delta={fe.growth_24h} pct={fe.growth_pct_24h} />
-            </div>
-          </li>
-        ))}
+              {/* Creator avatar — 32px gradient-initial fallback for
+                  stub creators. Real avatars land when public_creators
+                  exposes avatar_url (followup memory). */}
+              {fe.creator_handle && <InitialAvatar handle={fe.creator_handle} />}
+              <div className="flex min-w-0 flex-1 flex-col">
+                {fe.creator_handle
+                  ? (
+                    <Link
+                      href={`/c/${fe.creator_handle}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="truncate text-body-sm font-medium text-moonbeem-ink hover:text-moonbeem-pink hover:underline"
+                    >
+                      @{fe.creator_handle}
+                    </Link>
+                  )
+                  : (
+                    <span className="text-body-sm text-moonbeem-ink-subtle">
+                      @anon
+                    </span>
+                  )}
+                <span className="flex items-center gap-1.5 text-caption text-moonbeem-ink-subtle">
+                  <PlatformIcon platform={fe.platform} className="h-3 w-3" />
+                  {platformLabel[fe.platform]}
+                </span>
+              </div>
+              <div className="flex flex-col items-end">
+                <span className="text-body-sm font-semibold tabular-nums text-moonbeem-ink">
+                  {formatMetric(fe.view_count)}
+                </span>
+                <GrowthBadge delta={fe.growth_24h} pct={fe.growth_pct_24h} />
+              </div>
+            </li>
+          );
+        })}
       </ol>
     </div>
   );
