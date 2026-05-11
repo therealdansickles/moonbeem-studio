@@ -7,6 +7,7 @@ import { InstagramEmbed, TikTokEmbed, XEmbed } from "react-social-media-embed";
 import type { FanEditForModal } from "./FanEditModalProvider";
 import { trackModalEvent } from "@/lib/analytics/modal-event";
 import { vibrate } from "@/lib/haptics";
+import { extractYouTubeVideoId } from "@/lib/youtube";
 import PlatformIcon from "./PlatformIcon";
 
 // Modal type alias kept local for back-compat with the existing
@@ -446,24 +447,5 @@ function YouTubeEmbed({ embedUrl }: { embedUrl: string }) {
   );
 }
 
-// Extract the 11-char video ID from any YouTube URL form we ingest:
-// /watch?v=ID, /shorts/ID, youtu.be/ID, /embed/ID, /v/ID, /live/ID.
-function extractYouTubeVideoId(url: string): string | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return null;
-  }
-  const host = parsed.hostname.toLowerCase();
-  if (host === "youtu.be" || host.endsWith(".youtu.be")) {
-    const m = parsed.pathname.match(/^\/([A-Za-z0-9_-]{11})(?:\/|$|\?)/);
-    return m ? m[1] : null;
-  }
-  const v = parsed.searchParams.get("v");
-  if (v && /^[A-Za-z0-9_-]{11}$/.test(v)) return v;
-  const m = parsed.pathname.match(
-    /^\/(?:shorts|embed|v|live)\/([A-Za-z0-9_-]{11})(?:\/|$|\?)/,
-  );
-  return m ? m[1] : null;
-}
+// extractYouTubeVideoId imported from @/lib/youtube — shared with the
+// YT Data API client + ensembledata parseShortcodeFromUrl YT branch.

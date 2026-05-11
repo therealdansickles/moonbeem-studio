@@ -57,6 +57,8 @@
 // capture (forensic trail for shape-drift debugging). On network
 // failure / abort it's null.
 
+import { extractYouTubeVideoId, fetchVideoStats } from "@/lib/youtube";
+
 const ENSEMBLEDATA_BASE = "https://ensembledata.com/apis";
 const FETCH_TIMEOUT_MS = 5000;
 
@@ -82,6 +84,13 @@ export type FetchEngagementResult = {
   // this to fan_edits.creator_handle_displayed when that column is
   // null.
   creator_handle_displayed: string | null;
+  // ISO 8601 timestamp from the source. YouTube populates from
+  // snippet.publishedAt. Other platforms leave null (EnsembleData
+  // doesn't surface posted_at reliably on its per-post lookups).
+  // upsert.ts backfills fan_edits.posted_at when this is non-null AND
+  // the current column value is null (first-write-wins, matching the
+  // thumbnail backfill rule).
+  posted_at: string | null;
   raw_payload: unknown | null;
   error: FetchErrorCategory | null;
   fetched_at: Date;
@@ -115,7 +124,6 @@ export function parseShortcodeFromUrl(
     return null;
   }
   const path = parsed.pathname;
-  const host = parsed.hostname.toLowerCase();
   switch (platform.toLowerCase()) {
     case "tiktok": {
       const m = path.match(/\/(?:video|v)\/(\d+)/);
@@ -125,18 +133,11 @@ export function parseShortcodeFromUrl(
       const m = path.match(/\/(?:reel|reels|p|tv)\/([A-Za-z0-9_-]+)/);
       return m ? m[1] : null;
     }
-    case "youtube": {
-      if (host === "youtu.be" || host.endsWith(".youtu.be")) {
-        const m = path.match(/^\/([A-Za-z0-9_-]{11})(?:\/|$|\?)/);
-        return m ? m[1] : null;
-      }
-      const v = parsed.searchParams.get("v");
-      if (v && /^[A-Za-z0-9_-]{11}$/.test(v)) return v;
-      const m = path.match(
-        /^\/(?:shorts|embed|v|live)\/([A-Za-z0-9_-]{11})(?:\/|$|\?)/,
-      );
-      return m ? m[1] : null;
-    }
+    case "youtube":
+      // Delegate to the shared YT module so all callers (modal embed,
+      // Discover add-by-URL, view-tracking refresh) parse the same set
+      // of URL forms identically.
+      return extractYouTubeVideoId(url);
     case "twitter": {
       const m = path.match(/\/status\/(\d+)/);
       return m ? m[1] : null;
@@ -164,9 +165,24 @@ export async function fetchEngagementMetrics(args: {
     duration_seconds: null,
     aspect_ratio: null,
     creator_handle_displayed: null,
+    posted_at: null as string | null,
     raw_payload: null as unknown | null,
     fetched_at,
   };
+
+  const platformLower = (args.platform ?? "").toLowerCase();
+  const id = parseShortcodeFromUrl(args.embed_url, platformLower);
+  if (!id) {
+    return { ...empty, error: "parse_error" };
+  }
+
+  // YouTube goes through the official YT Data API v3, NOT EnsembleData
+  // (which doesn't actually expose a /youtube/video/info endpoint —
+  // probed 2026-05-10 in openapi.json). Branch early so the
+  // EnsembleData token check doesn't gate a YT-only refresh.
+  if (platformLower === "youtube") {
+    return await fetchYouTubeMetrics(id, fetched_at);
+  }
 
   const token = process.env.ENSEMBLEDATA_TOKEN;
   if (!token) {
@@ -175,12 +191,6 @@ export async function fetchEngagementMetrics(args: {
     // lifecycle state. The caller should also fail fast at startup
     // when token is missing, before reaching here.
     return { ...empty, error: "transient" };
-  }
-
-  const platformLower = (args.platform ?? "").toLowerCase();
-  const id = parseShortcodeFromUrl(args.embed_url, platformLower);
-  if (!id) {
-    return { ...empty, error: "parse_error" };
   }
 
   let apiUrl: string;
@@ -192,11 +202,6 @@ export async function fetchEngagementMetrics(args: {
       break;
     case "instagram":
       apiUrl = `${ENSEMBLEDATA_BASE}/instagram/post/details?code=${
-        encodeURIComponent(id)
-      }&token=${encodeURIComponent(token)}`;
-      break;
-    case "youtube":
-      apiUrl = `${ENSEMBLEDATA_BASE}/youtube/video/info?id=${
         encodeURIComponent(id)
       }&token=${encodeURIComponent(token)}`;
       break;
@@ -277,7 +282,86 @@ export async function fetchEngagementMetrics(args: {
     duration_seconds: metrics.duration_seconds,
     aspect_ratio: metrics.aspect_ratio,
     creator_handle_displayed: metrics.creator_handle_displayed,
+    // posted_at: null on EnsembleData-backed platforms — their
+    // per-post endpoints don't surface a reliable timestamp.
+    // YouTube branches through fetchYouTubeMetrics which fills this.
+    posted_at: null,
     raw_payload: body,
+    error: null,
+    fetched_at,
+  };
+}
+
+// ---------------------------------------------------------------------
+// YouTube — official YT Data API v3 (separate vendor from EnsembleData)
+// ---------------------------------------------------------------------
+//
+// Lives in this file so callers (view-tracking orchestrator) get one
+// fetchEngagementMetrics() surface regardless of platform. The actual
+// YT API client + URL parser are in src/lib/youtube/ — this is just
+// the adapter that maps YouTubeVideoStats → FetchEngagementResult.
+//
+// Quota model differs from EnsembleData (1 unit/call covers up to 50
+// IDs vs. 1 unit/post on EnsembleData). v1 calls one ID per refresh
+// to fit the existing orchestrator loop; batching to 50 is a future
+// orchestrator-only refactor.
+
+async function fetchYouTubeMetrics(
+  videoId: string,
+  fetched_at: Date,
+): Promise<FetchEngagementResult> {
+  const empty = {
+    view_count: null,
+    like_count: null,
+    comment_count: null,
+    share_count: null,
+    thumbnail_url: null,
+    duration_seconds: null,
+    aspect_ratio: null,
+    creator_handle_displayed: null,
+    posted_at: null as string | null,
+    raw_payload: null as unknown | null,
+    fetched_at,
+  };
+
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  const result = await fetchVideoStats([videoId], apiKey);
+  if (result.error === "missing_key") {
+    // Same shape as EnsembleData's missing-token path — operational,
+    // not per-row. Orchestrator skips without flipping lifecycle state.
+    return { ...empty, raw_payload: result.raw_payload, error: "transient" };
+  }
+  if (result.error === "rate_limited") {
+    return { ...empty, raw_payload: result.raw_payload, error: "rate_limited" };
+  }
+  if (result.error === "not_found") {
+    return { ...empty, raw_payload: result.raw_payload, error: "not_found" };
+  }
+  if (result.error === "transient") {
+    return { ...empty, raw_payload: result.raw_payload, error: "transient" };
+  }
+  if (result.error === "parse_error") {
+    return { ...empty, raw_payload: result.raw_payload, error: "parse_error" };
+  }
+  const stats = result.byId.get(videoId);
+  if (!stats) {
+    // Video ID was in our request but didn't come back — YT omits
+    // missing videos from items[] (deleted, private, age-restricted).
+    return { ...empty, raw_payload: result.raw_payload, error: "not_found" };
+  }
+  return {
+    view_count: stats.view_count,
+    like_count: stats.like_count,
+    comment_count: stats.comment_count,
+    share_count: null, // YT doesn't expose share counts on the API.
+    thumbnail_url: stats.thumbnail_url,
+    duration_seconds: stats.duration_seconds,
+    aspect_ratio: null, // YT needs part=player + maxHeight to compute.
+    creator_handle_displayed: null, // channel_title kept in payload
+                                    // only — not URL-safe; not stored
+                                    // on refresh.
+    posted_at: stats.posted_at,
+    raw_payload: result.raw_payload,
     error: null,
     fetched_at,
   };
@@ -440,22 +524,11 @@ function mapMetrics(platform: Platform, body: unknown): Metrics {
         creator_handle_displayed: creator_handle,
       };
     }
-    case "youtube": {
-      // No real raw_payload sample yet (no YouTube fan_edits in the
-      // current dataset). Visual fields stay null until we have a
-      // verified shape; metric paths preserved from prior version.
-      const stats = get(data, ["statistics"]) ?? data;
-      return {
-        view_count: toIntOrNull(get(stats, ["viewCount"])),
-        like_count: toIntOrNull(get(stats, ["likeCount"])),
-        comment_count: toIntOrNull(get(stats, ["commentCount"])),
-        share_count: null, // YT doesn't expose share count
-        thumbnail_url: null,
-        duration_seconds: null,
-        aspect_ratio: null,
-        creator_handle_displayed: null,
-      };
-    }
+    case "youtube":
+      // Unreachable — fetchEngagementMetrics short-circuits to the YT
+      // Data API v3 branch (fetchYouTubeMetrics) before reaching here.
+      // Kept for switch-exhaustiveness; returns empty if somehow hit.
+      return emptyMetrics();
     case "twitter": {
       // Twitter response: data.views.count is a string ("8944"),
       // engagement fields under data.legacy.*. Media (thumbnail,

@@ -63,9 +63,13 @@ export async function writeSnapshotAndUpdateFanEdit(
   //   - creator_handle_displayed: only set when currently NULL.
   //     Once any value lands (ingest-time parse or EnsembleData),
   //     don't overwrite.
+  //   - posted_at: only set when currently NULL (first-write-wins).
+  //     YouTube refresh backfills from snippet.publishedAt — other
+  //     platforms leave null since EnsembleData doesn't surface
+  //     posted_at reliably on per-post lookups.
   const existing = await supabase
     .from("fan_edits")
-    .select("thumbnail_source, creator_handle_displayed")
+    .select("thumbnail_source, creator_handle_displayed, posted_at")
     .eq("id", fanEditId)
     .single();
   if (existing.error || !existing.data) {
@@ -79,11 +83,15 @@ export async function writeSnapshotAndUpdateFanEdit(
     (existing.data.thumbnail_source as string | null) ?? null;
   const currentHandle =
     (existing.data.creator_handle_displayed as string | null) ?? null;
+  const currentPostedAt =
+    (existing.data.posted_at as string | null) ?? null;
   const shouldUpdateThumb =
     metrics.thumbnail_url !== null &&
     (currentSource === null || currentSource === "oembed");
   const shouldSetHandle =
     metrics.creator_handle_displayed !== null && currentHandle === null;
+  const shouldSetPostedAt =
+    metrics.posted_at !== null && currentPostedAt === null;
 
   // Denormalized counts on fan_edits use 0 fallback when the upstream
   // returned null (the columns are NOT NULL with default 0). The
@@ -123,6 +131,9 @@ export async function writeSnapshotAndUpdateFanEdit(
   }
   if (shouldSetHandle) {
     update.creator_handle_displayed = metrics.creator_handle_displayed;
+  }
+  if (shouldSetPostedAt) {
+    update.posted_at = metrics.posted_at;
   }
 
   const updateResult = await supabase

@@ -1,4 +1,4 @@
-// EnsembleData client adapter for the view-tracking Edge Function.
+// EnsembleData + YouTube Data API client adapter for view-tracking.
 //
 // ⚠ DUAL-COPY: this file mirrors src/lib/ensembledata/client.ts.
 // Edge Functions can't import from src/, so the field mappings and
@@ -35,6 +35,8 @@
 //              data.legacy.reply_count    (comment_count)
 //              data.legacy.retweet_count  (share_count)
 
+import { extractYouTubeVideoId, fetchVideoStats } from "./youtube.ts";
+
 const ENSEMBLEDATA_BASE = "https://ensembledata.com/apis";
 const FETCH_TIMEOUT_MS = 5000;
 
@@ -62,6 +64,11 @@ export type FetchEngagementResult = {
   // didn't capture a handle). Other platforms return null until we
   // verify their response shapes.
   creator_handle_displayed: string | null;
+  // ISO 8601 timestamp from the source. YouTube populates from
+  // snippet.publishedAt via fetchYouTubeMetrics. Other platforms
+  // null. upsert.ts backfills fan_edits.posted_at when this is
+  // non-null AND the current column value is null (first-write-wins).
+  posted_at: string | null;
   raw_payload: unknown | null;
   error: FetchErrorCategory | null;
   fetched_at: Date;
@@ -79,7 +86,6 @@ export function parseShortcodeFromUrl(
     return null;
   }
   const path = parsed.pathname;
-  const host = parsed.hostname.toLowerCase();
   switch (platform.toLowerCase()) {
     case "tiktok": {
       const m = path.match(/\/(?:video|v)\/(\d+)/);
@@ -89,18 +95,8 @@ export function parseShortcodeFromUrl(
       const m = path.match(/\/(?:reel|reels|p|tv)\/([A-Za-z0-9_-]+)/);
       return m ? m[1] : null;
     }
-    case "youtube": {
-      if (host === "youtu.be" || host.endsWith(".youtu.be")) {
-        const m = path.match(/^\/([A-Za-z0-9_-]{11})(?:\/|$|\?)/);
-        return m ? m[1] : null;
-      }
-      const v = parsed.searchParams.get("v");
-      if (v && /^[A-Za-z0-9_-]{11}$/.test(v)) return v;
-      const m = path.match(
-        /^\/(?:shorts|embed|v|live)\/([A-Za-z0-9_-]{11})(?:\/|$|\?)/,
-      );
-      return m ? m[1] : null;
-    }
+    case "youtube":
+      return extractYouTubeVideoId(url);
     case "twitter": {
       const m = path.match(/\/status\/(\d+)/);
       return m ? m[1] : null;
@@ -124,19 +120,27 @@ export async function fetchEngagementMetrics(args: {
     duration_seconds: null,
     aspect_ratio: null,
     creator_handle_displayed: null,
+    posted_at: null as string | null,
     raw_payload: null as unknown | null,
     fetched_at,
   };
-
-  const token = Deno.env.get("ENSEMBLEDATA_TOKEN");
-  if (!token) {
-    return { ...empty, error: "transient" };
-  }
 
   const platformLower = (args.platform ?? "").toLowerCase();
   const id = parseShortcodeFromUrl(args.embed_url, platformLower);
   if (!id) {
     return { ...empty, error: "parse_error" };
+  }
+
+  // YouTube goes through the official YT Data API v3, NOT EnsembleData
+  // (which has no per-video lookup endpoint). Branch early so the
+  // EnsembleData token check doesn't gate a YT-only refresh.
+  if (platformLower === "youtube") {
+    return await fetchYouTubeMetrics(id, fetched_at);
+  }
+
+  const token = Deno.env.get("ENSEMBLEDATA_TOKEN");
+  if (!token) {
+    return { ...empty, error: "transient" };
   }
 
   let apiUrl: string;
@@ -148,11 +152,6 @@ export async function fetchEngagementMetrics(args: {
       break;
     case "instagram":
       apiUrl = `${ENSEMBLEDATA_BASE}/instagram/post/details?code=${
-        encodeURIComponent(id)
-      }&token=${encodeURIComponent(token)}`;
-      break;
-    case "youtube":
-      apiUrl = `${ENSEMBLEDATA_BASE}/youtube/video/info?id=${
         encodeURIComponent(id)
       }&token=${encodeURIComponent(token)}`;
       break;
@@ -219,7 +218,69 @@ export async function fetchEngagementMetrics(args: {
     duration_seconds: metrics.duration_seconds,
     aspect_ratio: metrics.aspect_ratio,
     creator_handle_displayed: metrics.creator_handle_displayed,
+    // posted_at: null on EnsembleData-backed platforms — YouTube
+    // branches through fetchYouTubeMetrics which fills this.
+    posted_at: null,
     raw_payload: body,
+    error: null,
+    fetched_at,
+  };
+}
+
+// YouTube — official YT Data API v3 (separate vendor from EnsembleData).
+// Mirrors src/lib/ensembledata/client.ts fetchYouTubeMetrics. Maps
+// YouTubeVideoStats → FetchEngagementResult so the orchestrator sees a
+// uniform shape regardless of which API answered.
+async function fetchYouTubeMetrics(
+  videoId: string,
+  fetched_at: Date,
+): Promise<FetchEngagementResult> {
+  const empty = {
+    view_count: null,
+    like_count: null,
+    comment_count: null,
+    share_count: null,
+    thumbnail_url: null,
+    duration_seconds: null,
+    aspect_ratio: null,
+    creator_handle_displayed: null,
+    posted_at: null as string | null,
+    raw_payload: null as unknown | null,
+    fetched_at,
+  };
+
+  const apiKey = Deno.env.get("YOUTUBE_API_KEY");
+  const result = await fetchVideoStats([videoId], apiKey);
+  if (result.error === "missing_key") {
+    return { ...empty, raw_payload: result.raw_payload, error: "transient" };
+  }
+  if (result.error === "rate_limited") {
+    return { ...empty, raw_payload: result.raw_payload, error: "rate_limited" };
+  }
+  if (result.error === "not_found") {
+    return { ...empty, raw_payload: result.raw_payload, error: "not_found" };
+  }
+  if (result.error === "transient") {
+    return { ...empty, raw_payload: result.raw_payload, error: "transient" };
+  }
+  if (result.error === "parse_error") {
+    return { ...empty, raw_payload: result.raw_payload, error: "parse_error" };
+  }
+  const stats = result.byId.get(videoId);
+  if (!stats) {
+    return { ...empty, raw_payload: result.raw_payload, error: "not_found" };
+  }
+  return {
+    view_count: stats.view_count,
+    like_count: stats.like_count,
+    comment_count: stats.comment_count,
+    share_count: null,
+    thumbnail_url: stats.thumbnail_url,
+    duration_seconds: stats.duration_seconds,
+    aspect_ratio: null,
+    creator_handle_displayed: null,
+    posted_at: stats.posted_at,
+    raw_payload: result.raw_payload,
     error: null,
     fetched_at,
   };
@@ -379,22 +440,11 @@ function mapMetrics(platform: Platform, body: unknown): Metrics {
         creator_handle_displayed: creator_handle,
       };
     }
-    case "youtube": {
-      // No real raw_payload sample yet (no YouTube fan_edits in the
-      // current dataset). Visual fields stay null until we have a
-      // verified shape; metric paths preserved from prior version.
-      const stats = get(data, ["statistics"]) ?? data;
-      return {
-        view_count: toIntOrNull(get(stats, ["viewCount"])),
-        like_count: toIntOrNull(get(stats, ["likeCount"])),
-        comment_count: toIntOrNull(get(stats, ["commentCount"])),
-        share_count: null,
-        thumbnail_url: null,
-        duration_seconds: null,
-        aspect_ratio: null,
-        creator_handle_displayed: null,
-      };
-    }
+    case "youtube":
+      // Unreachable — fetchEngagementMetrics short-circuits to
+      // fetchYouTubeMetrics before reaching mapMetrics for YT.
+      // Kept for switch-exhaustiveness; returns empty if somehow hit.
+      return emptyMetrics();
     case "twitter": {
       // Twitter response: data.views.count is a string ("8944"),
       // engagement fields under data.legacy.*. Media (thumbnail,

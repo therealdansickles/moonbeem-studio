@@ -142,19 +142,13 @@ Deno.serve(async (_req: Request) => {
       Date.now() - REFRESH_INTERVAL_HOURS * 60 * 60 * 1000,
     ).toISOString();
 
-    // Exclude YouTube: EnsembleData has no per-video metrics endpoint
-    // (probed openapi.json 2026-05-10 — /youtube/video/info is absent;
-    // available YT endpoints are /youtube/hashtag/search,
-    // /youtube/search, /youtube/channel/*, /youtube/video/comments).
-    // Refresh path requires YouTube Data API v3 integration, tracked
-    // in followup memory under "YouTube thumbnail extractor". Until
-    // that lands, YT rows ingested via Discover stay frozen at the
-    // view counts captured at insert time.
+    // YouTube refresh re-enabled 2026-05-11 via YT Data API v3
+    // (env: YOUTUBE_API_KEY). fetchEngagementMetrics dispatches
+    // YT rows to fetchYouTubeMetrics; EnsembleData handles the rest.
     const { data: fanEdits, error: queryErr } = await supabase
       .from("fan_edits")
       .select("id, platform, embed_url")
       .eq("view_tracking_status", "active")
-      .neq("platform", "youtube")
       .or(
         `last_refreshed_at.is.null,last_refreshed_at.lt.${refreshCutoff}`,
       )
