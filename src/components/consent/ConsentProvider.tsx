@@ -124,14 +124,6 @@ type Props = {
 export default function ConsentProvider({ initialCountry, children }: Props) {
   const optIn = useMemo(() => isOptInRegion(initialCountry), [initialCountry]);
 
-  // TEMP DEBUG (consent-provider-fix branch only): surfaces the
-  // geo Vercel actually detected so we can verify EU testing is
-  // hitting an EU-classified IP at the edge. Roll back this log
-  // before merging to main.
-  if (typeof console !== "undefined") {
-    console.info("[consent] initialCountry:", initialCountry, "isOptIn:", optIn);
-  }
-
   // SSR + first-paint state: defaults applied per geo. isLoaded
   // false so consumers can avoid firing tracking before the cookie
   // has been read.
