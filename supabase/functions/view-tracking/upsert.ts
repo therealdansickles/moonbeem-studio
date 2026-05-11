@@ -30,6 +30,7 @@ export type SnapshotMetrics = {
   duration_seconds: number | null;
   aspect_ratio: string | null;
   creator_handle_displayed: string | null;
+  posted_at: string | null;
   raw_payload: unknown | null;
 };
 
