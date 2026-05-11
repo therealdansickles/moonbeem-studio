@@ -12,8 +12,13 @@
 // Close-outside / Escape closes the modal without saving (the
 // underlying consent state is unchanged; banner re-renders on
 // !hasDecided).
+//
+// Visual treatment (Gate 5): backdrop fades in; dialog scales from
+// 0.96 → 1 with opacity 0 → 1 over ~220ms, ease-out — same cadence
+// as the consent banner and FanEditModal.
 
 import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import { useConsent } from "./ConsentProvider";
 
 export default function ConsentSettingsModal() {
@@ -24,10 +29,6 @@ export default function ConsentSettingsModal() {
   const [sessionRecording, setSessionRecording] = useState(
     state.session_recording,
   );
-
-  // Reset draft whenever the modal opens fresh. The provider opens
-  // the modal by flipping isSettingsOpen; this component re-mounts
-  // each time so the initial useState seed is enough.
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -51,12 +52,30 @@ export default function ConsentSettingsModal() {
       role="dialog"
       aria-modal="true"
       aria-labelledby="consent-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) closeSettings();
       }}
     >
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-moonbeem-black p-6 shadow-2xl">
+      {/* Backdrop (separate motion node so it can fade independently). */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.18, ease: "easeOut" }}
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        aria-hidden="true"
+        onClick={closeSettings}
+      />
+
+      {/* Dialog */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 8 }}
+        transition={{ duration: 0.22, ease: "easeOut" }}
+        className="relative w-full max-w-md rounded-2xl border border-white/10 bg-moonbeem-black p-6 shadow-2xl"
+      >
         <div className="flex items-start justify-between gap-3">
           <h2
             id="consent-modal-title"
@@ -99,7 +118,7 @@ export default function ConsentSettingsModal() {
           <button
             type="button"
             onClick={onRejectAll}
-            className="rounded-md border border-white/15 px-3 py-2 text-caption text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
+            className="min-h-11 rounded-md border border-white/15 px-3 py-2 text-caption text-moonbeem-ink-muted transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
           >
             Reject all
           </button>
@@ -107,20 +126,21 @@ export default function ConsentSettingsModal() {
             <button
               type="button"
               onClick={closeSettings}
-              className="rounded-md border border-white/10 px-4 py-2 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
+              className="min-h-11 rounded-md border border-white/10 px-4 py-2 text-body-sm text-moonbeem-ink-muted transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={onSave}
-              className="rounded-md bg-moonbeem-pink px-5 py-2 text-body-sm font-semibold text-moonbeem-navy hover:opacity-90"
+              style={{ boxShadow: "inset 0 1px 0 rgba(255,255,255,0.22)" }}
+              className="min-h-11 rounded-md bg-moonbeem-pink px-5 py-2.5 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90"
             >
               Save
             </button>
           </div>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }
@@ -141,7 +161,7 @@ function ToggleRow({
   return (
     <label
       htmlFor={id}
-      className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border border-white/10 bg-white/[0.02] p-3"
+      className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border border-white/10 bg-white/[0.02] p-3 transition-colors hover:border-white/15"
     >
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="text-body-sm font-medium text-moonbeem-ink">
