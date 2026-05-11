@@ -128,18 +128,30 @@ export default function AllEditsTable({ rows, titleSlug, titleName }: Props) {
                   <button
                     type="button"
                     onClick={() => toggleSort(h.key)}
-                    className={`inline-flex items-center gap-1 hover:text-moonbeem-ink ${
+                    className={`group inline-flex items-center gap-1 transition-colors ${
                       sortKey === h.key
                         ? "text-moonbeem-pink"
-                        : "text-moonbeem-ink-subtle"
+                        : "text-moonbeem-ink-subtle hover:text-moonbeem-ink"
                     }`}
                   >
                     {h.label}
-                    {sortKey === h.key && (
-                      <span aria-hidden="true">
-                        {sortDir === "desc" ? "↓" : "↑"}
-                      </span>
-                    )}
+                    {sortKey === h.key
+                      ? (
+                        <span aria-hidden="true">
+                          {sortDir === "desc" ? "↓" : "↑"}
+                        </span>
+                      )
+                      : (
+                        // Inactive sortable: arrow renders dim, then
+                        // brightens on header hover so users can see
+                        // the column is sortable.
+                        <span
+                          aria-hidden="true"
+                          className="opacity-0 transition-opacity group-hover:opacity-60"
+                        >
+                          ↓
+                        </span>
+                      )}
                   </button>
                 </th>
               ))}
@@ -149,7 +161,7 @@ export default function AllEditsTable({ rows, titleSlug, titleName }: Props) {
             {sorted.map((r, i) => (
               <tr
                 key={r.id}
-                className="border-b border-white/5 transition-colors hover:bg-white/[0.04]"
+                className="border-b border-white/5 transition-colors hover:bg-gradient-to-r hover:from-moonbeem-violet/[0.08] hover:to-transparent"
               >
                 <td className="px-4 py-3 align-middle text-caption tabular-nums text-moonbeem-ink-subtle">
                   {i + 1}
@@ -161,7 +173,7 @@ export default function AllEditsTable({ rows, titleSlug, titleName }: Props) {
                     aria-label={`Open fan edit by @${
                       r.creator_handle ?? "anon"
                     }`}
-                    className="relative block h-12 w-12 overflow-hidden rounded-md bg-moonbeem-navy/40 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
+                    className="relative block h-12 w-12 overflow-hidden rounded-lg bg-moonbeem-navy/40 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
                   >
                     {r.thumbnail_url
                       ? (

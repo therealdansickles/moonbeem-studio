@@ -109,7 +109,7 @@ export default function TopPerformersCardClient({
                   e.stopPropagation();
                   openAt(i);
                 }}
-                className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-moonbeem-navy/40 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
+                className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-moonbeem-navy/40 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
                 aria-label={`Open fan edit by @${fe.creator_handle ?? "anon"}`}
               >
                 {fe.thumbnail_url
