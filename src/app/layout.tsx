@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import "./globals.css";
 import { inter, jost } from "./fonts";
 import TopNav from "@/components/TopNav";
 import FanEditModalProvider from "@/components/FanEditModalProvider";
+import ConsentProvider from "@/components/consent/ConsentProvider";
+import ConsentBanner from "@/components/consent/ConsentBanner";
 import GoogleAnalytics from "@/components/analytics/GoogleAnalytics";
 import VercelAnalytics from "@/components/analytics/VercelAnalytics";
 import MicrosoftClarity from "@/components/analytics/MicrosoftClarity";
@@ -37,11 +40,17 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Vercel injects the ISO-3166-1 alpha-2 country code on every
+  // request via x-vercel-ip-country. Local dev / non-Vercel hosts
+  // → undefined → ConsentProvider treats as opt-in (safer default).
+  const hdrs = await headers();
+  const country = hdrs.get("x-vercel-ip-country") ?? null;
+
   return (
     <html lang="en" className="h-full">
       <body
@@ -50,10 +59,13 @@ export default function RootLayout({
         <GoogleAnalytics />
         <VercelAnalytics />
         <MicrosoftClarity />
-        <FanEditModalProvider>
-          <TopNav />
-          <main className="flex-1 flex flex-col">{children}</main>
-        </FanEditModalProvider>
+        <ConsentProvider initialCountry={country}>
+          <FanEditModalProvider>
+            <TopNav />
+            <main className="flex-1 flex flex-col">{children}</main>
+            <ConsentBanner />
+          </FanEditModalProvider>
+        </ConsentProvider>
       </body>
     </html>
   );

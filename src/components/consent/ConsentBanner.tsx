@@ -1,0 +1,70 @@
+"use client";
+
+// Bottom-of-viewport consent banner. Shows when:
+//   - Provider has hydrated (isLoaded), AND
+//   - User hasn't decided on the current version yet
+//
+// Three actions: Accept all / Reject all / Customize (opens the
+// ConsentSettingsModal). All three close the banner by writing a
+// decided state to the cookie + server.
+
+import { useConsent } from "./ConsentProvider";
+import ConsentSettingsModal from "./ConsentSettingsModal";
+
+export default function ConsentBanner() {
+  const {
+    isLoaded,
+    hasDecided,
+    acceptAll,
+    rejectAll,
+    openSettings,
+    isSettingsOpen,
+  } = useConsent();
+
+  // Render the modal regardless of banner state — user can reopen
+  // settings post-decision via a future footer link.
+  return (
+    <>
+      {isLoaded && !hasDecided && (
+        <div
+          role="region"
+          aria-label="Cookie consent"
+          className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-moonbeem-black/95 px-4 py-4 backdrop-blur-md shadow-[0_-8px_24px_rgba(0,0,0,0.4)] md:px-6"
+        >
+          <div className="mx-auto flex max-w-5xl flex-col gap-3 md:flex-row md:items-center md:gap-6">
+            <p className="text-body-sm text-moonbeem-ink-muted md:flex-1">
+              Moonbeem uses analytics cookies to understand how the platform
+              performs, and session recording (Microsoft Clarity) to spot UX
+              issues. You can accept both, accept neither, or pick what&apos;s
+              comfortable. We never sell your data.
+            </p>
+            <div className="flex flex-col gap-2 md:flex-row md:flex-shrink-0">
+              <button
+                type="button"
+                onClick={openSettings}
+                className="rounded-md border border-white/15 px-4 py-2 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
+              >
+                Customize
+              </button>
+              <button
+                type="button"
+                onClick={rejectAll}
+                className="rounded-md border border-white/15 px-4 py-2 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
+              >
+                Reject all
+              </button>
+              <button
+                type="button"
+                onClick={acceptAll}
+                className="rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
+              >
+                Accept all
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {isSettingsOpen && <ConsentSettingsModal />}
+    </>
+  );
+}
