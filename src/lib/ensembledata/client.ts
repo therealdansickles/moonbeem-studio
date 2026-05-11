@@ -126,7 +126,7 @@ export function parseShortcodeFromUrl(
   const path = parsed.pathname;
   switch (platform.toLowerCase()) {
     case "tiktok": {
-      const m = path.match(/\/(?:video|v)\/(\d+)/);
+      const m = path.match(/\/(?:video|v|photo)\/(\d+)/);
       return m ? m[1] : null;
     }
     case "instagram": {
@@ -592,6 +592,9 @@ function mapMetrics(platform: Platform, body: unknown): Metrics {
 //
 // parseShortcodeFromUrl('https://www.tiktok.com/@number.1.angel10/video/7627616681170324758', 'tiktok')
 //   -> '7627616681170324758'
+//
+// parseShortcodeFromUrl('https://www.tiktok.com/@starcashdoc/photo/7615333991847120142', 'tiktok')
+//   -> '7615333991847120142'
 //
 // parseShortcodeFromUrl('https://x.com/xcxsource/status/2037213168209191391', 'twitter')
 //   -> '2037213168209191391'
