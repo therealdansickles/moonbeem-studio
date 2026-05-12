@@ -659,7 +659,11 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
 
   const [metrics, topPerformers, topCreators, allEdits] = await Promise.all([
     loadHeroMetrics(supabase, titleIds),
-    loadTopPerformers(supabase, titleIds, 12),
+    // Asymmetric Top-N: edits=10 (content, curated/selective);
+    // editors=12 (people, matches the Moonbeem "Top 12" brand
+    // staple used profile-side). The split preserves the
+    // two-column dashboard's vertical balance.
+    loadTopPerformers(supabase, titleIds, 10),
     loadTopCreators(supabase, titleIds, 12),
     loadAllEdits(supabase, titleIds),
   ]);
