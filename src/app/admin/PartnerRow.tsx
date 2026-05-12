@@ -20,14 +20,16 @@ export default function PartnerRow(props: Props) {
   return (
     <>
       <li className="flex items-center gap-4 py-3">
+        {/* Admin partner-row links to the dashboard (admin intent
+            is analytics access, not the public catalog at /p/<slug>). */}
         <Link
-          href={`/p/${props.slug}`}
+          href={`/p/${props.slug}/dashboard`}
           className="min-w-0 flex-1 text-body font-medium text-moonbeem-ink hover:text-moonbeem-pink"
         >
           {props.name}
         </Link>
         <span className="text-caption text-moonbeem-ink-subtle">
-          /p/{props.slug}
+          /p/{props.slug}/dashboard
         </span>
         <span className="text-body-sm tabular-nums text-moonbeem-ink-muted">
           {props.title_count} {props.title_count === 1 ? "title" : "titles"}
