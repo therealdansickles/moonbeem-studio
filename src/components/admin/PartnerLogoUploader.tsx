@@ -251,7 +251,12 @@ export default function PartnerLogoUploader({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-4">
-        <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/30">
+        {/* 16:9 preview tile (64×114) — matches the spec'd asset
+            aspect, so the modal preview reflects how the logo will
+            actually render in downstream surfaces (partner page
+            header, future marquee). 2026-05-12 follow-up to the
+            same-day aspect-ratio enforcement. */}
+        <div className="relative h-16 w-[7.11rem] shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/30">
           {currentUrl ? (
             // Plain <img>: avoids the next/image domain whitelist
             // requirement for arbitrary R2 public URLs in admin
