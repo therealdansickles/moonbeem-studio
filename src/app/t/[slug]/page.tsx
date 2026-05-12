@@ -128,6 +128,7 @@ export default async function TitlePage({ params }: PageProps) {
       .eq("title_id", title.id)
       .eq("user_id", user.id)
       .eq("request_type", "fan_edits")
+      .is("fulfilled_at", null)
       .maybeSingle();
     if (existingRequest) {
       alreadyRequested = true;
