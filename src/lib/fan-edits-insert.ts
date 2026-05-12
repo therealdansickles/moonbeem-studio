@@ -15,6 +15,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { parseShortcodeFromUrl } from "@/lib/ensembledata/client";
+import { fulfillTitleRequestsForFanEdit } from "@/lib/title-requests/fulfill-on-fan-edit";
 
 export type FanEditCandidate = {
   platform: "tiktok" | "instagram" | "youtube" | "twitter";
@@ -140,5 +141,16 @@ export async function insertFanEditCandidate(
       detail: insertErr?.message ?? "no row returned",
     };
   }
-  return { ok: true, inserted_id: inserted.id as string };
+
+  const insertedId = inserted.id as string;
+  try {
+    await fulfillTitleRequestsForFanEdit(supabase, titleId, insertedId);
+  } catch (e) {
+    console.error("fulfillTitleRequestsForFanEdit failed", {
+      titleId,
+      fanEditId: insertedId,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+  return { ok: true, inserted_id: insertedId };
 }

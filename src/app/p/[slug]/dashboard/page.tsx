@@ -594,27 +594,15 @@ async function loadOpenTitleRequests(
   partnerTitleIds: string[],
 ): Promise<RequestedTitle[]> {
   if (partnerTitleIds.length === 0) return [];
-  // 1. Find titles in this partner's catalog that have any
-  //    published fan_edits — those are the "fulfilled" set to exclude.
-  const { data: publishedRows } = await supabase
-    .from("fan_edits")
-    .select("title_id")
-    .in("title_id", partnerTitleIds)
-    .eq("is_active", true)
-    .eq("verification_status", "auto_verified")
-    .is("deleted_at", null);
-  const fulfilled = new Set(
-    (publishedRows ?? []).map((r) => r.title_id as string),
-  );
-  const openTitleIds = partnerTitleIds.filter((id) => !fulfilled.has(id));
-  if (openTitleIds.length === 0) return [];
-
-  // 2. Pull title_requests for the unfulfilled set.
+  // Open = fulfilled_at IS NULL. Fulfillment is set by the fan-edit
+  // insert hook (and the /api/titles/request handler when the title is
+  // already covered) — no need to re-derive via fan_edits join here.
   const { data: requests } = await supabase
     .from("title_requests")
     .select("title_id, requested_at, request_type")
-    .in("title_id", openTitleIds)
-    .eq("request_type", "fan_edits");
+    .in("title_id", partnerTitleIds)
+    .eq("request_type", "fan_edits")
+    .is("fulfilled_at", null);
   if (!requests || requests.length === 0) return [];
 
   // 3. Group + latest-timestamp per title.

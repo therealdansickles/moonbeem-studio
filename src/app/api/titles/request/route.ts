@@ -102,11 +102,27 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // If the title already has a published fan_edit, the request is
+  // pre-fulfilled at insert time. No notification fires — that's the
+  // fan-edit fulfillment hook's job, and this isn't a fan_edit insert.
+  // Visibility = same 3-condition rule the fan_edit display surfaces use.
+  const { data: existingFanEdit } = await supabase
+    .from("fan_edits")
+    .select("id")
+    .eq("title_id", body.title_id)
+    .eq("is_active", true)
+    .eq("verification_status", "auto_verified")
+    .is("deleted_at", null)
+    .limit(1)
+    .maybeSingle();
+  const fulfilledAt = existingFanEdit ? new Date().toISOString() : null;
+
   const { error } = await supabase.from("title_requests").insert({
     title_id: body.title_id,
     user_id: user.id,
     request_type: requestType,
     user_agent: request.headers.get("user-agent")?.slice(0, 500) ?? null,
+    fulfilled_at: fulfilledAt,
   });
 
   if (error) {

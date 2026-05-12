@@ -28,6 +28,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
+import { fulfillTitleRequestsForFanEdit } from "@/lib/title-requests/fulfill-on-fan-edit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { parseShortcodeFromUrl } from "@/lib/ensembledata/client";
 
@@ -377,12 +378,29 @@ export async function POST(request: NextRequest): Promise<Response> {
       // Counters use schema defaults (0).
     };
 
-    const { error: insertErr } = await supabase
+    const { data: inserted, error: insertErr } = await supabase
       .from("fan_edits")
-      .insert(insertRow);
-    if (insertErr) {
-      reject(`insert failed: ${insertErr.code ?? ""} ${insertErr.message}`);
+      .insert(insertRow)
+      .select("id")
+      .maybeSingle();
+    if (insertErr || !inserted) {
+      reject(
+        `insert failed: ${insertErr?.code ?? ""} ${insertErr?.message ?? "no row returned"}`,
+      );
       continue;
+    }
+    try {
+      await fulfillTitleRequestsForFanEdit(
+        supabase,
+        rawTitleId,
+        inserted.id as string,
+      );
+    } catch (e) {
+      console.error("fulfillTitleRequestsForFanEdit failed (csv import)", {
+        titleId: rawTitleId,
+        fanEditId: inserted.id,
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
     result.imported += 1;
   }

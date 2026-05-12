@@ -7,6 +7,12 @@ export type NotifyArgs = {
   titleId: string;
   contentType: ContentType;
   contentIds: string[];
+  // When provided, send to exactly these user_ids (skip the
+  // title_requests lookup). Used by the fan-edit fulfillment hook
+  // which already knows which requesters were just fulfilled and
+  // must NOT notify any others — only those user_ids whose request
+  // transitioned to fulfilled in this insert event.
+  userIds?: string[];
 };
 
 export type NotifyResult = {
@@ -42,22 +48,28 @@ export async function notifyTitleRequesters(
     return result;
   }
 
-  const { data: requestRows, error: reqErr } = await supabase
-    .from("title_requests")
-    .select("user_id")
-    .eq("title_id", titleId)
-    .not("user_id", "is", null);
-  if (reqErr) {
-    return result;
+  let userIds: string[];
+  if (args.userIds) {
+    userIds = Array.from(
+      new Set(args.userIds.filter((id): id is string => Boolean(id))),
+    );
+  } else {
+    const { data: requestRows, error: reqErr } = await supabase
+      .from("title_requests")
+      .select("user_id")
+      .eq("title_id", titleId)
+      .not("user_id", "is", null);
+    if (reqErr) {
+      return result;
+    }
+    userIds = Array.from(
+      new Set(
+        (requestRows ?? [])
+          .map((r) => r.user_id as string | null)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
   }
-
-  const userIds = Array.from(
-    new Set(
-      (requestRows ?? [])
-        .map((r) => r.user_id as string | null)
-        .filter((id): id is string => Boolean(id)),
-    ),
-  );
   if (userIds.length === 0) return result;
 
   const { data: usersRows } = await supabase
