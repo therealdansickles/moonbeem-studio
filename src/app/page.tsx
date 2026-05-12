@@ -36,12 +36,12 @@ export default async function Home() {
       </div>
 
       <div className="w-full pb-10">
-        <TitleCarousel title="Featured" titles={featured} />
+        <TitleCarousel title="Featured Films" titles={featured} />
       </div>
 
       {trending.length > 0 && (
         <div className="w-full pb-10">
-          <FanEditCarousel title="Trending" fanEdits={trending} />
+          <FanEditCarousel title="Trending Fan Edits" fanEdits={trending} />
         </div>
       )}
 
