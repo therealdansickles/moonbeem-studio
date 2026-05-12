@@ -272,12 +272,23 @@ function ModalContent({
         {/* Header */}
         <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
           <div className="flex min-w-0 flex-col gap-0.5">
-            <Link
-              href={`/t/${titleSlug}`}
-              className="truncate text-caption text-moonbeem-ink-subtle hover:text-moonbeem-ink"
-            >
-              {titleName}
-            </Link>
+            {/* Byline-title link only renders for same-title
+                contexts. Homepage Recent Edits + Trending Fan Edits
+                carousels are cross-title — arrow-navigating across
+                siblings that belong to different titles would make a
+                fixed-at-open titleSlug stale. Call sites in those
+                carousels pass titleSlug=""; the byline is suppressed
+                here. (Each card in the carousel still shows its own
+                title attribution before the modal opens, so the
+                information isn't lost.) */}
+            {titleSlug ? (
+              <Link
+                href={`/t/${titleSlug}`}
+                className="truncate text-caption text-moonbeem-ink-subtle hover:text-moonbeem-ink"
+              >
+                {titleName}
+              </Link>
+            ) : null}
             {handleHasLink ? (
               <Link
                 id={bylineId}

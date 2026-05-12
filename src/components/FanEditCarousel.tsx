@@ -47,13 +47,17 @@ export default function FanEditCarousel({ title, fanEdits }: Props) {
           role="list"
           onDragStart={(e) => e.preventDefault()}
         >
-          {fanEdits.map((fe) => (
+          {fanEdits.map((fe, idx) => (
             <div
               key={fe.id}
               role="listitem"
               className="w-[200px] shrink-0 snap-start md:w-[260px] lg:w-[280px]"
             >
-              <FanEditCard fanEdit={fe} />
+              <FanEditCard
+                fanEdit={fe}
+                siblings={fanEdits}
+                siblingIndex={idx}
+              />
             </div>
           ))}
         </div>
