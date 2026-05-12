@@ -88,7 +88,11 @@ export function parseShortcodeFromUrl(
   const path = parsed.pathname;
   switch (platform.toLowerCase()) {
     case "tiktok": {
-      const m = path.match(/\/(?:video|v)\/(\d+)/);
+      // /photo/ added 2026-05-11 to close dual-copy drift with
+      // src/lib/ensembledata/client.ts (commit 6783928). Without it,
+      // photo carousels (aweme_type 150) parse_error and silently
+      // stall the picker queue.
+      const m = path.match(/\/(?:video|v|photo)\/(\d+)/);
       return m ? m[1] : null;
     }
     case "instagram": {

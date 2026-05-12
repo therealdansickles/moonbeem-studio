@@ -99,6 +99,9 @@ export async function writeSnapshotAndUpdateFanEdit(
   // snapshot row above preserves the actual null for forensic accuracy.
   // duration_seconds and aspect_ratio are EnsembleData-only and always
   // updated (no oEmbed conflict to worry about).
+  // last_refresh_error / _at cleared so stale error state from prior
+  // ticks (silent-skip parse_error, transient fetch, write_failed)
+  // doesn't outlive recovery; NULL = no error currently recorded.
   const update: Record<string, unknown> = {
     view_count: metrics.view_count ?? 0,
     like_count: metrics.like_count ?? 0,
@@ -108,6 +111,8 @@ export async function writeSnapshotAndUpdateFanEdit(
     aspect_ratio: metrics.aspect_ratio,
     last_refreshed_at: new Date().toISOString(),
     view_tracking_failure_count: 0,
+    last_refresh_error: null,
+    last_refresh_error_at: null,
   };
   if (shouldUpdateThumb && metrics.thumbnail_url) {
     // Re-host on R2 so we own the asset. Platform CDN URLs (Instagram
@@ -196,4 +201,29 @@ export async function handleFailure(
   }
 
   return { markedDead: shouldMarkDead, newFailureCount: newCount };
+}
+
+// Records a per-row error on fan_edits for the silent-skip failure
+// paths (parse_error, transient) and the write_failed catch — none of
+// which previously touched fan_edits state. last_refreshed_at is
+// intentionally NOT updated here so the picker keeps re-trying the
+// row on every tick (its position in the ASC NULLS FIRST queue is
+// preserved). Best-effort: caller catches and logs without throwing.
+export async function recordRefreshError(
+  supabase: SupabaseClient,
+  fanEditId: string,
+  errorString: string,
+): Promise<void> {
+  const upd = await supabase
+    .from("fan_edits")
+    .update({
+      last_refresh_error: errorString,
+      last_refresh_error_at: new Date().toISOString(),
+    })
+    .eq("id", fanEditId);
+  if (upd.error) {
+    throw new Error(
+      `[view-tracking] recordRefreshError update failed for ${fanEditId}: ${upd.error.message}`,
+    );
+  }
 }

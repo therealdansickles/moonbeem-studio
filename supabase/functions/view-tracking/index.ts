@@ -41,6 +41,7 @@ import {
 import { fetchEngagementMetrics } from "./ensemble.ts";
 import {
   handleFailure,
+  recordRefreshError,
   writeSnapshotAndUpdateFanEdit,
 } from "./upsert.ts";
 import {
@@ -205,11 +206,27 @@ Deno.serve(async (_req: Request) => {
           counters.fan_edits_succeeded += 1;
         } catch (err) {
           counters.fan_edits_failed += 1;
+          const msg = err instanceof Error ? err.message : String(err);
           console.error(
-            `[view-tracking] write failed for ${fe.id}: ${
-              err instanceof Error ? err.message : err
-            }`,
+            `[view-tracking] write failed for ${fe.id}: ${msg}`,
           );
+          // Surface the write_failed reason on fan_edits so it's
+          // queryable without trawling Edge Function logs. Best-effort:
+          // if the error record itself fails, log and move on (the
+          // primary write failure has already been counted).
+          try {
+            await recordRefreshError(
+              supabase,
+              fe.id as string,
+              `write_failed: ${msg}`,
+            );
+          } catch (recErr) {
+            console.error(
+              `[view-tracking] recordRefreshError after write_failed for ${fe.id}: ${
+                recErr instanceof Error ? recErr.message : recErr
+              }`,
+            );
+          }
         }
       } else if (
         result.error === "not_found" || result.error === "private"
@@ -239,11 +256,27 @@ Deno.serve(async (_req: Request) => {
         earlyExitReason = "rate_limited";
         break;
       } else {
-        // 'transient' or 'parse_error' — skip without state change.
-        // (Not the post's fault; don't increment failure_count.)
+        // 'transient' or 'parse_error' — skip without changing
+        // last_refreshed_at or failure_count (not the post's fault).
+        // Do record the per-row error so silent-skip classes (e.g.
+        // pre-2026-05-11 TikTok /photo/ rows) are queryable from
+        // fan_edits directly instead of inferred from picker drift.
         console.warn(
           `[view-tracking] SKIPPED fan_edit_id=${fe.id} reason=${result.error}`,
         );
+        try {
+          await recordRefreshError(
+            supabase,
+            fe.id as string,
+            `${result.error}: ${fe.platform as string} fetch returned ${result.error}`,
+          );
+        } catch (recErr) {
+          console.error(
+            `[view-tracking] recordRefreshError after ${result.error} for ${fe.id}: ${
+              recErr instanceof Error ? recErr.message : recErr
+            }`,
+          );
+        }
       }
 
       lastProcessed = fe.id as string;
