@@ -211,7 +211,7 @@ async function main() {
       const r2Url = await rehostOne(row.id, row.thumbnail_url, row.embed_url);
       const { error: upErr } = await supabase
         .from("fan_edits")
-        .update({ thumbnail_url: r2Url })
+        .update({ thumbnail_url: r2Url, thumbnail_source: 'manual_rehost' })
         .eq("id", row.id);
       if (upErr) throw new Error(upErr.message);
       console.log(`  OK   ${row.id}`);
