@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 
 // Distribution partner order for the homepage logo strip. Hardcoded
 // for the 2026-05-12 Emerson Collective pitch. Super-admin reorder
@@ -20,7 +20,12 @@ export type MarqueePartner = {
 };
 
 export async function getMarqueePartners(): Promise<MarqueePartner[]> {
-  const supabase = await createClient();
+  // Service-role client: partners has RLS enabled with no SELECT
+  // policy yet, so the cookie-bound anon client returns zero rows
+  // for unauthenticated visitors. Matches the convention used by
+  // /p/[slug] page. Followup queued to add a public SELECT policy
+  // so future public reads can drop the service-role escalation.
+  const supabase = createServiceRoleClient();
   const { data, error } = await supabase
     .from("partners")
     .select("slug, name, logo_url")
