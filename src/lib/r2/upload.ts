@@ -59,12 +59,24 @@ export function buildStillKey(
   return `stills/${titleSlug}/${index}.${safeExt(ext)}`;
 }
 
-// partners/<slug>/logo.<ext>. Slug-based path (not id-based) so the
+// partners/<slug>/logo-<ms>.<ext>. Slug-based directory so the
 // "create new partner" flow can upload before the partner row's id
-// is known to the client. If a slug is later changed via Edit
-// Partner, the stored logo_url still resolves — we don't move the
-// R2 object on slug change. Re-upload to overwrite at the new slug
-// path if you want the file to follow the URL.
+// is known to the client. The Date.now() ms suffix makes each
+// upload mint a NEW public URL — browsers and CDNs treat it as a
+// fresh resource and don't serve stale bytes from a prior
+// replacement (caught 2026-05-12 in Phase B smoke test on
+// Magnolia: replacing /partners/magnolia-pictures/logo.png left
+// the browser cache serving the morning's square 64 KB version
+// even though R2 had the new 16:9 file). Mirrors the unique-key
+// pattern used by fan_edits/<id>/thumb.jpg.
+//
+// Orphaned objects from prior uploads at partners/<slug>/logo-*.<ext>
+// are NOT deleted here — a post-pitch reconciliation cron will
+// purge keys that don't match a current partners.logo_url.
+//
+// If a slug is later changed via Edit Partner, the stored logo_url
+// still resolves — we don't move the R2 object on slug change.
+// Re-upload at the new slug to land bytes under that path.
 export function buildPartnerLogoKey(slug: string, ext: string): string {
-  return `partners/${slug}/logo.${safeExt(ext)}`;
+  return `partners/${slug}/logo-${Date.now()}.${safeExt(ext)}`;
 }
