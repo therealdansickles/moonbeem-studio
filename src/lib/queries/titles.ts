@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 
 export type CastMember = {
   name: string;
@@ -176,6 +177,38 @@ export async function getFeaturedTitles(): Promise<Title[]> {
     .eq("is_featured", true)
     .eq("is_active", true)
     .order("created_at", { ascending: true });
+  if (error || !data) return [];
+  return data as Title[];
+}
+
+// Comprehensive catalog of all films on Moonbeem — feeds the
+// homepage "All Films" carousel below Recent Remixes. Filters on
+// media_type='movie' to exclude TMDB-imported TV rows from the
+// catalog (today's 11 rows are all movies; the filter future-
+// proofs against TV bleed-in).
+//
+// When the title_type column ships with the manual title creation
+// flow, swap the filter to title_type='movie' — that's the
+// canonical content-type taxonomy (movie | tv_series | tv_episode
+// | fashion_show | campaign | runway | performance). media_type
+// stays as the TMDB-import audit field. (followup queued)
+//
+// Featured titles intentionally appear in BOTH Featured and All
+// Films — Featured is editorial curation, All Films is
+// comprehensive coverage. Same posters in two carousels.
+//
+// Service-role client matches the convention used by the partner-
+// catalog page; the homepage page.tsx fans out reads in parallel
+// alongside getFeaturedTitles + getRecentFanEdits + getMarqueePartners.
+export async function getAllFilms(): Promise<Title[]> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("titles")
+    .select("*")
+    .eq("is_public", true)
+    .eq("is_active", true)
+    .eq("media_type", "movie")
+    .order("created_at", { ascending: false });
   if (error || !data) return [];
   return data as Title[];
 }
