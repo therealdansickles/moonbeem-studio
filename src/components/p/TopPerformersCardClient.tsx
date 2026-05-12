@@ -78,7 +78,7 @@ export default function TopPerformersCardClient({
     <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
       <div className="flex items-center gap-3">
         <span className="rounded-full bg-moonbeem-pink/15 px-2.5 py-0.5 text-caption font-medium text-moonbeem-pink">
-          Top performers
+          Top edits
         </span>
         <span className="text-caption text-moonbeem-ink-subtle">
           by view count

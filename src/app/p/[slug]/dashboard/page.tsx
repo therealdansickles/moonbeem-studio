@@ -528,7 +528,7 @@ function TopCreatorsCard({ creators }: { creators: TopCreator[] }) {
     <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
       <div className="flex items-center gap-3">
         <span className="rounded-full bg-moonbeem-pink/15 px-2.5 py-0.5 text-caption font-medium text-moonbeem-pink">
-          Top fan editors
+          Top editors
         </span>
         <span className="text-caption text-moonbeem-ink-subtle">
           by total views
@@ -659,8 +659,8 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
 
   const [metrics, topPerformers, topCreators, allEdits] = await Promise.all([
     loadHeroMetrics(supabase, titleIds),
-    loadTopPerformers(supabase, titleIds, 10),
-    loadTopCreators(supabase, titleIds, 10),
+    loadTopPerformers(supabase, titleIds, 12),
+    loadTopCreators(supabase, titleIds, 12),
     loadAllEdits(supabase, titleIds),
   ]);
   const fanEditIdsForTracking = allEdits.map((r) => r.id);
