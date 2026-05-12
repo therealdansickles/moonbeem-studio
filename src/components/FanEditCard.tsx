@@ -51,20 +51,19 @@ export default function FanEditCard({
       typeof siblingIndex === "number" &&
       siblingIndex >= 0 &&
       siblingIndex < siblings.length;
+    // Modal byline derives from per-fanEdit title_slug/title_name
+    // on each item (FanEditWithTitle already carries them), so the
+    // byline tracks the current card during arrow-nav across
+    // cross-title carousels. Top-level titleSlug/titleName are
+    // still passed for back-compat with any legacy reader.
     if (hasCarousel) {
-      // Cross-title carousel: full siblings list, empty title fields
-      // so the modal hides the byline-title link (avoids the link
-      // pointing at the WRONG title after arrow-navigating to a
-      // sibling that belongs to a different title).
       open({
         fanEdits: siblings!,
         index: siblingIndex!,
-        titleSlug: "",
-        titleName: "",
+        titleSlug: fanEdit.title_slug,
+        titleName: fanEdit.title_name,
       });
     } else {
-      // Standalone card (no parent carousel): retain the original
-      // single-item open with the byline-title link.
       open({
         fanEdits: [fanEdit],
         index: 0,

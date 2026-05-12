@@ -218,6 +218,13 @@ function ModalContent({
     "anon";
   const handleHasLink = !!fanEdit.creator_moonbeem_handle;
   const bylineId = `fan-edit-modal-byline-${fanEdit.id}`;
+  // Per-fanEdit title fields take precedence over the top-level
+  // titleSlug/titleName props so the byline updates as the user
+  // arrow-navigates across siblings of different titles. Top-level
+  // remains the fallback for admin callers (AllEditsTable,
+  // TopPerformersCardClient) that pass a fixed title at open time.
+  const bylineTitleSlug = fanEdit.title_slug ?? titleSlug ?? "";
+  const bylineTitleName = fanEdit.title_name ?? titleName ?? "";
 
   return (
     <div
@@ -272,21 +279,26 @@ function ModalContent({
         {/* Header */}
         <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
           <div className="flex min-w-0 flex-col gap-0.5">
-            {/* Byline-title link only renders for same-title
-                contexts. Homepage Recent Edits + Trending Fan Edits
-                carousels are cross-title — arrow-navigating across
-                siblings that belong to different titles would make a
-                fixed-at-open titleSlug stale. Call sites in those
-                carousels pass titleSlug=""; the byline is suppressed
-                here. (Each card in the carousel still shows its own
-                title attribution before the modal opens, so the
-                information isn't lost.) */}
-            {titleSlug ? (
+            {/* Byline title link prefers per-fanEdit title fields
+                (cross-title callers — homepage Recent Edits +
+                Trending Edits — set them so the byline tracks the
+                current card during arrow-nav), falling back to the
+                top-level titleSlug/titleName for legacy callers
+                (admin /p/[slug] AllEditsTable +
+                TopPerformersCardClient) that pass a fixed title at
+                open time. onClick={onClose} fires before navigation
+                so the modal also closes when the byline target URL
+                matches the current URL (e.g. clicking "Erupcja"
+                while already on /t/erupcja — Next.js routes to the
+                same path as a no-op and would leave the modal stuck
+                open without an explicit close). */}
+            {bylineTitleSlug && bylineTitleName ? (
               <Link
-                href={`/t/${titleSlug}`}
+                href={`/t/${bylineTitleSlug}`}
+                onClick={onClose}
                 className="truncate text-caption text-moonbeem-ink-subtle hover:text-moonbeem-ink"
               >
-                {titleName}
+                {bylineTitleName}
               </Link>
             ) : null}
             {handleHasLink ? (
