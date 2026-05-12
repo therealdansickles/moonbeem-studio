@@ -506,3 +506,142 @@ export async function getRecentFanEdits(
     };
   });
 }
+
+// Trending fan edits — top N by view-count delta over the past 24h.
+// Uses existing view_tracking_snapshots data (no new schema, no new
+// cron, no first-run NULL trap). Snapshots are written by the
+// view-tracking Edge Function every ~20h per fan_edit; 39% of
+// active fan_edits have at least one snapshot from ≥24h ago as of
+// the initial deploy, growing as the cron continues to populate
+// history.
+//
+// Algorithm:
+//   1. Fetch all snapshots for active fan_edits in a single round
+//      trip. 847 rows total today — well under any limit.
+//   2. Group by fan_edit_id: pick the LATEST snapshot and the
+//      most-recent snapshot ≤24h ago.
+//   3. Rows with BOTH a latest and a 24h-prior snapshot get a
+//      delta. Rows with only a latest (recently ingested, no
+//      history) are excluded — they're noise for a "trending"
+//      ranking.
+//   4. Order by delta DESC, limit N, then hydrate with title +
+//      creator handle joins to match FanEditWithTitle shape.
+//
+// Service-role client matches the partner-catalog convention; also
+// view_tracking_snapshots has no public SELECT policy.
+export async function getTrendingFanEdits(
+  limit = 12,
+): Promise<FanEditWithTitle[]> {
+  const supabase = createServiceRoleClient();
+
+  // 1. Active, undeleted, verified fan_edits with the standard
+  //    filters used by getRecentFanEdits. The view-tracking-status
+  //    filter is critical — deleted/private/dead rows aren't
+  //    trending material.
+  const { data: feActive } = await supabase
+    .from("fan_edits")
+    .select("id")
+    .eq("is_active", true)
+    .eq("verification_status", "auto_verified")
+    .eq("view_tracking_status", "active")
+    .is("deleted_at", null);
+  const activeIds = (feActive ?? []).map((r) => r.id as string);
+  if (activeIds.length === 0) return [];
+
+  // 2. All snapshots for those fan_edits, oldest first so we can
+  //    walk the array and "last wins" for the latest pointer.
+  const { data: allSnaps } = await supabase
+    .from("view_tracking_snapshots")
+    .select("fan_edit_id, view_count, captured_at")
+    .in("fan_edit_id", activeIds)
+    .order("captured_at", { ascending: true });
+
+  const cutoff24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const latestByFe = new Map<string, { view_count: number; captured_at: string }>();
+  const oldByFe = new Map<string, { view_count: number; captured_at: string }>();
+  for (const s of allSnaps ?? []) {
+    const id = s.fan_edit_id as string;
+    const snap = {
+      view_count: (s.view_count as number | null) ?? 0,
+      captured_at: s.captured_at as string,
+    };
+    latestByFe.set(id, snap);
+    if (snap.captured_at <= cutoff24h) oldByFe.set(id, snap);
+  }
+
+  // 3. Compute deltas only for fan_edits with BOTH latest and ≥24h
+  //    ago snapshots. INNER JOIN semantics: rows without coverage
+  //    are skipped entirely, never padded with zeros.
+  const ranked: { id: string; delta: number }[] = [];
+  for (const id of activeIds) {
+    const latest = latestByFe.get(id);
+    const old = oldByFe.get(id);
+    if (!latest || !old) continue;
+    ranked.push({ id, delta: latest.view_count - old.view_count });
+  }
+  ranked.sort((a, b) => b.delta - a.delta);
+  const topIds = ranked.slice(0, limit).map((r) => r.id);
+  if (topIds.length === 0) return [];
+
+  // 4. Hydrate to FanEditWithTitle shape — same JOIN pattern as
+  //    getRecentFanEdits. Service-role bypasses fan_edits and
+  //    titles RLS; both have public SELECT policies anyway but
+  //    we stay on service-role for consistency with this function's
+  //    snapshot read.
+  const { data: hydrated } = await supabase
+    .from("fan_edits")
+    .select(
+      "id, title_id, platform, embed_url, thumbnail_url, creator_handle_displayed, creator_id, created_at, titles!inner(slug, title, poster_url, is_active)",
+    )
+    .in("id", topIds)
+    .eq("titles.is_active", true);
+  const rowsRaw = (hydrated ?? []) as unknown as FanEditJoinRow[];
+  const rows = rowsRaw.filter((r) => r.titles && r.titles.poster_url);
+
+  // Preserve the delta-ranked order (hydrate query loses it).
+  const orderIndex = new Map(topIds.map((id, i) => [id, i]));
+  rows.sort(
+    (a, b) =>
+      (orderIndex.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+      (orderIndex.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+  );
+
+  // Creator handle map (mirrors getRecentFanEdits).
+  const creatorIds = Array.from(
+    new Set(rows.map((r) => r.creator_id).filter((id): id is string => !!id)),
+  );
+  const handleById = new Map<string, string>();
+  if (creatorIds.length > 0) {
+    const { data: creators } = await supabase
+      .from("public_creators")
+      .select("id, moonbeem_handle")
+      .in("id", creatorIds);
+    for (const c of (creators ?? []) as Array<{
+      id: string;
+      moonbeem_handle: string;
+    }>) {
+      handleById.set(c.id, c.moonbeem_handle);
+    }
+  }
+
+  return rows.map((r) => {
+    const moonbeemHandle = r.creator_id
+      ? (handleById.get(r.creator_id) ?? null)
+      : null;
+    return {
+      id: r.id,
+      title_id: r.title_id,
+      creator_handle:
+        moonbeemHandle ?? r.creator_handle_displayed ?? "anon",
+      creator_handle_displayed: r.creator_handle_displayed,
+      creator_moonbeem_handle: moonbeemHandle,
+      platform: r.platform,
+      embed_url: r.embed_url,
+      thumbnail_url: r.thumbnail_url,
+      title_slug: r.titles!.slug,
+      title_name: r.titles!.title,
+      title_poster_url: r.titles!.poster_url!,
+      created_at: r.created_at,
+    };
+  });
+}
