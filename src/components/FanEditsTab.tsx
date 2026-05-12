@@ -13,6 +13,10 @@ type Props = {
   fanEdits: FanEdit[];
   titleSlug: string;
   titleName: string;
+  // Forwarded to FanEditThumbnail as the per-title poster
+  // fallback when a row's thumbnail_url is null (e.g.
+  // deleted_from_platform rows).
+  titlePosterUrl?: string | null;
 };
 
 const platformOrder = ["tiktok", "instagram", "twitter", "youtube"] as const;
@@ -30,6 +34,7 @@ export default function FanEditsTab({
   fanEdits,
   titleSlug,
   titleName,
+  titlePosterUrl,
 }: Props) {
   const { open } = useFanEditModal();
 
@@ -105,6 +110,7 @@ export default function FanEditsTab({
                   <FanEditThumbnail
                     key={fe.id}
                     fanEdit={fe}
+                    titlePosterUrl={titlePosterUrl}
                     eager={eagerIds.has(fe.id)}
                     onOpen={() => {
                       trackFanEditClick({

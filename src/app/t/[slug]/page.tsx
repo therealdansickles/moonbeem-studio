@@ -222,6 +222,7 @@ export default async function TitlePage({ params }: PageProps) {
                 fanEdits={fanEdits}
                 titleSlug={title.slug}
                 titleName={title.title}
+                titlePosterUrl={title.poster_url}
               />
             }
             videosContent={<VideosTab clips={clips} />}

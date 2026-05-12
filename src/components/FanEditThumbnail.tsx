@@ -8,6 +8,12 @@ import PlatformIcon from "./PlatformIcon";
 
 type Props = {
   fanEdit: FanEdit;
+  // Per-title poster fallback when fanEdit.thumbnail_url is null
+  // (e.g. row was marked deleted_from_platform and the broken
+  // upstream thumb was nulled out). Mirrors FanEditCard's
+  // `fanEdit.thumbnail_url ?? fanEdit.title_poster_url` pattern.
+  // The animate-pulse gradient only renders when BOTH are missing.
+  titlePosterUrl?: string | null;
   eager?: boolean;
   onOpen: () => void;
 };
@@ -39,12 +45,22 @@ function aspectFor(fe: FanEdit): string {
   }
 }
 
-export default function FanEditThumbnail({ fanEdit, eager, onOpen }: Props) {
+export default function FanEditThumbnail({
+  fanEdit,
+  titlePosterUrl,
+  eager,
+  onOpen,
+}: Props) {
   const handle =
     fanEdit.creator_moonbeem_handle ??
     fanEdit.creator_handle_displayed ??
     "anon";
-  const hasThumb = !!fanEdit.thumbnail_url;
+  // Mirror FanEditCard's fallback chain: thumbnail → title poster
+  // → animate-pulse gradient (final). Rows marked
+  // deleted_from_platform get thumbnail_url=NULL so they land on
+  // the title-poster fallback rather than showing a loading shimmer.
+  const renderSrc = fanEdit.thumbnail_url ?? titlePosterUrl ?? null;
+  const hasImage = !!renderSrc;
 
   function handleClick() {
     vibrate(8);
@@ -63,14 +79,14 @@ export default function FanEditThumbnail({ fanEdit, eager, onOpen }: Props) {
         className="group absolute inset-0 block overflow-hidden rounded-xl bg-moonbeem-navy/40 transition-[transform,box-shadow] duration-200 ease-out hover:scale-[1.02] hover:shadow-[0_20px_40px_rgba(245,197,225,0.25)] active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
         aria-label={`Play fan edit by @${handle} on ${platformLabel[fanEdit.platform]}`}
       >
-        {hasThumb ? (
+        {hasImage ? (
           <Image
-            src={fanEdit.thumbnail_url!}
+            src={renderSrc!}
             alt=""
             fill
             sizes="(max-width: 768px) 50vw, 33vw"
             loading={eager ? "eager" : "lazy"}
-            unoptimized
+            unoptimized={!!fanEdit.thumbnail_url}
             draggable={false}
             className="select-none object-cover"
           />
