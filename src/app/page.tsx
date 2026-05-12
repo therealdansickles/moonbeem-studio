@@ -41,7 +41,7 @@ export default async function Home() {
 
       {trending.length > 0 && (
         <div className="w-full pb-10">
-          <FanEditCarousel title="Trending Fan Edits" fanEdits={trending} />
+          <FanEditCarousel title="Trending Edits" fanEdits={trending} />
         </div>
       )}
 
