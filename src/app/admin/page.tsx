@@ -352,22 +352,63 @@ function SectionHeader({
   );
 }
 
+// Open title requests across the platform — surfaced on the
+// /admin Quick actions row as a card-level operational signal.
+// Counts request ROWS (not distinct titles) for titles that still
+// have zero published fan_edits (is_active + auto_verified + not
+// deleted). Mirrors the per-partner card on /p/<slug>/dashboard
+// but skips the partner_id filter — super-admin sees platform-wide
+// state including titles without an attached partner.
+async function loadOpenRequestCount(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+): Promise<number> {
+  const { data: reqs } = await supabase
+    .from("title_requests")
+    .select("title_id")
+    .eq("request_type", "fan_edits");
+  if (!reqs || reqs.length === 0) return 0;
+
+  const titleIds = Array.from(new Set(reqs.map((r) => r.title_id as string)));
+  const { data: published } = await supabase
+    .from("fan_edits")
+    .select("title_id")
+    .in("title_id", titleIds)
+    .eq("is_active", true)
+    .eq("verification_status", "auto_verified")
+    .is("deleted_at", null);
+  const fulfilled = new Set(
+    (published ?? []).map((r) => r.title_id as string),
+  );
+  let count = 0;
+  for (const r of reqs) {
+    if (!fulfilled.has(r.title_id as string)) count++;
+  }
+  return count;
+}
+
 export default async function AdminLanding() {
   await requireSuperAdminOr404();
   const supabase = createServiceRoleClient();
 
   const partners = await loadPartners(supabase);
-  const [titles, catalogCounts, withdrawals, earnings, latestRunsMap] =
-    await Promise.all([
-      loadTitles(supabase, partners),
-      loadCatalogCounts(supabase),
-      loadRecentWithdrawals(supabase),
-      loadRecentEarnings(supabase),
-      getLatestAdminActionRuns([
-        "earnings_calculate",
-        "view_tracking_trigger",
-      ]),
-    ]);
+  const [
+    titles,
+    catalogCounts,
+    withdrawals,
+    earnings,
+    latestRunsMap,
+    openRequestCount,
+  ] = await Promise.all([
+    loadTitles(supabase, partners),
+    loadCatalogCounts(supabase),
+    loadRecentWithdrawals(supabase),
+    loadRecentEarnings(supabase),
+    getLatestAdminActionRuns([
+      "earnings_calculate",
+      "view_tracking_trigger",
+    ]),
+    loadOpenRequestCount(supabase),
+  ]);
   const lastRuns: Partial<Record<AdminActionKey, AdminActionRun>> = {};
   for (const [k, v] of latestRunsMap) lastRuns[k] = v;
 
@@ -390,14 +431,6 @@ export default async function AdminLanding() {
           <p className="text-body text-moonbeem-ink-muted m-0">
             All partners, all titles, all earnings · super-admin view
           </p>
-          <div className="mt-2 flex items-center gap-4 text-caption">
-            <Link
-              href="/admin/requests"
-              className="text-moonbeem-pink hover:underline"
-            >
-              Title requests →
-            </Link>
-          </div>
         </div>
 
         {/* Quick actions */}
@@ -407,7 +440,10 @@ export default async function AdminLanding() {
             pillTone="violet"
             title="ops triggers"
           />
-          <AdminQuickActions lastRuns={lastRuns} />
+          <AdminQuickActions
+            lastRuns={lastRuns}
+            openRequestCount={openRequestCount}
+          />
         </div>
 
         {/* Partners */}
