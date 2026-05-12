@@ -47,7 +47,7 @@ export default async function Home() {
 
       {recentFanEdits.length > 0 && (
         <div className="w-full pb-10">
-          <FanEditCarousel title="Recent Remixes" fanEdits={recentFanEdits} />
+          <FanEditCarousel title="Recent Edits" fanEdits={recentFanEdits} />
         </div>
       )}
 
