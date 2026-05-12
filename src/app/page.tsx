@@ -2,18 +2,21 @@ import {
   getFeaturedTitles,
   getRecentFanEdits,
 } from "@/lib/queries/titles";
+import { getMarqueePartners } from "@/lib/queries/partners";
 import TitleCarousel from "@/components/TitleCarousel";
 import FanEditCarousel from "@/components/FanEditCarousel";
+import PartnerLogoStrip from "@/components/PartnerLogoStrip";
 
 export default async function Home() {
-  const [featured, recentFanEdits] = await Promise.all([
+  const [featured, recentFanEdits, partners] = await Promise.all([
     getFeaturedTitles(),
     getRecentFanEdits(12),
+    getMarqueePartners(),
   ]);
 
   return (
     <div className="relative flex flex-col items-stretch bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)] flex-1">
-      <div className="flex items-center justify-center overflow-hidden px-4 pt-8 pb-6 md:pt-12 md:pb-8">
+      <div className="flex items-center justify-center overflow-hidden px-4 pt-8 pb-6 md:pt-12 md:pb-4">
         {/* Fluid wordmark: clamps from 2.5rem (40px, smallest mobile)
             up to 6rem (96px, matches the design-system
             --text-display-xl on desktop). 12vw is the preferred
@@ -22,6 +25,10 @@ export default async function Home() {
         <h1 className="font-wordmark font-bold text-moonbeem-pink m-0 text-[clamp(2.5rem,12vw,6rem)] leading-[0.95]">
           moonbeem.
         </h1>
+      </div>
+
+      <div className="w-full pb-6">
+        <PartnerLogoStrip partners={partners} />
       </div>
 
       <div className="w-full pb-10">

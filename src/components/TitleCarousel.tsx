@@ -6,7 +6,10 @@ import TitleCard from "./TitleCard";
 import { useDragScroll } from "@/hooks/useDragScroll";
 
 type Props = {
-  title: string;
+  // Section header above the carousel. Omit / empty string to render
+  // the carousel without a header (e.g. partner-catalog page where
+  // the hero already names the section).
+  title?: string;
   titles: Pick<Title, "id" | "slug" | "title" | "poster_url">[];
 };
 
@@ -36,9 +39,11 @@ export default function TitleCarousel({ title, titles }: Props) {
 
   return (
     <section className="w-full">
-      <h2 className="mb-4 px-6 text-caption font-medium uppercase tracking-wider text-moonbeem-pink">
-        {title}
-      </h2>
+      {title && (
+        <h2 className="mb-4 px-6 text-caption font-medium uppercase tracking-wider text-moonbeem-pink">
+          {title}
+        </h2>
+      )}
 
       <div className="relative">
         <div

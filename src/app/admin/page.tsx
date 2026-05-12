@@ -554,7 +554,7 @@ export default async function AdminLanding() {
                       <td className="px-5 py-3">
                         {b.partner_slug ? (
                           <Link
-                            href={`/p/${b.partner_slug}`}
+                            href={`/p/${b.partner_slug}/dashboard`}
                             className="text-moonbeem-ink hover:text-moonbeem-pink"
                           >
                             {b.partner_name}

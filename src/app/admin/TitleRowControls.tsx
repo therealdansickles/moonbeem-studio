@@ -143,7 +143,7 @@ export default function TitleRowControls({
           <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-caption text-moonbeem-ink-subtle">
             {partnerSlug ? (
               <Link
-                href={`/p/${partnerSlug}`}
+                href={`/p/${partnerSlug}/dashboard`}
                 className="hover:text-moonbeem-pink"
               >
                 Partner: {partnerName ?? partnerSlug}
@@ -194,7 +194,7 @@ export default function TitleRowControls({
       <div className="mt-3 flex flex-wrap items-center gap-3 text-caption">
         {partnerSlug && (
           <Link
-            href={`/p/${partnerSlug}`}
+            href={`/p/${partnerSlug}/dashboard`}
             className="rounded-md border border-white/10 px-3 py-1 text-moonbeem-ink-muted hover:border-moonbeem-pink/40 hover:text-moonbeem-pink"
           >
             Partner dashboard →
