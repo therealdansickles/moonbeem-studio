@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type Props = {
   // Slug must be set before the user can upload — drives the R2
@@ -29,10 +29,11 @@ type Props = {
 // verification is queued as a post-pitch followup that pairs with
 // the super-admin partner activation UI work.
 const ACCEPTED_EXTS = ["png", "svg"] as const;
-const ACCEPTED_MIME = ACCEPTED_EXTS.map((e) => {
-  if (e === "svg") return "image/svg+xml";
-  return "image/png";
-});
+const EXT_TO_MIME: Record<(typeof ACCEPTED_EXTS)[number], string> = {
+  png: "image/png",
+  svg: "image/svg+xml",
+};
+const ACCEPTED_MIME = Object.values(EXT_TO_MIME);
 const MAX_BYTES = 2 * 1024 * 1024;
 const MIN_WIDTH = 1280;
 const MIN_HEIGHT = 720;
@@ -147,15 +148,40 @@ export default function PartnerLogoUploader({
     partnerSlug,
   );
 
+  // Revoke any blob: ObjectURL when currentUrl changes or this
+  // component unmounts. The cleanup closes over the PREVIOUS
+  // currentUrl, so each replace correctly revokes the prior blob.
+  // R2 URLs (https://) are skipped — only blob: URLs need revoking.
+  useEffect(() => {
+    return () => {
+      if (currentUrl && currentUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(currentUrl);
+      }
+    };
+  }, [currentUrl]);
+
   async function onPick(file: File) {
     if (busy) return;
     setError(null);
     const ext = extOf(file);
-    // Format check first — gives the clearest message for the
-    // common "drag in a JPEG" case before we even probe bytes.
-    if (!(ACCEPTED_EXTS as readonly string[]).includes(ext)) {
-      const detected = file.type || `.${ext || "(unknown)"}`;
+    const mime = file.type;
+    const extOk = (ACCEPTED_EXTS as readonly string[]).includes(ext);
+    const mimeOk = (ACCEPTED_MIME as readonly string[]).includes(mime);
+    // Both ext and MIME must be in the accepted set. Catches the
+    // common "drag in a JPEG" case before we probe bytes.
+    if (!extOk || !mimeOk) {
+      const detected = mime || `.${ext || "(unknown)"}`;
       setError(`File must be PNG or SVG. Your file is ${detected}.`);
+      return;
+    }
+    // Both are accepted formats — but they must agree, or the file
+    // is renamed (e.g. JPEG → .png). Renames cause downstream
+    // Content-Type vs bytes mismatches on R2 (see the 2026-05-11
+    // HEIC regression for the same shape of bug). Reject explicitly.
+    if (mime !== EXT_TO_MIME[ext as (typeof ACCEPTED_EXTS)[number]]) {
+      setError(
+        `File extension and content don't match. File appears to be ${mime} but is named .${ext}.`,
+      );
       return;
     }
     if (file.size > MAX_BYTES) {
