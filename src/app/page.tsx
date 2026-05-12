@@ -2,6 +2,7 @@ import {
   getAllFilms,
   getFeaturedTitles,
   getRecentFanEdits,
+  getTrendingFanEdits,
 } from "@/lib/queries/titles";
 import { getMarqueePartners } from "@/lib/queries/partners";
 import TitleCarousel from "@/components/TitleCarousel";
@@ -9,11 +10,12 @@ import FanEditCarousel from "@/components/FanEditCarousel";
 import PartnerLogoStrip from "@/components/PartnerLogoStrip";
 
 export default async function Home() {
-  const [featured, recentFanEdits, partners, allFilms] = await Promise.all([
+  const [featured, recentFanEdits, partners, allFilms, trending] = await Promise.all([
     getFeaturedTitles(),
     getRecentFanEdits(12),
     getMarqueePartners(),
     getAllFilms(),
+    getTrendingFanEdits(12),
   ]);
 
   return (
@@ -36,6 +38,12 @@ export default async function Home() {
       <div className="w-full pb-10">
         <TitleCarousel title="Featured" titles={featured} />
       </div>
+
+      {trending.length > 0 && (
+        <div className="w-full pb-10">
+          <FanEditCarousel title="Trending" fanEdits={trending} />
+        </div>
+      )}
 
       {recentFanEdits.length > 0 && (
         <div className="w-full pb-10">
