@@ -20,26 +20,72 @@ type Props = {
   onCleared?: () => void;
 };
 
-const ACCEPTED_EXTS = ["png", "jpg", "jpeg", "webp", "svg"] as const;
+// Spec (2026-05-12): PNG and SVG only. Strict 16:9 with ±2%
+// tolerance to absorb rounding. Min 1280×720 so the asset stays
+// crisp on retina at marquee display heights. 2 MB cap unchanged.
+// Server-side dimension/aspect validation is architecturally
+// impossible with the presigned-PUT flow (browser uploads bytes
+// directly to R2; server never sees them). Post-upload byte
+// verification is queued as a post-pitch followup that pairs with
+// the super-admin partner activation UI work.
+const ACCEPTED_EXTS = ["png", "svg"] as const;
 const ACCEPTED_MIME = ACCEPTED_EXTS.map((e) => {
-  if (e === "png") return "image/png";
-  if (e === "webp") return "image/webp";
   if (e === "svg") return "image/svg+xml";
-  return "image/jpeg";
+  return "image/png";
 });
 const MAX_BYTES = 2 * 1024 * 1024;
-const MAX_DIMENSION = 1024;
+const MIN_WIDTH = 1280;
+const MIN_HEIGHT = 720;
+const ASPECT_TARGET = 16 / 9;
+const ASPECT_TOLERANCE = 0.02;
 
 function extOf(file: File): string {
   const m = file.name.match(/\.([a-zA-Z0-9]+)$/);
   return (m?.[1] ?? "").toLowerCase();
 }
 
+// SVG dimension extraction. Prefer viewBox ("0 0 W H") since it
+// describes intrinsic aspect regardless of how the SVG is sized
+// downstream; fall back to numeric width/height attributes on the
+// root <svg> when viewBox is absent. Returns null when neither is
+// usable — caller treats that as a hard fail so we never write an
+// un-validatable SVG to R2.
+function parseSvgDimensions(
+  text: string,
+): { width: number; height: number } | null {
+  const svgMatch = text.match(/<svg\b[^>]*>/i);
+  if (!svgMatch) return null;
+  const svgTag = svgMatch[0];
+
+  // viewBox can be "min-x min-y width height", whitespace or comma sep.
+  const vb = svgTag.match(/\bviewBox\s*=\s*["']([^"']+)["']/i);
+  if (vb) {
+    const parts = vb[1].trim().split(/[\s,]+/).map(Number);
+    if (parts.length === 4 && parts.every((n) => Number.isFinite(n))) {
+      const [, , w, h] = parts;
+      if (w > 0 && h > 0) return { width: w, height: h };
+    }
+  }
+
+  // Fall back to width/height attributes. Strip "px" / "pt" etc.
+  const wAttr = svgTag.match(/\bwidth\s*=\s*["']([^"']+)["']/i);
+  const hAttr = svgTag.match(/\bheight\s*=\s*["']([^"']+)["']/i);
+  const wNum = wAttr ? parseFloat(wAttr[1]) : NaN;
+  const hNum = hAttr ? parseFloat(hAttr[1]) : NaN;
+  if (Number.isFinite(wNum) && Number.isFinite(hNum) && wNum > 0 && hNum > 0) {
+    return { width: wNum, height: hNum };
+  }
+
+  return null;
+}
+
 async function probeImage(
   file: File,
 ): Promise<{ width: number; height: number } | null> {
-  // SVGs are vector; skip dimension probe.
-  if (file.type === "image/svg+xml") return { width: 0, height: 0 };
+  if (file.type === "image/svg+xml") {
+    const text = await file.text();
+    return parseSvgDimensions(text);
+  }
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const img = new window.Image();
@@ -53,6 +99,11 @@ async function probeImage(
     };
     img.src = url;
   });
+}
+
+function formatBytes(n: number): string {
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024).toFixed(0)} KB`;
 }
 
 async function putWithProgress(
@@ -100,25 +151,50 @@ export default function PartnerLogoUploader({
     if (busy) return;
     setError(null);
     const ext = extOf(file);
+    // Format check first — gives the clearest message for the
+    // common "drag in a JPEG" case before we even probe bytes.
     if (!(ACCEPTED_EXTS as readonly string[]).includes(ext)) {
-      setError(`Unsupported format. Use: ${ACCEPTED_EXTS.join(", ")}.`);
+      const detected = file.type || `.${ext || "(unknown)"}`;
+      setError(`File must be PNG or SVG. Your file is ${detected}.`);
       return;
     }
     if (file.size > MAX_BYTES) {
-      setError(`Logo must be ≤ 2 MB (got ${(file.size / 1024 / 1024).toFixed(1)} MB).`);
+      setError(
+        `File must be under 2 MB. Your file is ${formatBytes(file.size)}.`,
+      );
       return;
     }
     const dims = await probeImage(file);
     if (!dims) {
-      setError("Could not read image. Try a different file.");
+      // SVGs without viewBox or width/height land here. PNGs that
+      // fail to decode also land here, but that's a degenerate file.
+      setError(
+        file.type === "image/svg+xml"
+          ? "SVG must declare a viewBox or width/height on the root <svg>. Re-export with viewBox set."
+          : "Could not read image. Try a different file.",
+      );
       return;
     }
+    // 16:9 aspect ratio (±2% tolerance to absorb rounding).
+    const actualAspect = dims.width / dims.height;
+    if (Math.abs(actualAspect - ASPECT_TARGET) / ASPECT_TARGET > ASPECT_TOLERANCE) {
+      const ratioFmt = `${actualAspect.toFixed(2)}:1`;
+      setError(
+        `Image must be 16:9 aspect ratio. Your image is ${ratioFmt} (${dims.width}×${dims.height}).`,
+      );
+      return;
+    }
+    // Min dimensions — only meaningful for raster. SVG viewBox
+    // dimensions are unitless and the asset is vector-scalable, so
+    // the min-dimension check is skipped for SVG (a viewBox of
+    // 0 0 16 9 still represents a true 16:9 vector that renders
+    // crisp at any size).
     if (
       file.type !== "image/svg+xml" &&
-      (dims.width > MAX_DIMENSION || dims.height > MAX_DIMENSION)
+      (dims.width < MIN_WIDTH || dims.height < MIN_HEIGHT)
     ) {
       setError(
-        `Logo dimensions must be ≤ ${MAX_DIMENSION}×${MAX_DIMENSION} (got ${dims.width}×${dims.height}).`,
+        `Image must be at least ${MIN_WIDTH}×${MIN_HEIGHT}. Your image is ${dims.width}×${dims.height}.`,
       );
       return;
     }
@@ -219,7 +295,7 @@ export default function PartnerLogoUploader({
                 : "Upload logo"}
           </label>
           <span className="text-caption text-moonbeem-ink-subtle">
-            PNG, JPG, WEBP, or SVG · ≤ 2&nbsp;MB · ≤ {MAX_DIMENSION}×{MAX_DIMENSION}
+            PNG or SVG · 16:9 · ≥ {MIN_WIDTH}×{MIN_HEIGHT} · ≤ 2&nbsp;MB
           </span>
           {!slugReady && (
             <span className="text-caption text-moonbeem-ink-subtle">

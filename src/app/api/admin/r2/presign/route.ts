@@ -33,11 +33,12 @@ const STILL_CONTENT_TYPES: Record<string, string> = {
   avif: "image/avif",
 };
 
+// Partner logos: PNG and SVG only (2026-05-12). Dimension/aspect
+// validation is client-side; server-side defense-in-depth would
+// require a post-upload R2 fetch (queued as a post-pitch followup
+// alongside the super-admin partner activation UI work).
 const PARTNER_LOGO_CONTENT_TYPES: Record<string, string> = {
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
   png: "image/png",
-  webp: "image/webp",
   svg: "image/svg+xml",
 };
 
