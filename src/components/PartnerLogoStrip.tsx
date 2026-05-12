@@ -7,8 +7,8 @@ import { useDragScroll } from "@/hooks/useDragScroll";
 
 // Logo render height. All partner logos are spec'd as 16:9 (Phase A
 // admin upload enforcement, 2026-05-12), so width = height × 16/9 ≈
-// 128px per logo at 72px tall — uniform across all six cells.
-const LOGO_HEIGHT_PX = 72;
+// 170px per logo at 96px tall — uniform across all six cells.
+const LOGO_HEIGHT_PX = 96;
 
 type Props = {
   partners: MarqueePartner[];
@@ -65,7 +65,7 @@ export default function PartnerLogoStrip({ partners }: Props) {
             href={`/p/${p.slug}`}
             role="listitem"
             aria-label={p.name}
-            className="flex shrink-0 items-center opacity-60 transition-opacity duration-200 hover:opacity-100"
+            className="flex shrink-0 items-center opacity-[0.85] transition-opacity duration-200 hover:opacity-100"
           >
             {/* Plain <img>: avoids needing to add the R2 host to
                 next.config remotePatterns for every uploaded
