@@ -571,6 +571,152 @@ function TopCreatorsCard({ creators }: { creators: TopCreator[] }) {
   );
 }
 
+// Open title requests for this partner — visitors hit "Request fan
+// edits" on /t/[slug], which inserts a row into title_requests.
+// title_requests has no fulfilled_at column today (followup queue
+// has a schema-level fix). We derive fulfillment at the display
+// layer here: a title is "open" if it has NO published fan_edits
+// (is_active + auto_verified + not soft-deleted). Once a partner
+// ships fan_edits for a requested title, the title falls out of
+// this card naturally.
+type RequestedTitle = {
+  title_id: string;
+  slug: string;
+  title: string;
+  poster_url: string | null;
+  request_count: number;
+  latest_request_at: string;
+};
+
+async function loadOpenTitleRequests(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  partnerTitleIds: string[],
+): Promise<RequestedTitle[]> {
+  if (partnerTitleIds.length === 0) return [];
+  // 1. Find titles in this partner's catalog that have any
+  //    published fan_edits — those are the "fulfilled" set to exclude.
+  const { data: publishedRows } = await supabase
+    .from("fan_edits")
+    .select("title_id")
+    .in("title_id", partnerTitleIds)
+    .eq("is_active", true)
+    .eq("verification_status", "auto_verified")
+    .is("deleted_at", null);
+  const fulfilled = new Set(
+    (publishedRows ?? []).map((r) => r.title_id as string),
+  );
+  const openTitleIds = partnerTitleIds.filter((id) => !fulfilled.has(id));
+  if (openTitleIds.length === 0) return [];
+
+  // 2. Pull title_requests for the unfulfilled set.
+  const { data: requests } = await supabase
+    .from("title_requests")
+    .select("title_id, requested_at, request_type")
+    .in("title_id", openTitleIds)
+    .eq("request_type", "fan_edits");
+  if (!requests || requests.length === 0) return [];
+
+  // 3. Group + latest-timestamp per title.
+  const counts = new Map<string, number>();
+  const latest = new Map<string, string>();
+  for (const r of requests) {
+    const tid = r.title_id as string;
+    counts.set(tid, (counts.get(tid) ?? 0) + 1);
+    const at = r.requested_at as string;
+    const prev = latest.get(tid);
+    if (!prev || at > prev) latest.set(tid, at);
+  }
+
+  // 4. Hydrate title display fields.
+  const requestedIds = Array.from(counts.keys());
+  const { data: titles } = await supabase
+    .from("titles")
+    .select("id, slug, title, poster_url")
+    .in("id", requestedIds);
+
+  const out: RequestedTitle[] = [];
+  for (const t of titles ?? []) {
+    out.push({
+      title_id: t.id as string,
+      slug: t.slug as string,
+      title: t.title as string,
+      poster_url: (t.poster_url as string | null) ?? null,
+      request_count: counts.get(t.id as string) ?? 0,
+      latest_request_at: latest.get(t.id as string) ?? "",
+    });
+  }
+  // Count DESC, then title name ASC for tiebreaker. Defensive cap at
+  // 20 — today the dataset is tiny; cap protects future scale.
+  out.sort((a, b) => {
+    if (b.request_count !== a.request_count) {
+      return b.request_count - a.request_count;
+    }
+    return a.title.localeCompare(b.title);
+  });
+  return out.slice(0, 20);
+}
+
+function RequestedTitlesCard({
+  requestedTitles,
+}: {
+  requestedTitles: RequestedTitle[];
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+      <div className="flex items-center gap-3">
+        <span className="rounded-full bg-moonbeem-pink/15 px-2.5 py-0.5 text-caption font-medium text-moonbeem-pink">
+          Requested titles
+        </span>
+        <span className="text-caption text-moonbeem-ink-subtle">
+          edits not yet published
+        </span>
+      </div>
+      {requestedTitles.length === 0 ? (
+        <p className="mt-4 text-body-sm text-moonbeem-ink-muted">
+          No edit requests for your titles yet.
+        </p>
+      ) : (
+        <ol className="mt-4 flex flex-col">
+          {requestedTitles.map((t) => (
+            <li key={t.title_id}>
+              <Link
+                href={`/t/${t.slug}`}
+                className="-mx-2 flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-white/[0.035]"
+              >
+                {t.poster_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={t.poster_url}
+                    alt=""
+                    className="h-12 w-8 shrink-0 rounded object-cover"
+                    draggable={false}
+                  />
+                ) : (
+                  <div className="h-12 w-8 shrink-0 rounded bg-moonbeem-navy/40" />
+                )}
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-body-sm font-medium text-moonbeem-ink">
+                    {t.title}
+                  </span>
+                  <span className="text-caption text-moonbeem-ink-subtle">
+                    latest {new Date(t.latest_request_at).toLocaleDateString()}
+                  </span>
+                </div>
+                <span className="shrink-0 text-body-sm font-semibold tabular-nums text-moonbeem-ink">
+                  {t.request_count}{" "}
+                  <span className="text-caption text-moonbeem-ink-subtle">
+                    {t.request_count === 1 ? "request" : "requests"}
+                  </span>
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 function HeroTile({
   value,
   label,
@@ -657,16 +803,18 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
   const titleRows = titles ?? [];
   const titleIds = titleRows.map((t) => t.id as string);
 
-  const [metrics, topPerformers, topCreators, allEdits] = await Promise.all([
-    loadHeroMetrics(supabase, titleIds),
-    // Asymmetric Top-N: edits=10 (content, curated/selective);
-    // editors=12 (people, matches the Moonbeem "Top 12" brand
-    // staple used profile-side). The split preserves the
-    // two-column dashboard's vertical balance.
-    loadTopPerformers(supabase, titleIds, 10),
-    loadTopCreators(supabase, titleIds, 12),
-    loadAllEdits(supabase, titleIds),
-  ]);
+  const [metrics, topPerformers, topCreators, allEdits, requestedTitles] =
+    await Promise.all([
+      loadHeroMetrics(supabase, titleIds),
+      // Asymmetric Top-N: edits=10 (content, curated/selective);
+      // editors=12 (people, matches the Moonbeem "Top 12" brand
+      // staple used profile-side). The split preserves the
+      // two-column dashboard's vertical balance.
+      loadTopPerformers(supabase, titleIds, 10),
+      loadTopCreators(supabase, titleIds, 12),
+      loadAllEdits(supabase, titleIds),
+      loadOpenTitleRequests(supabase, titleIds),
+    ]);
   const fanEditIdsForTracking = allEdits.map((r) => r.id);
   const [dailyGrowth, trackingStartDay] = await Promise.all([
     loadDailyGrowth(supabase, fanEditIdsForTracking, titleIds),
@@ -771,6 +919,10 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
             titleName={primaryName}
           />
           <TopCreatorsCard creators={topCreators} />
+        </div>
+
+        <div className="mt-10">
+          <RequestedTitlesCard requestedTitles={requestedTitles} />
         </div>
 
         <div className="mt-10">
