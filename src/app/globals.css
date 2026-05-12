@@ -94,3 +94,22 @@ body {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* Partner logo marquee. The track contains TWO copies of the logo
+   list rendered back-to-back; translating -50% lands exactly on
+   the start of the second copy, so the loop is seamless. Pauses
+   on hover for legibility. */
+@keyframes marquee-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.marquee-track {
+  animation: marquee-scroll 35s linear infinite;
+  width: max-content;
+}
+.marquee-track:hover {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track { animation: none; }
+}
