@@ -204,8 +204,13 @@ function snapshotFromRun(run: AdminActionRun | undefined): LastRunSnapshot | nul
 
 export default function AdminQuickActions({
   lastRuns,
+  openRequestCount,
 }: {
   lastRuns: Partial<Record<AdminActionKey, AdminActionRun>>;
+  // Open title requests across all partners (rows in title_requests
+  // for titles with no published fan_edits yet). Displayed on the
+  // stacked Title requests nav card with pluralization-aware copy.
+  openRequestCount: number;
 }) {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -225,20 +230,60 @@ export default function AdminQuickActions({
         cta="Run view tracking"
         initialLastRun={snapshotFromRun(lastRuns.view_tracking_trigger)}
       />
-      <Link
-        href="/admin/clicks"
-        className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 transition-colors hover:border-moonbeem-pink/40"
-      >
-        <div className="text-body font-medium text-moonbeem-ink">
-          View click events
-        </div>
-        <p className="mt-1 text-caption text-moonbeem-ink-subtle">
-          Last 7 / 30 day human-vs-bot rollups, top titles, top creators.
-        </p>
-        <span className="mt-4 inline-block rounded-md border border-white/15 px-4 py-2 text-body-sm text-moonbeem-ink">
-          Open All Clicks →
-        </span>
-      </Link>
+      {/* Third column: stacked navigation cards. The two action cards
+          on the left are tall (title + multi-line desc + button + last-
+          run state); splitting column 3 into two slim cards (View click
+          events + Title requests) gives Title requests card-level weight
+          while keeping the row's total height balanced. */}
+      <div className="flex flex-col gap-4">
+        <NavCard
+          href="/admin/clicks"
+          title="View click events"
+          description="Bot filtering, top titles, top creators"
+          cta="Open All Clicks →"
+        />
+        <NavCard
+          href="/admin/requests"
+          title="Title requests"
+          description={`${openRequestCount} open ${
+            openRequestCount === 1 ? "request" : "requests"
+          } across all partners`}
+          cta="View all →"
+        />
+      </div>
     </div>
+  );
+}
+
+// Slim navigation card — half the height of an ActionCard, used for
+// the stacked third column on the /admin Quick actions row. Tighter
+// padding (p-4) and pill (px-3 py-1.5) so two stack inside the same
+// total height as one ActionCard.
+function NavCard({
+  href,
+  title,
+  description,
+  cta,
+}: {
+  href: string;
+  title: string;
+  description: string;
+  cta: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="flex flex-col rounded-2xl border border-white/10 bg-white/[0.02] p-4 transition-colors hover:border-moonbeem-pink/40"
+    >
+      <div className="text-body-sm font-medium text-moonbeem-ink">
+        {title}
+      </div>
+      <p className="mt-1 text-caption text-moonbeem-ink-subtle">
+        {description}
+      </p>
+      <span className="mt-3 inline-block w-fit rounded-md border border-white/15 px-3 py-1.5 text-caption text-moonbeem-ink">
+        {cta}
+      </span>
+    </Link>
   );
 }
