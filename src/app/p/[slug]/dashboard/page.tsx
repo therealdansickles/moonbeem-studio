@@ -103,6 +103,7 @@ async function loadHeroMetrics(
       .from("external_clicks")
       .select("id", { count: "exact", head: true })
       .in("title_id", titleIds)
+      .eq("is_bot", false)
       .not("title_offer_id", "is", null),
   ]);
 
