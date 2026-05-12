@@ -376,12 +376,28 @@ function mapMetrics(platform: Platform, body: unknown): Metrics {
       const first = Array.isArray(data) ? data[0] : null;
       const stats = first ? get(first, ["statistics"]) : null;
       const video = first ? get(first, ["video"]) : null;
-      // origin_cover preserves the video aspect (tplv-tiktokx-shrink);
-      // cover is square-cropped (tplv-tiktokx-cropcenter). Prefer
-      // origin_cover, fall back to cover.
+      // Thumbnail selection:
+      //   1. image_post_info.images[0].thumbnail (WEBP, q70, ~40KB)
+      //      for photo carousels. TikTok serves both display_image
+      //      and video.origin_cover as HEIC for photo posts —
+      //      unrenderable outside Safari, and r2-upload here has no
+      //      HEIC decoder (Deno runtime). The `thumbnail` variant is
+      //      a clean WEBP, universally browser-renderable.
+      //      (Verified 2026-05-12 via raw EnsembleData response after
+      //      an initial display_image-based fix corrupted 21 photo
+      //      thumbnails with HEIC.)
+      //   2. video.origin_cover (preserves aspect, tplv-tiktokx-shrink)
+      //      for actual video posts.
+      //   3. video.cover (square-cropped, tplv-tiktokx-cropcenter) as
+      //      final fallback.
+      const photoImages = get(first, ["image_post_info", "images"]);
+      const photoThumb = Array.isArray(photoImages) && photoImages.length > 0
+        ? firstStringInList(get(photoImages[0], ["thumbnail", "url_list"]))
+        : null;
       const thumb =
+        photoThumb ??
         firstStringInList(get(video, ["origin_cover", "url_list"])) ??
-          firstStringInList(get(video, ["cover", "url_list"]));
+        firstStringInList(get(video, ["cover", "url_list"]));
       // duration is in milliseconds.
       const duration_seconds = msToSeconds(get(video, ["duration"]));
       const aspect_ratio = simplifyAspectRatio(
