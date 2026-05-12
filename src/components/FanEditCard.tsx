@@ -9,9 +9,24 @@ import PlatformIcon from "./PlatformIcon";
 
 type Props = {
   fanEdit: FanEditWithTitle;
+  // Optional carousel context — when this card sits in a
+  // FanEditCarousel, the parent passes the full list and this
+  // card's index so the modal can arrow-nav across siblings.
+  // Without these, the modal opens with a single-item list (legacy
+  // standalone-card behavior). The homepage Recent Edits +
+  // Trending Fan Edits carousels are CROSS-TITLE — each sibling
+  // can belong to a different title — so when carousel context is
+  // present the modal byline-title link is suppressed (handled by
+  // passing empty titleSlug/Name) to avoid mid-nav byline drift.
+  siblings?: FanEditWithTitle[];
+  siblingIndex?: number;
 };
 
-export default function FanEditCard({ fanEdit }: Props) {
+export default function FanEditCard({
+  fanEdit,
+  siblings,
+  siblingIndex,
+}: Props) {
   const router = useRouter();
   const { open } = useFanEditModal();
   // Prefer the canonical moonbeem_handle for both display and the
@@ -21,10 +36,6 @@ export default function FanEditCard({ fanEdit }: Props) {
   const displayHandle =
     moonbeemHandle ?? fanEdit.creator_handle_displayed ?? null;
 
-  // Recent Remixes carousel is cross-title — opening with a
-  // single-item list disables arrow-nav inside the modal (arrow-nav
-  // across unrelated titles would be confusing). The byline link in
-  // the modal header still goes to the correct title page.
   function openModal() {
     trackFanEditClick({
       title_id: fanEdit.title_id,
@@ -35,12 +46,31 @@ export default function FanEditCard({ fanEdit }: Props) {
         fanEdit.creator_handle_displayed ??
         null,
     });
-    open({
-      fanEdits: [fanEdit],
-      index: 0,
-      titleSlug: fanEdit.title_slug,
-      titleName: fanEdit.title_name,
-    });
+    const hasCarousel =
+      Array.isArray(siblings) &&
+      typeof siblingIndex === "number" &&
+      siblingIndex >= 0 &&
+      siblingIndex < siblings.length;
+    // Modal byline derives from per-fanEdit title_slug/title_name
+    // on each item (FanEditWithTitle already carries them), so the
+    // byline tracks the current card during arrow-nav across
+    // cross-title carousels. Top-level titleSlug/titleName are
+    // still passed for back-compat with any legacy reader.
+    if (hasCarousel) {
+      open({
+        fanEdits: siblings!,
+        index: siblingIndex!,
+        titleSlug: fanEdit.title_slug,
+        titleName: fanEdit.title_name,
+      });
+    } else {
+      open({
+        fanEdits: [fanEdit],
+        index: 0,
+        titleSlug: fanEdit.title_slug,
+        titleName: fanEdit.title_name,
+      });
+    }
   }
 
   return (

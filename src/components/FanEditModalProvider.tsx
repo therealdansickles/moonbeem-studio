@@ -37,6 +37,15 @@ export type FanEditForModal = {
   embed_url: string;
   creator_handle_displayed: string | null;
   creator_moonbeem_handle: string | null;
+  // Per-fan-edit title attribution. Modal byline-title link reads
+  // from these so the byline tracks the CURRENT fanEdit during
+  // arrow-nav across cross-title carousels (homepage Recent Edits +
+  // Trending Edits). Optional: legacy admin callers (AllEditsTable,
+  // TopPerformersCardClient) that don't carry per-row title info
+  // can omit these and the modal falls back to the top-level
+  // titleSlug/titleName passed to open().
+  title_slug?: string | null;
+  title_name?: string | null;
 };
 
 type OpenArgs = {
