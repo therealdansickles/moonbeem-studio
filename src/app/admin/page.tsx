@@ -390,6 +390,14 @@ export default async function AdminLanding() {
           <p className="text-body text-moonbeem-ink-muted m-0">
             All partners, all titles, all earnings · super-admin view
           </p>
+          <div className="mt-2 flex items-center gap-4 text-caption">
+            <Link
+              href="/admin/requests"
+              className="text-moonbeem-pink hover:underline"
+            >
+              Title requests →
+            </Link>
+          </div>
         </div>
 
         {/* Quick actions */}
