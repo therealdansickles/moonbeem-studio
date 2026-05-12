@@ -65,7 +65,13 @@ export default function PartnerLogoStrip({ partners }: Props) {
             href={`/p/${p.slug}`}
             role="listitem"
             aria-label={p.name}
-            className="flex shrink-0 items-center opacity-[0.85] transition-opacity duration-200 hover:opacity-100"
+            // overflow-hidden + rounded-lg on the cell clips each
+            // logo's per-asset background (Oscilloscope on black,
+            // Topic on white, etc.) into a uniform rounded shape so
+            // the strip reads as one consistent surface rather than
+            // a row of independent rectangles. Matches the Featured /
+            // Recent Remixes card corner treatment.
+            className="flex shrink-0 items-center overflow-hidden rounded-lg opacity-[0.85] transition-opacity duration-200 hover:opacity-100"
           >
             {/* Plain <img>: avoids needing to add the R2 host to
                 next.config remotePatterns for every uploaded

@@ -7,10 +7,12 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 const MARQUEE_PARTNER_ORDER: readonly string[] = [
   "magnolia-pictures",
   "oscilloscope-laboratories",
+  "optimist",
   "roadside-attractions",
   "topic-studios",
   "1-2-special",
   "mitten-media",
+  "dpop-studios",
 ];
 
 export type MarqueePartner = {
