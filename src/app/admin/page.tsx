@@ -428,10 +428,18 @@ export default async function AdminLanding() {
 
         {/* Partners */}
         <div className="mt-10">
-          <SectionHeader
-            pill="Partners"
-            title={`${partners.length} ${partners.length === 1 ? "partner" : "partners"}`}
-          />
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <SectionHeader
+              pill="Partners"
+              title={`${partners.length} ${partners.length === 1 ? "partner" : "partners"}`}
+            />
+            <Link
+              href="/admin/marquee"
+              className="rounded-md border border-white/10 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
+            >
+              Curate marquee →
+            </Link>
+          </div>
           <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
             {partners.length === 0 ? (
               <p className="text-body-sm text-moonbeem-ink-muted">

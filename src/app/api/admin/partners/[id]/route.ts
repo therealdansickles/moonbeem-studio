@@ -16,9 +16,11 @@
 // Super-admin only.
 
 import { NextResponse, type NextRequest } from "next/server";
+import { revalidatePath } from "next/cache";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildPublicUrl } from "@/lib/r2/upload";
+import { nextMarqueeOrder } from "@/lib/marquee-order";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -29,6 +31,7 @@ type PatchBody = {
   slug?: string;
   logo_url?: string | null;
   logo_key?: string | null;
+  is_marquee_visible?: boolean;
 };
 
 export async function PATCH(
@@ -75,16 +78,48 @@ export async function PATCH(
     update.logo_url = trimmed === "" ? null : trimmed;
   }
 
+  const supabase = createServiceRoleClient();
+
+  // is_marquee_visible: false→true appends to end (max+1); true→false
+  // leaves marquee_order untouched. Same-value updates are no-ops.
+  let visibilityChanged = false;
+  if (body.is_marquee_visible !== undefined) {
+    if (typeof body.is_marquee_visible !== "boolean") {
+      return NextResponse.json(
+        { error: "is_marquee_visible_not_boolean" },
+        { status: 400 },
+      );
+    }
+    const { data: current, error: readErr } = await supabase
+      .from("partners")
+      .select("is_marquee_visible")
+      .eq("id", id)
+      .maybeSingle();
+    if (readErr) {
+      return NextResponse.json({ error: readErr.message }, { status: 500 });
+    }
+    if (!current) {
+      return NextResponse.json({ error: "partner_not_found" }, { status: 404 });
+    }
+    const wasVisible = current.is_marquee_visible as boolean;
+    if (body.is_marquee_visible !== wasVisible) {
+      update.is_marquee_visible = body.is_marquee_visible;
+      visibilityChanged = true;
+      if (body.is_marquee_visible === true) {
+        update.marquee_order = await nextMarqueeOrder(supabase);
+      }
+    }
+  }
+
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "no_fields" }, { status: 400 });
   }
 
-  const supabase = createServiceRoleClient();
   const { data, error } = await supabase
     .from("partners")
     .update(update)
     .eq("id", id)
-    .select("id, slug, name, logo_url")
+    .select("id, slug, name, logo_url, is_marquee_visible, marquee_order")
     .maybeSingle();
 
   if (error) {
@@ -95,6 +130,9 @@ export async function PATCH(
   }
   if (!data) {
     return NextResponse.json({ error: "partner_not_found" }, { status: 404 });
+  }
+  if (visibilityChanged) {
+    revalidatePath("/");
   }
   return NextResponse.json({ ok: true, partner: data });
 }

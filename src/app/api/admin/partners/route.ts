@@ -10,9 +10,11 @@
 // Super-admin only.
 
 import { NextResponse, type NextRequest } from "next/server";
+import { revalidatePath } from "next/cache";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildPublicUrl } from "@/lib/r2/upload";
+import { nextMarqueeOrder } from "@/lib/marquee-order";
 
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -64,10 +66,21 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = createServiceRoleClient();
+  // Auto-append to marquee: new partners are marquee_visible=true by
+  // default and land at the end. The homepage strip additionally
+  // filters logo_url IS NOT NULL, so partners created without a logo
+  // hold their slot but don't render until they upload one.
+  const marqueeOrder = await nextMarqueeOrder(supabase);
   const { data, error } = await supabase
     .from("partners")
-    .insert({ name, slug, logo_url: logoUrl })
-    .select("id, slug, name, logo_url")
+    .insert({
+      name,
+      slug,
+      logo_url: logoUrl,
+      is_marquee_visible: true,
+      marquee_order: marqueeOrder,
+    })
+    .select("id, slug, name, logo_url, is_marquee_visible, marquee_order")
     .single();
 
   if (error) {
@@ -78,6 +91,9 @@ export async function POST(request: NextRequest) {
       );
     }
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (logoUrl) {
+    revalidatePath("/");
   }
   return NextResponse.json({ partner: data }, { status: 201 });
 }

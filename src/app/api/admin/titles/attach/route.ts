@@ -34,6 +34,7 @@ import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildPublicUrl } from "@/lib/r2/upload";
 import { nextFeaturedOrder } from "@/lib/featured-order";
+import { nextMarqueeOrder } from "@/lib/marquee-order";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -123,9 +124,17 @@ export async function POST(request: NextRequest) {
     if (!slug || !SLUG_RE.test(slug)) {
       return NextResponse.json({ error: "invalid_partner_slug" }, { status: 400 });
     }
+    // Auto-append to marquee (same semantics as POST /api/admin/partners).
+    const marqueeOrder = await nextMarqueeOrder(supabase);
     const { data, error } = await supabase
       .from("partners")
-      .insert({ name, slug, logo_url: logoUrl })
+      .insert({
+        name,
+        slug,
+        logo_url: logoUrl,
+        is_marquee_visible: true,
+        marquee_order: marqueeOrder,
+      })
       .select("id, slug, name, logo_url")
       .single();
     if (error) {
@@ -136,6 +145,9 @@ export async function POST(request: NextRequest) {
     }
     partnerRow = data as typeof partnerRow;
     partnerId = partnerRow.id;
+    if (logoUrl) {
+      revalidatePath("/");
+    }
   } else {
     const { data, error } = await supabase
       .from("partners")
