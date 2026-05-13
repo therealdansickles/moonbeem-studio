@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { enforce, getIp } from "@/lib/ratelimit";
 
 type RequestType = "fan_edits" | "clips_and_stills";
 
@@ -34,6 +35,9 @@ function buildSignInUrl(args: {
 }
 
 export async function POST(request: NextRequest) {
+  const limit = await enforce("tightAnon", getIp(request), "titles/request");
+  if (!limit.ok) return limit.response;
+
   let body: Body;
   try {
     body = (await request.json()) as Body;

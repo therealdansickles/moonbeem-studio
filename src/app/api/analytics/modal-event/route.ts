@@ -10,6 +10,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getUser } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { enforce, getIp } from "@/lib/ratelimit";
 
 const ALLOWED_EVENT_TYPES = [
   "modal_open",
@@ -71,7 +72,15 @@ export async function POST(request: NextRequest) {
       ? (metadataRaw as Record<string, unknown>)
       : null;
 
+  // Session is loaded anyway to capture user_id below; branch the
+  // rate-limit tier on auth state without added overhead. Authed users
+  // get a more generous per-user budget (modal arrow-nav + Trending
+  // exploration can plausibly exceed the 300/min IP limit).
   const user = await getUser();
+  const limit = user
+    ? await enforce("chattyAuthUser", user.id, "analytics/modal-event")
+    : await enforce("chattyAnon", getIp(request), "analytics/modal-event");
+  if (!limit.ok) return limit.response;
 
   const supabase = createServiceRoleClient();
   const { error } = await supabase.from("fan_edit_events").insert({

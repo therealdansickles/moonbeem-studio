@@ -1,10 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { enforce, getIp } from "@/lib/ratelimit";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(request: NextRequest) {
+  const limit = await enforce("standardAnon", getIp(request), "unsubscribe");
+  if (!limit.ok) return limit.response;
+
   const { searchParams, origin } = new URL(request.url);
   const token = searchParams.get("token") ?? "";
 
