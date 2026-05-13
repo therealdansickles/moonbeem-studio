@@ -38,6 +38,36 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
+      // Security response headers — applied to all routes. Vercel
+      // already sets Strict-Transport-Security (max-age=63072000); we
+      // don't override that here to avoid duplicate-header noise.
+      // Content-Security-Policy is intentionally NOT set — getting it
+      // wrong is worse than not having it; tracked as a followup so
+      // we can build a per-origin allowlist (R2, Supabase, TMDb,
+      // Vercel analytics, etc.) carefully.
+      {
+        source: "/:path*",
+        headers: [
+          // Clickjacking defense: only this origin can iframe us.
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          // Prevent MIME sniffing: browsers must honor declared
+          // Content-Type instead of guessing.
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          // Send full origin only to same-origin requests; cross-
+          // origin requests get just the origin (no path). Sensible
+          // default that doesn't leak request paths to third parties.
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // Deny camera/mic/geolocation by default. If a feature
+          // needs one of these (e.g., a creator-side recording
+          // tool), opt in per-page via a route-specific override.
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=(), browsing-topics=()",
+          },
+        ],
+      },
+      // CORS on /api/:path* — see ALLOWED_ORIGIN block above for
+      // threat-model context. Same-origin enforcement.
       {
         source: "/api/:path*",
         headers: [
