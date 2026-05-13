@@ -14,6 +14,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentProfile, getUser } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { calculateEarningsForRate } from "@/lib/earnings-calc";
+import { enforce } from "@/lib/ratelimit";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -26,6 +27,8 @@ export async function PUT(
   if (!user) {
     return NextResponse.json({ error: "not_authenticated" }, { status: 401 });
   }
+  const limit = await enforce("partnerWrites", user.id, "p/title-rates");
+  if (!limit.ok) return limit.response;
   const { slug } = await params;
   const supabase = createServiceRoleClient();
 
