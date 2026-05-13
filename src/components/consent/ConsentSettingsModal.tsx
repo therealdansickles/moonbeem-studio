@@ -75,14 +75,21 @@ export default function ConsentSettingsModal() {
         </div>
 
         <p className="mt-3 text-caption text-moonbeem-ink-muted">
-          Pick what&apos;s comfortable. You can change this later.
+          Pick what&apos;s comfortable. You can change this later. See our{" "}
+          <a
+            href="/privacy-policy"
+            className="underline decoration-moonbeem-pink/40 underline-offset-2 hover:text-moonbeem-pink"
+          >
+            privacy policy
+          </a>{" "}
+          for details on what we collect and why.
         </p>
 
         <div className="mt-6 flex flex-col gap-4">
           <ToggleRow
             id="consent-analytics"
             title="Analytics"
-            description="Aggregate pageviews and event counts (Google Analytics 4). Helps us understand which surfaces work."
+            description="Aggregate pageviews, event counts (Google Analytics 4), and approximate location (country, region, city) derived from your IP. Helps us understand which surfaces work and where our audience is."
             checked={analytics}
             onChange={setAnalytics}
           />

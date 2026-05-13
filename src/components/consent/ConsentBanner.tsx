@@ -54,10 +54,18 @@ export default function ConsentBanner() {
         >
           <div className="mx-auto flex max-w-5xl flex-col gap-3 md:flex-row md:items-center md:gap-6">
             <p className="text-body-sm text-moonbeem-ink-muted md:flex-1">
-              Moonbeem uses analytics cookies to understand how the platform
-              performs, and session recording (Microsoft Clarity) to spot UX
-              issues. You can accept both, accept neither, or pick what&apos;s
-              comfortable. We never sell your data.
+              Moonbeem uses analytics, including approximate location (country,
+              region, city) derived from your IP address, to understand how the
+              platform performs. Session recording (Microsoft Clarity) helps us
+              spot UX issues. You can accept both, accept neither, or pick
+              what&apos;s comfortable. We never sell your data.{" "}
+              <a
+                href="/privacy-policy"
+                className="underline decoration-moonbeem-pink/40 underline-offset-2 hover:text-moonbeem-pink"
+              >
+                Privacy policy
+              </a>
+              .
             </p>
             <div className="flex flex-col gap-2 md:flex-row md:flex-shrink-0">
               <button
