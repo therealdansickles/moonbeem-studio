@@ -1,26 +1,49 @@
-import { createServiceRoleClient } from "@/lib/supabase/service";
-import { sendTitleUpdateEmail } from "@/lib/notifications/send-title-update-email";
+// Resolves who should be emailed for a (title, contentType) update,
+// applies opt-out + dedup filters, and enqueues rows for the email
+// queue worker. Does NOT send emails directly — the queue + drain
+// machinery (src/lib/email-queue.ts) handles dispatch, retries, and
+// notification_log audit writes.
+//
+// Decision-level filtering (who) happens here at enqueue time:
+//   - skip users who opted out (notification_preferences)
+//   - skip users who already received this content (notification_log)
+//   - skip users with no email on file
+//
+// Dispatch-level concerns (retries, Resend errors, send latency) are
+// the queue worker's job. By the time a row is in email_queue,
+// sending IS the right action — the drain just executes.
 
-export type ContentType = "clip" | "still" | "fan_edit";
+import { createServiceRoleClient } from "@/lib/supabase/service";
+import {
+  enqueueEmailBatch,
+  type ContentType,
+} from "@/lib/email-queue";
+
+export type { ContentType };
 
 export type NotifyArgs = {
   titleId: string;
   contentType: ContentType;
   contentIds: string[];
-  // When provided, send to exactly these user_ids (skip the
-  // title_requests lookup). Used by the fan-edit fulfillment hook
-  // which already knows which requesters were just fulfilled and
-  // must NOT notify any others — only those user_ids whose request
-  // transitioned to fulfilled in this insert event.
+  // When provided, restrict the recipient pool to these user_ids
+  // (skip the title_requests lookup). Used by the fan-edit
+  // fulfillment hook which already knows which requesters were just
+  // fulfilled and must NOT notify any others — only those user_ids
+  // whose request transitioned to fulfilled in this insert event.
   userIds?: string[];
 };
 
 export type NotifyResult = {
-  notified: number;
+  /** Number of queue rows created. Roughly = number of emails that will be sent. */
+  enqueued: number;
+  /** Queue row ids — pass these to drainQueue({ ids }) for hot-path delivery. */
+  enqueuedIds: string[];
+  /** Users skipped because they opted out via notification_preferences. */
   skipped_unsub: number;
+  /** Users skipped because notification_log shows we already sent overlapping content. */
   skipped_already: number;
-  failed: number;
-  failed_user_ids: string[];
+  /** Users skipped because they have no email on file (defensive). */
+  skipped_no_email: number;
 };
 
 export async function notifyTitleRequesters(
@@ -28,26 +51,27 @@ export async function notifyTitleRequesters(
 ): Promise<NotifyResult> {
   const { titleId, contentType, contentIds } = args;
   const result: NotifyResult = {
-    notified: 0,
+    enqueued: 0,
+    enqueuedIds: [],
     skipped_unsub: 0,
     skipped_already: 0,
-    failed: 0,
-    failed_user_ids: [],
+    skipped_no_email: 0,
   };
 
   if (contentIds.length === 0) return result;
 
   const supabase = createServiceRoleClient();
 
+  // Defensive title existence check — if the title disappeared
+  // between caller's logic and this call, bail.
   const { data: title, error: titleErr } = await supabase
     .from("titles")
-    .select("id, slug, title")
+    .select("id")
     .eq("id", titleId)
     .maybeSingle();
-  if (titleErr || !title) {
-    return result;
-  }
+  if (titleErr || !title) return result;
 
+  // Resolve recipient pool.
   let userIds: string[];
   if (args.userIds) {
     userIds = Array.from(
@@ -59,9 +83,7 @@ export async function notifyTitleRequesters(
       .select("user_id")
       .eq("title_id", titleId)
       .not("user_id", "is", null);
-    if (reqErr) {
-      return result;
-    }
+    if (reqErr) return result;
     userIds = Array.from(
       new Set(
         (requestRows ?? [])
@@ -72,52 +94,60 @@ export async function notifyTitleRequesters(
   }
   if (userIds.length === 0) return result;
 
-  const { data: usersRows } = await supabase
-    .from("users")
-    .select("id, email")
-    .in("id", userIds);
-  const emailById = new Map(
-    (usersRows ?? []).map((u) => [u.id as string, (u.email as string | null) ?? null]),
-  );
+  // Batch metadata lookups for filter decisions.
+  const [usersRes, prefsRes, priorLogsRes] = await Promise.all([
+    supabase.from("users").select("id, email").in("id", userIds),
+    supabase
+      .from("notification_preferences")
+      .select("user_id, email_on_title_updates")
+      .in("user_id", userIds),
+    supabase
+      .from("notification_log")
+      .select("user_id, content_ids")
+      .eq("title_id", titleId)
+      .in("user_id", userIds)
+      .overlaps("content_ids", contentIds),
+  ]);
 
-  const { data: prefRows } = await supabase
-    .from("notification_preferences")
-    .select("user_id, email_on_title_updates, unsubscribe_token")
-    .in("user_id", userIds);
-  const prefByUser = new Map(
-    (prefRows ?? []).map((p) => [
-      p.user_id as string,
-      {
-        enabled: p.email_on_title_updates as boolean,
-        token: p.unsubscribe_token as string,
-      },
+  const emailByUser = new Map<string, string | null>(
+    (usersRes.data ?? []).map((u) => [
+      u.id as string,
+      (u.email as string | null) ?? null,
     ]),
   );
+  const prefByUser = new Map<string, { enabled: boolean }>(
+    (prefsRes.data ?? []).map((p) => [
+      p.user_id as string,
+      { enabled: p.email_on_title_updates as boolean },
+    ]),
+  );
+  const alreadyNotified = new Set(
+    (priorLogsRes.data ?? []).map((r) => r.user_id as string),
+  );
 
+  // Insert default prefs for users that don't have a row yet. The
+  // schema default is email_on_title_updates=true, so missing-prefs
+  // users get opted in by default. Mirrors legacy behavior pre-queue.
   const missingPrefs = userIds.filter((id) => !prefByUser.has(id));
   if (missingPrefs.length > 0) {
     const { data: inserted } = await supabase
       .from("notification_preferences")
       .insert(missingPrefs.map((user_id) => ({ user_id })))
-      .select("user_id, email_on_title_updates, unsubscribe_token");
+      .select("user_id, email_on_title_updates");
     for (const row of inserted ?? []) {
       prefByUser.set(row.user_id as string, {
         enabled: row.email_on_title_updates as boolean,
-        token: row.unsubscribe_token as string,
       });
     }
   }
 
-  const { data: priorLogs } = await supabase
-    .from("notification_log")
-    .select("user_id, content_ids")
-    .eq("title_id", titleId)
-    .in("user_id", userIds)
-    .overlaps("content_ids", contentIds);
-  const alreadyNotified = new Set(
-    (priorLogs ?? []).map((r) => r.user_id as string),
-  );
-
+  // Apply filters; collect enqueue rows.
+  const toEnqueue: {
+    userId: string;
+    titleId: string;
+    contentType: ContentType;
+    contentIds: string[];
+  }[] = [];
   for (const userId of userIds) {
     const pref = prefByUser.get(userId);
     if (!pref || !pref.enabled) {
@@ -128,53 +158,18 @@ export async function notifyTitleRequesters(
       result.skipped_already += 1;
       continue;
     }
-    const email = emailById.get(userId);
+    const email = emailByUser.get(userId);
     if (!email) {
-      result.failed += 1;
-      result.failed_user_ids.push(userId);
-      await supabase.from("notification_log").insert({
-        user_id: userId,
-        title_id: titleId,
-        content_type: contentType,
-        content_ids: contentIds,
-        status: "failed",
-        error_text: "no email on file",
-      });
+      result.skipped_no_email += 1;
       continue;
     }
-
-    const send = await sendTitleUpdateEmail({
-      to: email,
-      titleName: title.title as string,
-      titleSlug: title.slug as string,
-      contentType,
-      contentCount: contentIds.length,
-      unsubscribeToken: pref.token,
-    });
-
-    if (send.ok) {
-      result.notified += 1;
-      await supabase.from("notification_log").insert({
-        user_id: userId,
-        title_id: titleId,
-        content_type: contentType,
-        content_ids: contentIds,
-        resend_message_id: send.resendMessageId,
-        status: "sent",
-      });
-    } else {
-      result.failed += 1;
-      result.failed_user_ids.push(userId);
-      await supabase.from("notification_log").insert({
-        user_id: userId,
-        title_id: titleId,
-        content_type: contentType,
-        content_ids: contentIds,
-        status: "failed",
-        error_text: send.error.slice(0, 500),
-      });
-    }
+    toEnqueue.push({ userId, titleId, contentType, contentIds });
   }
 
+  if (toEnqueue.length === 0) return result;
+
+  const { ids } = await enqueueEmailBatch(toEnqueue);
+  result.enqueued = ids.length;
+  result.enqueuedIds = ids;
   return result;
 }
