@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import PartnerLogoUploader from "@/components/admin/PartnerLogoUploader";
 
 type Partner = {
@@ -16,10 +17,34 @@ type TitleHit = {
   slug: string;
   title: string;
   year: number | null;
+  poster_url: string | null;
   partner_id: string | null;
   is_active: boolean;
   is_public: boolean;
 };
+
+function PosterThumb({ url, alt }: { url: string | null; alt: string }) {
+  if (!url) {
+    return (
+      <div
+        className="h-[60px] w-[40px] shrink-0 rounded-sm border border-white/10 bg-white/[0.03]"
+        aria-hidden="true"
+      />
+    );
+  }
+  return (
+    <div className="h-[60px] w-[40px] shrink-0 overflow-hidden rounded-sm bg-white/[0.03]">
+      <Image
+        src={url}
+        alt={alt}
+        width={40}
+        height={60}
+        className="h-full w-full object-cover"
+        unoptimized
+      />
+    </div>
+  );
+}
 
 type Mode = "pick-existing" | "create-new";
 
@@ -220,17 +245,20 @@ export default function AttachTitleModal({ onClose }: Props) {
           </label>
           {selected ? (
             <div className="flex items-center justify-between gap-3 rounded-lg border border-moonbeem-pink/30 bg-moonbeem-pink/5 px-3 py-2">
-              <div className="min-w-0">
-                <div className="truncate text-body-sm text-moonbeem-ink">
-                  {selected.title}
-                  {selected.year && (
-                    <span className="ml-2 text-moonbeem-ink-subtle">
-                      ({selected.year})
-                    </span>
-                  )}
-                </div>
-                <div className="font-mono text-caption text-moonbeem-ink-subtle">
-                  /t/{selected.slug}
+              <div className="flex min-w-0 items-center gap-3">
+                <PosterThumb url={selected.poster_url} alt={`${selected.title} poster`} />
+                <div className="min-w-0">
+                  <div className="truncate text-body-sm text-moonbeem-ink">
+                    {selected.title}
+                    {selected.year && (
+                      <span className="ml-2 text-moonbeem-ink-subtle">
+                        ({selected.year})
+                      </span>
+                    )}
+                  </div>
+                  <div className="font-mono text-caption text-moonbeem-ink-subtle">
+                    /t/{selected.slug}
+                  </div>
                 </div>
               </div>
               <button
@@ -284,17 +312,20 @@ export default function AttachTitleModal({ onClose }: Props) {
                           : "hover:bg-moonbeem-pink/5"
                       }`}
                     >
-                      <div className="min-w-0">
-                        <div className="truncate text-body-sm text-moonbeem-ink">
-                          {h.title}
-                          {h.year && (
-                            <span className="ml-2 text-moonbeem-ink-subtle">
-                              ({h.year})
-                            </span>
-                          )}
-                        </div>
-                        <div className="font-mono text-caption text-moonbeem-ink-subtle">
-                          /t/{h.slug}
+                      <div className="flex min-w-0 items-center gap-3">
+                        <PosterThumb url={h.poster_url} alt={`${h.title} poster`} />
+                        <div className="min-w-0">
+                          <div className="truncate text-body-sm text-moonbeem-ink">
+                            {h.title}
+                            {h.year && (
+                              <span className="ml-2 text-moonbeem-ink-subtle">
+                                ({h.year})
+                              </span>
+                            )}
+                          </div>
+                          <div className="font-mono text-caption text-moonbeem-ink-subtle">
+                            /t/{h.slug}
+                          </div>
                         </div>
                       </div>
                       {attached && (
