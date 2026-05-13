@@ -11,7 +11,9 @@
 // insert response.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { after } from "next/server";
 import { notifyTitleRequesters } from "@/lib/notifications/notify-title-requesters";
+import { drainQueue } from "@/lib/email-queue";
 
 export type FulfillResult = {
   fulfilled_request_count: number;
@@ -47,12 +49,25 @@ export async function fulfillTitleRequestsForFanEdit(
     return { fulfilled_request_count: updated?.length ?? 0, notified_user_ids: [] };
   }
 
-  await notifyTitleRequesters({
+  const notify = await notifyTitleRequesters({
     titleId,
     contentType: "fan_edit",
     contentIds: [fanEditId],
     userIds,
   });
+
+  // Hot-path drain via after(). Safe to call from a library function:
+  // after() captures the surrounding route handler's request context,
+  // and both callers (CSV importer + Discover add) are route handlers.
+  if (notify.enqueuedIds.length > 0) {
+    after(async () => {
+      try {
+        await drainQueue({ ids: notify.enqueuedIds, budgetMs: 25_000 });
+      } catch (err) {
+        console.error("after() drainQueue failed (fan-edit fulfillment)", err);
+      }
+    });
+  }
 
   return {
     fulfilled_request_count: updated?.length ?? 0,

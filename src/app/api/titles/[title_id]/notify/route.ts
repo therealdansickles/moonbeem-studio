@@ -1,8 +1,9 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, after, type NextRequest } from "next/server";
 import {
   notifyTitleRequesters,
   type ContentType,
 } from "@/lib/notifications/notify-title-requesters";
+import { drainQueue } from "@/lib/email-queue";
 import { enforce, getIp } from "@/lib/ratelimit";
 
 const UUID_RE =
@@ -73,6 +74,18 @@ export async function POST(
     contentType: contentType as ContentType,
     contentIds,
   });
+
+  // Manual /notify call is an explicit "send these now" intent —
+  // hot-path drain rather than waiting for cron's 5-min cadence.
+  if (result.enqueuedIds.length > 0) {
+    after(async () => {
+      try {
+        await drainQueue({ ids: result.enqueuedIds, budgetMs: 25_000 });
+      } catch (err) {
+        console.error("after() drainQueue failed (notify)", err);
+      }
+    });
+  }
 
   return NextResponse.json(result);
 }

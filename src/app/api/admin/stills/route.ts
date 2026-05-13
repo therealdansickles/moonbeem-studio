@@ -1,8 +1,9 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, after, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
 import { buildPublicUrl } from "@/lib/r2/upload";
 import { notifyTitleRequesters } from "@/lib/notifications/notify-title-requesters";
+import { drainQueue } from "@/lib/email-queue";
 import { enforce } from "@/lib/ratelimit";
 
 type Body = {
@@ -66,14 +67,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  // Enqueue synchronously, drain on after() hot path.
+  let enqueuedIds: string[] = [];
   try {
-    await notifyTitleRequesters({
+    const notify = await notifyTitleRequesters({
       titleId: body.title_id,
       contentType: "still",
       contentIds: [data.id as string],
     });
+    enqueuedIds = notify.enqueuedIds;
   } catch (err) {
     console.error("notifyTitleRequesters failed (still)", err);
+  }
+  if (enqueuedIds.length > 0) {
+    after(async () => {
+      try {
+        await drainQueue({ ids: enqueuedIds, budgetMs: 25_000 });
+      } catch (err) {
+        console.error("after() drainQueue failed (still)", err);
+      }
+    });
   }
 
   return NextResponse.json(data, { status: 201 });
