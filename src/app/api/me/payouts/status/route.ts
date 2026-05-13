@@ -13,11 +13,14 @@
 import { NextResponse } from "next/server";
 import { verifySession } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { enforce } from "@/lib/ratelimit";
 
 const MIN_WITHDRAWAL_CENTS = 1000;
 
 export async function GET() {
   const session = await verifySession();
+  const limit = await enforce("userWrites", session.userId, "me/payouts/status");
+  if (!limit.ok) return limit.response;
   const supabase = createServiceRoleClient();
 
   const { data: creator } = await supabase

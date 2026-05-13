@@ -12,6 +12,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { verifySession } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getStripe } from "@/lib/stripe/server";
+import { enforce } from "@/lib/ratelimit";
 
 // Resolve the public base URL for Stripe-redirect targets. Stripe
 // echoes return_url/refresh_url back verbatim, so a misconfigured
@@ -29,6 +30,8 @@ function publicBaseUrl(request: NextRequest): string {
 
 export async function POST(request: NextRequest) {
   const session = await verifySession();
+  const limit = await enforce("userWrites", session.userId, "me/payouts/onboard");
+  if (!limit.ok) return limit.response;
   const supabase = createServiceRoleClient();
 
   const { data: creator, error: creatorErr } = await supabase

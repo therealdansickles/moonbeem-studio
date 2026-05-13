@@ -17,6 +17,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { verifySession } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { enforce } from "@/lib/ratelimit";
 import {
   ALLOWED_SOCIAL_PLATFORMS,
   type SocialPlatform,
@@ -29,6 +30,8 @@ type Body = {
 
 export async function PATCH(request: NextRequest) {
   const session = await verifySession();
+  const limit = await enforce("userWrites", session.userId, "me/socials/visibility");
+  if (!limit.ok) return limit.response;
 
   let body: Body;
   try {

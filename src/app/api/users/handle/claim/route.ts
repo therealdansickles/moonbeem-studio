@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { verifySession } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
+import { enforce } from "@/lib/ratelimit";
 
 const HANDLE_RE = /^[a-z0-9_]{3,30}$/;
 const RESERVED = new Set([
@@ -23,7 +24,9 @@ const RESERVED = new Set([
 ]);
 
 export async function POST(request: NextRequest) {
-  await verifySession();
+  const session = await verifySession();
+  const limit = await enforce("userWrites", session.userId, "users/handle/claim");
+  if (!limit.ok) return limit.response;
 
   let body: { handle?: string };
   try {

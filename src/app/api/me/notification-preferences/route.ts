@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { enforce } from "@/lib/ratelimit";
 
 export async function GET() {
   const supabase = await createClient();
@@ -9,6 +10,8 @@ export async function GET() {
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const limit = await enforce("userWrites", user.id, "me/notification-preferences");
+  if (!limit.ok) return limit.response;
 
   const existing = await supabase
     .from("notification_preferences")
@@ -47,6 +50,8 @@ export async function PATCH(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const limit = await enforce("userWrites", user.id, "me/notification-preferences");
+  if (!limit.ok) return limit.response;
 
   let body: PatchBody;
   try {

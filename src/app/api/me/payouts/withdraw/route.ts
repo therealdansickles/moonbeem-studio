@@ -26,11 +26,14 @@ import type Stripe from "stripe";
 import { verifySession } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getStripe } from "@/lib/stripe/server";
+import { enforce } from "@/lib/ratelimit";
 
 const MIN_WITHDRAWAL_CENTS = 1000;
 
 export async function POST() {
   const session = await verifySession();
+  const limit = await enforce("userWrites", session.userId, "me/payouts/withdraw");
+  if (!limit.ok) return limit.response;
   const supabase = createServiceRoleClient();
 
   const { data: creator } = await supabase

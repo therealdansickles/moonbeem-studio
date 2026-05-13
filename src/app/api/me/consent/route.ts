@@ -16,6 +16,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { enforce } from "@/lib/ratelimit";
 
 const CONSENT_VERSION = 1;
 
@@ -30,6 +31,8 @@ export async function GET() {
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const limit = await enforce("userWrites", user.id, "me/consent");
+  if (!limit.ok) return limit.response;
   const { data, error } = await supabase
     .from("users")
     .select("consent_state")
@@ -47,6 +50,8 @@ export async function PUT(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const limit = await enforce("userWrites", user.id, "me/consent");
+  if (!limit.ok) return limit.response;
 
   let body: ConsentBody;
   try {

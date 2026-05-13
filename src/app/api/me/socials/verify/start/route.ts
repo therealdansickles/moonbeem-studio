@@ -6,6 +6,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { verifySession } from "@/lib/dal";
+import { enforce } from "@/lib/ratelimit";
 import { createClient } from "@/lib/supabase/server";
 import {
   generateVerificationCode,
@@ -14,7 +15,9 @@ import {
 } from "@/lib/socials/handle";
 
 export async function POST(request: NextRequest) {
-  await verifySession();
+  const session = await verifySession();
+  const limit = await enforce("userWrites", session.userId, "me/socials/verify/start");
+  if (!limit.ok) return limit.response;
 
   let body: unknown;
   try {

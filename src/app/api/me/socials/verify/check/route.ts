@@ -11,6 +11,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { verifySession } from "@/lib/dal";
+import { enforce } from "@/lib/ratelimit";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { BioFetchError, fetchBio } from "@/lib/ensembledata/bio";
@@ -23,7 +24,9 @@ import {
 const VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
 
 export async function POST(request: NextRequest) {
-  await verifySession();
+  const session = await verifySession();
+  const limit = await enforce("userWrites", session.userId, "me/socials/verify/check");
+  if (!limit.ok) return limit.response;
 
   let body: unknown;
   try {

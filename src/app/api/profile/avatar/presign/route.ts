@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { verifySession } from "@/lib/dal";
+import { enforce } from "@/lib/ratelimit";
 import {
   buildPublicUrl,
   generatePresignedUploadUrl,
@@ -18,6 +19,8 @@ function safeExt(ext: string): string {
 
 export async function GET(request: NextRequest) {
   const session = await verifySession();
+  const limit = await enforce("userWrites", session.userId, "profile/avatar/presign");
+  if (!limit.ok) return limit.response;
 
   const ext = safeExt(request.nextUrl.searchParams.get("ext") ?? "jpg");
   const contentType = ALLOWED[ext];

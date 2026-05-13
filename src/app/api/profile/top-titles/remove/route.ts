@@ -1,12 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { verifySession } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
+import { enforce } from "@/lib/ratelimit";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request: NextRequest) {
   const session = await verifySession();
+  const limit = await enforce("userWrites", session.userId, "profile/top-titles/remove");
+  if (!limit.ok) return limit.response;
 
   let body: { title_id?: string };
   try {

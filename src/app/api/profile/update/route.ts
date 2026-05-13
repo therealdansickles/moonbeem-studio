@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { verifySession } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
+import { enforce } from "@/lib/ratelimit";
 
 const MAX_DISPLAY_NAME = 50;
 const MAX_BIO = 200;
@@ -26,6 +27,8 @@ function isHttpUrl(value: string): boolean {
 
 export async function POST(request: NextRequest) {
   const session = await verifySession();
+  const limit = await enforce("userWrites", session.userId, "profile/update");
+  if (!limit.ok) return limit.response;
 
   let body: Body;
   try {
