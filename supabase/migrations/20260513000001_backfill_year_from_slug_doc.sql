@@ -1,0 +1,61 @@
+-- Documentation-only: the titles.year backfill ran as an out-of-band
+-- Node script, not as a migration UPDATE statement. This file exists
+-- to keep the migration log honest about a backfill that happened on
+-- this date — it makes no schema or data changes itself.
+--
+-- Why out-of-band:
+--   The natural single-statement UPDATE (initially scoped as
+--   20260512000009_backfill_year_from_slug.sql, since deleted) hit
+--   the Supavisor pooler's ~2min statement_timeout (SQLSTATE 57014)
+--   on the 1.14M-row bulk UPDATE — see
+--   memory/feedback_supabase_bulk_operations.md.
+--   The script chunks the work via cursor pagination by id and fires
+--   small per-(year, id-batch) UPDATEs concurrently, each fitting
+--   well under the per-statement timeout.
+--
+-- Script: scripts/_one_shot_backfill_year_from_slug.mjs
+-- Executed: 2026-05-13 (morning ET)
+--
+-- Predicate applied (identical to the deleted migration):
+--   year IS NULL
+--   AND slug ~ '-\d{4}$'
+--   AND slug !~ 'tmdb-\d{4}$'
+--   AND substring(slug FROM '-(\d{4})$')::int BETWEEN 1888 AND 2030
+--
+-- Three protections:
+--   1. slug ~ '-\d{4}$'         — must end in -YYYY
+--   2. slug !~ 'tmdb-\d{4}$'    — TMDb IDs can collide with 4-digit
+--                                 years; this is the belt-and-
+--                                 suspenders pass for hypothetical
+--                                 'tmdb-2010' false positives
+--   3. parsed year BETWEEN 1888 AND 2030 — first film 1888; 2030
+--                                 leaves headroom for upcoming
+--                                 releases without admitting garbage
+--                                 like '7002' or 'equity-6928'
+--
+-- Recon (scripts/_one_shot_recon_year_backfill.mjs) confirmed the
+-- mapping is canonical: of 1,000 rows where year IS NOT NULL, all
+-- 1,000 had slug suffix matching stored year exactly.
+--
+-- Verification (run from the script and stored in /tmp/backfill-year.log):
+--   - Pre-apply null-year count: ~1.31M (planned estimate)
+--   - Post-apply null-year count: ~232K (mostly slugs with no -YYYY suffix
+--     at all — `pisspants`, `juliet-gerrard-science-in-dark-times`, etc.,
+--     which the predicate correctly leaves alone)
+--   - Eligible-for-backfill remaining: ~0-512 (extrapolated from 1/256 sample)
+--   - Spot-checks confirmed:
+--       SELECT slug, year FROM titles
+--       WHERE slug IN ('dina-2010', 'rad-1986', 'dina-2017');
+--       returned: 2010, 1986, 2017 ✓
+--
+-- Operational footnote: when this script ran on 2026-05-13 morning, it
+-- found the bulk of the backfill had ALREADY happened — committed by
+-- partial successes of the canceled 20260512000009 migration the prior
+-- night. Supabase migrations don't wrap statements in BEGIN/COMMIT, so
+-- when one statement in a multi-statement migration times out, prior
+-- statements stay committed even though the migration itself is not
+-- recorded as applied. See memory/feedback_supabase_migration_partial_commit.md.
+
+-- This migration is intentionally empty. It exists for the audit
+-- trail.
+select 1 where false;
