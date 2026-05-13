@@ -3,6 +3,7 @@ import {
   notifyTitleRequesters,
   type ContentType,
 } from "@/lib/notifications/notify-title-requesters";
+import { enforce, getIp } from "@/lib/ratelimit";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -26,6 +27,15 @@ export async function POST(
   ) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+
+  // Service-to-service endpoint (Bearer service-role gated). IP-keyed
+  // admin tier serves as a leaked-key safety net — at 300/min per IP
+  // a leaked key abuser is bounded without affecting legitimate batch
+  // notify calls from our own admin upload routes (those run from
+  // Vercel function IPs which would burn budget collectively, but the
+  // limit is high enough that real upload bursts pass through).
+  const limit = await enforce("admin", getIp(request), "titles/[title_id]/notify");
+  if (!limit.ok) return limit.response;
 
   const { title_id } = await ctx.params;
   if (!UUID_RE.test(title_id)) {

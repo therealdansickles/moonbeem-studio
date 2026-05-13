@@ -11,9 +11,12 @@ import { NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { logAdminActionRun } from "@/lib/admin-action-runs";
+import { enforce } from "@/lib/ratelimit";
 
 export async function POST() {
   const session = await requireSuperAdmin();
+  const rl = await enforce("admin", session.userId, "admin/view-tracking/trigger");
+  if (!rl.ok) return rl.response;
   const startedAt = Date.now();
   const supabase = createServiceRoleClient();
   const { data, error } = await supabase.functions.invoke("view-tracking", {

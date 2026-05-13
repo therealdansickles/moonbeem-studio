@@ -28,6 +28,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
+import { enforce } from "@/lib/ratelimit";
 import { fulfillTitleRequestsForFanEdit } from "@/lib/title-requests/fulfill-on-fan-edit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { parseShortcodeFromUrl } from "@/lib/ensembledata/client";
@@ -146,7 +147,9 @@ function isTikTokShortenedHost(host: string): boolean {
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
-  await requireSuperAdmin();
+  const session = await requireSuperAdmin();
+  const limit = await enforce("admin", session.userId, "admin/fan-edits/import");
+  if (!limit.ok) return limit.response;
 
   let formData: FormData;
   try {

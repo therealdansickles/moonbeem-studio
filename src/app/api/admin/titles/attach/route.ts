@@ -31,6 +31,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireSuperAdmin } from "@/lib/dal";
+import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildPublicUrl } from "@/lib/r2/upload";
 import { nextFeaturedOrder } from "@/lib/featured-order";
@@ -56,7 +57,9 @@ type Body = {
 };
 
 export async function POST(request: NextRequest) {
-  await requireSuperAdmin();
+  const session = await requireSuperAdmin();
+  const limit = await enforce("admin", session.userId, "admin/titles/attach");
+  if (!limit.ok) return limit.response;
 
   let body: Body;
   try {

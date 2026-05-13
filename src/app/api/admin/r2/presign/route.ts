@@ -6,6 +6,7 @@ import {
   buildStillKey,
   generatePresignedUploadUrl,
 } from "@/lib/r2/upload";
+import { enforce } from "@/lib/ratelimit";
 
 const ALLOWED_EXTS: Record<string, true> = {
   mp4: true,
@@ -47,7 +48,9 @@ const PARTNER_LOGO_EXTS = new Set(Object.keys(PARTNER_LOGO_CONTENT_TYPES));
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export async function GET(request: NextRequest) {
-  await requireSuperAdmin();
+  const session = await requireSuperAdmin();
+  const limit = await enforce("admin", session.userId, "admin/r2/presign");
+  if (!limit.ok) return limit.response;
 
   const { searchParams } = request.nextUrl;
   const type = searchParams.get("type");

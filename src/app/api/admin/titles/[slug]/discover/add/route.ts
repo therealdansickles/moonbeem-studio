@@ -24,6 +24,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { enforce } from "@/lib/ratelimit";
 import {
   insertFanEditCandidate,
   type FanEditCandidate,
@@ -68,7 +69,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ slug: string }> },
 ) {
-  await requireSuperAdmin();
+  const session = await requireSuperAdmin();
+  const limit = await enforce("admin", session.userId, "admin/titles/[slug]/discover/add");
+  if (!limit.ok) return limit.response;
   const { slug } = await params;
 
   let body: { posts?: unknown; url?: unknown };

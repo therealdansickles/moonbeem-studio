@@ -26,6 +26,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireSuperAdmin } from "@/lib/dal";
+import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { nextFeaturedOrder } from "@/lib/featured-order";
 
@@ -43,7 +44,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ slug: string }> },
 ) {
-  await requireSuperAdmin();
+  const session = await requireSuperAdmin();
+  const limit = await enforce("admin", session.userId, "admin/titles/[slug]");
+  if (!limit.ok) return limit.response;
   const { slug } = await params;
 
   let body: Body;

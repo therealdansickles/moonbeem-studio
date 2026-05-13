@@ -3,6 +3,7 @@ import { requireSuperAdmin } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
 import { buildPublicUrl } from "@/lib/r2/upload";
 import { notifyTitleRequesters } from "@/lib/notifications/notify-title-requesters";
+import { enforce } from "@/lib/ratelimit";
 
 type Body = {
   title_id?: string;
@@ -14,7 +15,9 @@ type Body = {
 };
 
 export async function POST(request: NextRequest) {
-  await requireSuperAdmin();
+  const session = await requireSuperAdmin();
+  const limit = await enforce("admin", session.userId, "admin/clips");
+  if (!limit.ok) return limit.response;
 
   let body: Body;
   try {

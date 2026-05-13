@@ -16,6 +16,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
+import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 
 const MIN_QUERY_LEN = 2;
@@ -23,7 +24,9 @@ const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 
 export async function GET(request: NextRequest) {
-  await requireSuperAdmin();
+  const session = await requireSuperAdmin();
+  const rl = await enforce("admin", session.userId, "admin/titles/search");
+  if (!rl.ok) return rl.response;
 
   const q = (request.nextUrl.searchParams.get("q") ?? "").trim();
   if (q.length < MIN_QUERY_LEN) {

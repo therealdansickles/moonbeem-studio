@@ -19,9 +19,12 @@ import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { logAdminActionRun } from "@/lib/admin-action-runs";
 import { calculateEarningsForRate, type Rate } from "@/lib/earnings-calc";
+import { enforce } from "@/lib/ratelimit";
 
 export async function POST() {
   const session = await requireSuperAdmin();
+  const rl = await enforce("admin", session.userId, "admin/earnings/calculate");
+  if (!rl.ok) return rl.response;
   const startedAt = Date.now();
   const supabase = createServiceRoleClient();
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC

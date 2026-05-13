@@ -37,6 +37,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { enforce } from "@/lib/ratelimit";
 import {
   searchTikTokKeyword,
   searchYouTubeHashtag,
@@ -63,6 +64,8 @@ export async function POST(
   { params }: { params: Promise<{ slug: string }> },
 ) {
   const session = await requireSuperAdmin();
+  const limit = await enforce("admin", session.userId, "admin/titles/[slug]/discover/search");
+  if (!limit.ok) return limit.response;
   const { slug } = await params;
 
   let body: {

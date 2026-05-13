@@ -14,6 +14,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { enforce } from "@/lib/ratelimit";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -23,7 +24,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; memberId: string }> },
 ) {
-  await requireSuperAdmin();
+  const session = await requireSuperAdmin();
+  const limit = await enforce("admin", session.userId, "admin/partners/[id]/members/[memberId] PATCH");
+  if (!limit.ok) return limit.response;
   const { id, memberId } = await params;
   if (!UUID_RE.test(id) || !UUID_RE.test(memberId)) {
     return NextResponse.json({ error: "invalid_id" }, { status: 400 });
@@ -62,7 +65,9 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string; memberId: string }> },
 ) {
-  await requireSuperAdmin();
+  const session = await requireSuperAdmin();
+  const limit = await enforce("admin", session.userId, "admin/partners/[id]/members/[memberId] DELETE");
+  if (!limit.ok) return limit.response;
   const { id, memberId } = await params;
   if (!UUID_RE.test(id) || !UUID_RE.test(memberId)) {
     return NextResponse.json({ error: "invalid_id" }, { status: 400 });

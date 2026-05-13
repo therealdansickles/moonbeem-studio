@@ -18,6 +18,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireSuperAdmin } from "@/lib/dal";
+import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildPublicUrl } from "@/lib/r2/upload";
 import { nextMarqueeOrder } from "@/lib/marquee-order";
@@ -38,7 +39,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  await requireSuperAdmin();
+  const session = await requireSuperAdmin();
+  const limit = await enforce("admin", session.userId, "admin/partners/[id] PATCH");
+  if (!limit.ok) return limit.response;
   const { id } = await params;
   if (!UUID_RE.test(id)) {
     return NextResponse.json({ error: "invalid_id" }, { status: 400 });
@@ -141,7 +144,9 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  await requireSuperAdmin();
+  const session = await requireSuperAdmin();
+  const limit = await enforce("admin", session.userId, "admin/partners/[id] DELETE");
+  if (!limit.ok) return limit.response;
   const { id } = await params;
   if (!UUID_RE.test(id)) {
     return NextResponse.json({ error: "invalid_id" }, { status: 400 });

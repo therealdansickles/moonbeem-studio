@@ -14,6 +14,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { enforce } from "@/lib/ratelimit";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -24,7 +25,9 @@ const TEMP_OFFSET = 10_000;
 type Entry = { partner_id: string; position: number };
 
 export async function POST(request: NextRequest) {
-  await requireSuperAdmin();
+  const session = await requireSuperAdmin();
+  const limit = await enforce("admin", session.userId, "admin/partners/marquee/reorder");
+  if (!limit.ok) return limit.response;
 
   let body: { positions?: Entry[] };
   try {

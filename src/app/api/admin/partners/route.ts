@@ -12,6 +12,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireSuperAdmin } from "@/lib/dal";
+import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildPublicUrl } from "@/lib/r2/upload";
 import { nextMarqueeOrder } from "@/lib/marquee-order";
@@ -30,7 +31,9 @@ type CreateBody = {
 };
 
 export async function GET() {
-  await requireSuperAdmin();
+  const session = await requireSuperAdmin();
+  const limit = await enforce("admin", session.userId, "admin/partners");
+  if (!limit.ok) return limit.response;
   const supabase = createServiceRoleClient();
   const { data, error } = await supabase
     .from("partners")
@@ -43,7 +46,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  await requireSuperAdmin();
+  const session = await requireSuperAdmin();
+  const limit = await enforce("admin", session.userId, "admin/partners");
+  if (!limit.ok) return limit.response;
   let body: CreateBody;
   try {
     body = (await request.json()) as CreateBody;
