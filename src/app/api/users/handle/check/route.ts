@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { enforce, getIp } from "@/lib/ratelimit";
 
 const HANDLE_RE = /^[a-z0-9_]{3,30}$/;
 const RESERVED = new Set([
@@ -22,6 +23,14 @@ const RESERVED = new Set([
 ]);
 
 export async function POST(request: NextRequest) {
+  // Username enumeration is the threat here — keep the limit tight.
+  const limit = await enforce(
+    "tightAnon",
+    getIp(request),
+    "users/handle/check",
+  );
+  if (!limit.ok) return limit.response;
+
   let body: { handle?: string };
   try {
     body = (await request.json()) as { handle?: string };
