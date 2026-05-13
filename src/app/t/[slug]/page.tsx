@@ -157,7 +157,7 @@ export default async function TitlePage({ params }: PageProps) {
           ))}
         </div>
       )}
-      {clips.length === 0 && (
+      {fanEdits.length === 0 && (
         <RequestFanEditsCTA
           titleId={title.id}
           titleName={title.title}
