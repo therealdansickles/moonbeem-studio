@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/drain-email-queue",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/cleanup-fan-edit-events",
+      "schedule": "0 3 1 * *"
     }
   ]
 }
