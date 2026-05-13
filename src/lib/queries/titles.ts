@@ -176,7 +176,7 @@ export async function getFeaturedTitles(): Promise<Title[]> {
     .select("*")
     .eq("is_featured", true)
     .eq("is_active", true)
-    .order("created_at", { ascending: true });
+    .order("featured_order", { ascending: true });
   if (error || !data) return [];
   return data as Title[];
 }

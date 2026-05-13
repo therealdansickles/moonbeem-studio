@@ -455,7 +455,15 @@ export default async function AdminLanding() {
               title={`${titles.length} partnered`}
               hint={`${catalogCounts.total_titles.toLocaleString()} titles in catalog · ${catalogCounts.partnered_titles} with partner`}
             />
-            <AttachTitleButton />
+            <div className="flex items-center gap-3">
+              <Link
+                href="/admin/featured"
+                className="rounded-md border border-white/10 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
+              >
+                Curate featured →
+              </Link>
+              <AttachTitleButton />
+            </div>
           </div>
           {titles.length === 0 ? (
             <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">

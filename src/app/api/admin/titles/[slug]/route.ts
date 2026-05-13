@@ -2,9 +2,10 @@
 //
 // Super-admin only. Body shape:
 //   {
-//     is_active?:  boolean,
-//     is_public?:  boolean,
-//     partner_id?: string | null,  // reassign or detach
+//     is_active?:   boolean,
+//     is_public?:   boolean,
+//     is_featured?: boolean,
+//     partner_id?:  string | null,  // reassign or detach
 //   }
 //
 // Invariants:
@@ -16,8 +17,14 @@
 //     partner needs to set their own rate from /p/[their-slug].
 //   - Detaching to NULL also clears all of the title's
 //     partner_title_rates (no partner means no active CPM rate).
+//   - is_featured false→true assigns featured_order =
+//     max(featured_order WHERE is_featured) + 1 (append to end).
+//     true→false leaves featured_order untouched — the row drops out
+//     of the homepage via the is_featured filter, and the stale order
+//     value is inert until the row is re-featured.
 
 import { NextResponse, type NextRequest } from "next/server";
+import { revalidatePath } from "next/cache";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 
@@ -27,6 +34,7 @@ const UUID_RE =
 type Body = {
   is_active?: boolean;
   is_public?: boolean;
+  is_featured?: boolean;
   partner_id?: string | null;
 };
 
@@ -47,6 +55,7 @@ export async function PATCH(
   if (
     body.is_active === undefined &&
     body.is_public === undefined &&
+    body.is_featured === undefined &&
     body.partner_id === undefined
   ) {
     return NextResponse.json({ error: "no_fields" }, { status: 400 });
@@ -56,6 +65,15 @@ export async function PATCH(
   }
   if (body.is_public !== undefined && typeof body.is_public !== "boolean") {
     return NextResponse.json({ error: "is_public_not_boolean" }, { status: 400 });
+  }
+  if (
+    body.is_featured !== undefined &&
+    typeof body.is_featured !== "boolean"
+  ) {
+    return NextResponse.json(
+      { error: "is_featured_not_boolean" },
+      { status: 400 },
+    );
   }
   if (
     body.partner_id !== undefined &&
@@ -68,7 +86,7 @@ export async function PATCH(
   const supabase = createServiceRoleClient();
   const { data: current, error: readErr } = await supabase
     .from("titles")
-    .select("id, slug, is_active, is_public, partner_id")
+    .select("id, slug, is_active, is_public, is_featured, partner_id, featured_order")
     .eq("slug", slug)
     .maybeSingle();
   if (readErr) {
@@ -107,7 +125,7 @@ export async function PATCH(
     }
   }
 
-  const update: Body = {};
+  const update: Body & { featured_order?: number } = {};
   if (body.is_active !== undefined) update.is_active = body.is_active;
   if (body.is_public !== undefined) update.is_public = body.is_public;
   if (body.partner_id !== undefined) update.partner_id = body.partner_id;
@@ -116,14 +134,37 @@ export async function PATCH(
     update.is_public = false;
   }
 
+  // is_featured: false→true appends to end (max+1); true→false leaves
+  // featured_order untouched. Same-value updates are no-ops.
+  const wasFeatured = current.is_featured as boolean;
+  if (body.is_featured !== undefined && body.is_featured !== wasFeatured) {
+    update.is_featured = body.is_featured;
+    if (body.is_featured === true) {
+      const { data: maxRow } = await supabase
+        .from("titles")
+        .select("featured_order")
+        .eq("is_featured", true)
+        .order("featured_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const nextOrder = ((maxRow?.featured_order as number | null) ?? 0) + 1;
+      update.featured_order = nextOrder;
+    }
+  }
+
   const { data: updated, error: writeErr } = await supabase
     .from("titles")
     .update(update)
     .eq("id", current.id as string)
-    .select("id, slug, is_active, is_public, partner_id")
+    .select("id, slug, is_active, is_public, is_featured, partner_id, featured_order")
     .maybeSingle();
   if (writeErr) {
     return NextResponse.json({ error: writeErr.message }, { status: 500 });
+  }
+
+  // Featured changes affect the homepage carousel; nudge the cache.
+  if (body.is_featured !== undefined && body.is_featured !== wasFeatured) {
+    revalidatePath("/");
   }
 
   // Cascade for partner_id changes: if the prior partner was non-
