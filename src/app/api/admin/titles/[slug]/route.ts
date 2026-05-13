@@ -27,6 +27,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { nextFeaturedOrder } from "@/lib/featured-order";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -140,15 +141,7 @@ export async function PATCH(
   if (body.is_featured !== undefined && body.is_featured !== wasFeatured) {
     update.is_featured = body.is_featured;
     if (body.is_featured === true) {
-      const { data: maxRow } = await supabase
-        .from("titles")
-        .select("featured_order")
-        .eq("is_featured", true)
-        .order("featured_order", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      const nextOrder = ((maxRow?.featured_order as number | null) ?? 0) + 1;
-      update.featured_order = nextOrder;
+      update.featured_order = await nextFeaturedOrder(supabase);
     }
   }
 

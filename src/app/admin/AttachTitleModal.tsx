@@ -86,6 +86,7 @@ export default function AttachTitleModal({ onClose }: Props) {
   // Flags + submit state
   const [isActive, setIsActive] = useState(true);
   const [isPublic, setIsPublic] = useState(false);
+  const [isFeatured, setIsFeatured] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitErr, setSubmitErr] = useState<string | null>(null);
 
@@ -173,6 +174,7 @@ export default function AttachTitleModal({ onClose }: Props) {
       title_id: selected.id,
       is_active: isActive,
       is_public: isPublic,
+      is_featured: isFeatured,
     };
     if (mode === "pick-existing") {
       payload.partner_id = partnerId;
@@ -477,6 +479,18 @@ export default function AttachTitleModal({ onClose }: Props) {
                 <span className="text-moonbeem-ink">Public</span>
                 <span className="text-caption text-moonbeem-ink-subtle">
                   (anonymous /t/{selected.slug} renders)
+                </span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={isFeatured}
+                  onChange={(e) => setIsFeatured(e.target.checked)}
+                  className="accent-moonbeem-pink"
+                />
+                <span className="text-moonbeem-ink">Add to Featured carousel</span>
+                <span className="text-caption text-moonbeem-ink-subtle">
+                  (appears on homepage Featured row)
                 </span>
               </label>
             </div>

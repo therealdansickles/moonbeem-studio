@@ -6,6 +6,9 @@
 //   new_partner?: { name, slug, logo_url? }, // … or this (creates partner)
 //   is_active?: boolean,                 // default true
 //   is_public?: boolean,                 // default false
+//   is_featured?: boolean,               // default false; if true, append
+//                                        //   to homepage Featured carousel
+//                                        //   (assigns featured_order = max+1)
 // }
 //
 // Performs (in order):
@@ -26,9 +29,11 @@
 // Super-admin only.
 
 import { NextResponse, type NextRequest } from "next/server";
+import { revalidatePath } from "next/cache";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildPublicUrl } from "@/lib/r2/upload";
+import { nextFeaturedOrder } from "@/lib/featured-order";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -46,6 +51,7 @@ type Body = {
   new_partner?: NewPartner;
   is_active?: boolean;
   is_public?: boolean;
+  is_featured?: boolean;
 };
 
 export async function POST(request: NextRequest) {
@@ -76,9 +82,14 @@ export async function POST(request: NextRequest) {
   }
   const isActive = body.is_active ?? true;
   const isPublic = body.is_public ?? false;
-  if (typeof isActive !== "boolean" || typeof isPublic !== "boolean") {
+  const isFeatured = body.is_featured ?? false;
+  if (
+    typeof isActive !== "boolean" ||
+    typeof isPublic !== "boolean" ||
+    typeof isFeatured !== "boolean"
+  ) {
     return NextResponse.json(
-      { error: "is_active_or_is_public_not_boolean" },
+      { error: "flag_not_boolean" },
       { status: 400 },
     );
   }
@@ -141,16 +152,22 @@ export async function POST(request: NextRequest) {
     partnerId = partnerRow.id;
   }
 
+  const titleUpdate: Record<string, unknown> = {
+    partner_id: partnerId,
+    is_active: isActive,
+    is_public: isPublic,
+  };
+  if (isFeatured) {
+    titleUpdate.is_featured = true;
+    titleUpdate.featured_order = await nextFeaturedOrder(supabase);
+  }
+
   const { data: titleRow, error: titleErr } = await supabase
     .from("titles")
-    .update({
-      partner_id: partnerId,
-      is_active: isActive,
-      is_public: isPublic,
-    })
+    .update(titleUpdate)
     .eq("id", body.title_id)
     .is("deleted_at", null)
-    .select("id, slug, title, year, partner_id, is_active, is_public")
+    .select("id, slug, title, year, partner_id, is_active, is_public, is_featured, featured_order")
     .maybeSingle();
 
   if (titleErr) {
@@ -158,6 +175,10 @@ export async function POST(request: NextRequest) {
   }
   if (!titleRow) {
     return NextResponse.json({ error: "title_not_found" }, { status: 404 });
+  }
+
+  if (isFeatured) {
+    revalidatePath("/");
   }
 
   return NextResponse.json({ ok: true, partner: partnerRow, title: titleRow });
