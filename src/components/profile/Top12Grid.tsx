@@ -15,6 +15,11 @@ import {
   arrayMove,
   rectSortingStrategy,
 } from "@dnd-kit/sortable";
+import {
+  fetchJson,
+  FetchJsonError,
+  RateLimitedError,
+} from "@/lib/fetch-json";
 import type { TopTitle } from "@/lib/queries/profiles";
 import TitleCard from "@/components/TitleCard";
 import SortableTitleSlot from "./SortableTitleSlot";
@@ -80,15 +85,17 @@ export default function Top12Grid({ topTitles, isOwner }: Props) {
     if (removingId) return;
     setRemovingId(id);
     try {
-      const res = await fetch("/api/profile/top-titles/remove", {
+      await fetchJson("/api/profile/top-titles/remove", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title_id: titleId }),
+        body: { title_id: titleId },
       });
-      if (!res.ok) throw new Error(`remove ${res.status}`);
       router.refresh();
     } catch (err) {
-      console.error(err);
+      if (err instanceof RateLimitedError || err instanceof FetchJsonError) {
+        console.warn("[Top12 remove]", err.userMessage);
+      } else {
+        console.error(err);
+      }
     } finally {
       setRemovingId(null);
     }
@@ -108,20 +115,22 @@ export default function Top12Grid({ topTitles, isOwner }: Props) {
     setItems(next);
     setSavingReorder(true);
     try {
-      const res = await fetch("/api/profile/top-titles/reorder", {
+      await fetchJson("/api/profile/top-titles/reorder", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           positions: next.map((t) => ({
             title_id: t.title_id,
             position: t.position,
           })),
-        }),
+        },
       });
-      if (!res.ok) throw new Error(`reorder ${res.status}`);
       router.refresh();
     } catch (err) {
-      console.error(err);
+      if (err instanceof RateLimitedError || err instanceof FetchJsonError) {
+        console.warn("[Top12 reorder]", err.userMessage);
+      } else {
+        console.error(err);
+      }
     } finally {
       setSavingReorder(false);
     }

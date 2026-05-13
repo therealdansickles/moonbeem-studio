@@ -32,6 +32,11 @@
 
 import { useState } from "react";
 import { formatRelativeDays } from "@/lib/relative-time";
+import {
+  fetchJson,
+  FetchJsonError,
+  RateLimitedError,
+} from "@/lib/fetch-json";
 
 type Props = {
   titleId: string;
@@ -61,37 +66,21 @@ export default function RequestFanEditsCTA({
     setStatus("submitting");
     setErrorMsg("");
     try {
-      const res = await fetch("/api/titles/request", {
+      const data = await fetchJson<{
+        already_requested?: boolean;
+        requested_at?: string | null;
+        requires_auth?: boolean;
+        redirect_to?: string;
+      }>("/api/titles/request", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           title_id: titleId,
           redirect_to: `/t/${titleSlug}`,
           title_name: titleName,
           request_type: "fan_edits",
-        }),
+        },
       });
 
-      if (res.status === 401) {
-        const data = (await res.json().catch(() => ({}))) as {
-          requires_auth?: boolean;
-          redirect_to?: string;
-        };
-        if (data.requires_auth && data.redirect_to) {
-          window.location.href = data.redirect_to;
-          return;
-        }
-      }
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text.slice(0, 200) || `request ${res.status}`);
-      }
-
-      const data = (await res.json().catch(() => ({}))) as {
-        already_requested?: boolean;
-        requested_at?: string | null;
-      };
       if (data.already_requested && data.requested_at) {
         setSubmittedAt(data.requested_at);
       } else {
@@ -99,8 +88,26 @@ export default function RequestFanEditsCTA({
       }
       setStatus("done");
     } catch (err) {
+      // 401 from the route includes a redirect_to to /login — fetchJson
+      // throws FetchJsonError with status 401 + payload containing the
+      // redirect. Honor it before surfacing any error UI.
+      if (err instanceof FetchJsonError && err.status === 401) {
+        const p = err.payload as
+          | { requires_auth?: boolean; redirect_to?: string }
+          | null;
+        if (p?.requires_auth && p.redirect_to) {
+          window.location.href = p.redirect_to;
+          return;
+        }
+      }
       setStatus("error");
-      setErrorMsg(err instanceof Error ? err.message : String(err));
+      if (err instanceof RateLimitedError) {
+        setErrorMsg(err.userMessage);
+      } else if (err instanceof FetchJsonError) {
+        setErrorMsg(err.userMessage);
+      } else {
+        setErrorMsg(err instanceof Error ? err.message : String(err));
+      }
     }
   }
 

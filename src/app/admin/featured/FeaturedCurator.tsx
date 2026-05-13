@@ -18,6 +18,11 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import {
+  fetchJson,
+  FetchJsonError,
+  RateLimitedError,
+} from "@/lib/fetch-json";
 
 export type FeaturedTitle = {
   id: string;
@@ -67,23 +72,24 @@ export default function FeaturedCurator({
     setSaving(true);
     setErrorMsg(null);
     try {
-      const res = await fetch("/api/admin/titles/featured/reorder", {
+      await fetchJson("/api/admin/titles/featured/reorder", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           positions: next.map((t, idx) => ({
             title_id: t.id,
             position: idx + 1,
           })),
-        }),
+        },
       });
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(j.error ?? `reorder ${res.status}`);
-      }
       router.refresh();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : String(err));
+      setErrorMsg(
+        err instanceof RateLimitedError || err instanceof FetchJsonError
+          ? err.userMessage
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      );
       setItems(items); // rollback
     } finally {
       setSaving(false);
@@ -97,18 +103,19 @@ export default function FeaturedCurator({
     const prev = items;
     setItems(items.filter((x) => x.id !== t.id));
     try {
-      const res = await fetch(`/api/admin/titles/${t.slug}`, {
+      await fetchJson(`/api/admin/titles/${t.slug}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_featured: false }),
+        body: { is_featured: false },
       });
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(j.error ?? `remove ${res.status}`);
-      }
       router.refresh();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : String(err));
+      setErrorMsg(
+        err instanceof RateLimitedError || err instanceof FetchJsonError
+          ? err.userMessage
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      );
       setItems(prev);
     } finally {
       setRemovingId(null);
@@ -118,18 +125,12 @@ export default function FeaturedCurator({
   async function handleAdd(hit: SearchHit) {
     setErrorMsg(null);
     try {
-      const res = await fetch(`/api/admin/titles/${hit.slug}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_featured: true }),
-      });
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(j.error ?? `add ${res.status}`);
-      }
-      const j = (await res.json()) as {
+      const j = await fetchJson<{
         title?: { featured_order?: number };
-      };
+      }>(`/api/admin/titles/${hit.slug}`, {
+        method: "PATCH",
+        body: { is_featured: true },
+      });
       const nextOrder = j.title?.featured_order ?? items.length + 1;
       setItems([
         ...items,
@@ -144,7 +145,13 @@ export default function FeaturedCurator({
       ]);
       router.refresh();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : String(err));
+      setErrorMsg(
+        err instanceof RateLimitedError || err instanceof FetchJsonError
+          ? err.userMessage
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      );
     }
   }
 

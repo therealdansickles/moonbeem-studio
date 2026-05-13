@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { SearchResult } from "@/lib/queries/titles";
 import { trackCreatorSearch } from "@/lib/analytics/track";
+import { fetchJson, RateLimitedError } from "@/lib/fetch-json";
 
 const DEBOUNCE_MS = 300;
 const MIN_QUERY_LEN = 2;
@@ -18,6 +19,7 @@ export default function SearchBar() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [rateLimitHint, setRateLimitHint] = useState<string | null>(null);
 
   // Debounced fetch
   useEffect(() => {
@@ -35,17 +37,21 @@ export default function SearchBar() {
       const ac = new AbortController();
       abortRef.current = ac;
       try {
-        const res = await fetch(
+        const json = await fetchJson<{ results: SearchResult[] }>(
           `/api/search?q=${encodeURIComponent(trimmed)}`,
           { signal: ac.signal },
         );
-        if (!res.ok) throw new Error(`search ${res.status}`);
-        const json = (await res.json()) as { results: SearchResult[] };
         setResults(json.results);
+        setRateLimitHint(null);
       } catch (err) {
-        if ((err as Error).name !== "AbortError") {
-          setResults([]);
+        if ((err as Error).name === "AbortError") return;
+        if (err instanceof RateLimitedError) {
+          // Keep prior results visible; surface a small hint instead
+          // of blanking the dropdown.
+          setRateLimitHint(err.userMessage);
+          return;
         }
+        setResults([]);
       } finally {
         if (!ac.signal.aborted) setLoading(false);
       }
@@ -130,7 +136,13 @@ export default function SearchBar() {
             </ul>
           )}
 
-          {!loading && trimmed.length >= MIN_QUERY_LEN && results.length === 0 && (
+          {rateLimitHint && (
+            <p className="px-4 py-3 text-body-sm text-moonbeem-magenta text-center">
+              {rateLimitHint}
+            </p>
+          )}
+
+          {!loading && !rateLimitHint && trimmed.length >= MIN_QUERY_LEN && results.length === 0 && (
             <p className="px-4 py-6 text-body-sm text-moonbeem-ink-muted text-center">
               No films match &lsquo;{trimmed}&rsquo;.
             </p>

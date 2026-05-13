@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import PartnerLogoUploader from "@/components/admin/PartnerLogoUploader";
+import { fetchJson, FetchJsonError, RateLimitedError } from "@/lib/fetch-json";
 
 type Partner = {
   id: string;
@@ -188,25 +189,25 @@ export default function AttachTitleModal({ onClose }: Props) {
     }
 
     try {
-      const res = await fetch("/api/admin/titles/attach", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const j = (await res.json()) as {
+      const j = await fetchJson<{
         ok?: boolean;
         title?: TitleHit;
-        error?: string;
-      };
-      if (!res.ok || !j.ok || !j.title) {
-        setSubmitErr(j.error ?? `request failed (${res.status})`);
+      }>("/api/admin/titles/attach", { method: "POST", body: payload });
+      if (!j.ok || !j.title) {
+        setSubmitErr("Attach didn't complete. Try again.");
         return;
       }
       // Success — navigate to the title detail page so the user
       // lands on the operational hub for the title they just attached.
       router.push(`/admin/titles/${j.title.slug}`);
     } catch (e) {
-      setSubmitErr(e instanceof Error ? e.message : String(e));
+      setSubmitErr(
+        e instanceof RateLimitedError || e instanceof FetchJsonError
+          ? e.userMessage
+          : e instanceof Error
+            ? e.message
+            : String(e),
+      );
     } finally {
       setSubmitting(false);
     }

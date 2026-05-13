@@ -18,6 +18,11 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import {
+  fetchJson,
+  FetchJsonError,
+  RateLimitedError,
+} from "@/lib/fetch-json";
 
 export type MarqueePartner = {
   id: string;
@@ -58,23 +63,24 @@ export default function MarqueeCurator({
     setSaving(true);
     setErrorMsg(null);
     try {
-      const res = await fetch("/api/admin/partners/marquee/reorder", {
+      await fetchJson("/api/admin/partners/marquee/reorder", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           positions: next.map((p, idx) => ({
             partner_id: p.id,
             position: idx + 1,
           })),
-        }),
+        },
       });
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(j.error ?? `reorder ${res.status}`);
-      }
       router.refresh();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : String(err));
+      setErrorMsg(
+        err instanceof RateLimitedError || err instanceof FetchJsonError
+          ? err.userMessage
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      );
       setVisible(prev);
     } finally {
       setSaving(false);
@@ -90,18 +96,19 @@ export default function MarqueeCurator({
     setVisible(visible.filter((x) => x.id !== p.id));
     setHidden([{ ...p, is_marquee_visible: false }, ...hidden]);
     try {
-      const res = await fetch(`/api/admin/partners/${p.id}`, {
+      await fetchJson(`/api/admin/partners/${p.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_marquee_visible: false }),
+        body: { is_marquee_visible: false },
       });
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(j.error ?? `hide ${res.status}`);
-      }
       router.refresh();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : String(err));
+      setErrorMsg(
+        err instanceof RateLimitedError || err instanceof FetchJsonError
+          ? err.userMessage
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      );
       setVisible(prevVisible);
       setHidden(prevHidden);
     } finally {
@@ -121,18 +128,19 @@ export default function MarqueeCurator({
       { ...p, is_marquee_visible: true, marquee_order: visible.length + 1 },
     ]);
     try {
-      const res = await fetch(`/api/admin/partners/${p.id}`, {
+      await fetchJson(`/api/admin/partners/${p.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_marquee_visible: true }),
+        body: { is_marquee_visible: true },
       });
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(j.error ?? `show ${res.status}`);
-      }
       router.refresh();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : String(err));
+      setErrorMsg(
+        err instanceof RateLimitedError || err instanceof FetchJsonError
+          ? err.userMessage
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      );
       setVisible(prevVisible);
       setHidden(prevHidden);
     } finally {

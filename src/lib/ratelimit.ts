@@ -90,9 +90,18 @@ export async function enforce(
     return { ok: true, response: null };
   }
 
+  // Upstash REST round-trip is normally ~10-50ms. Cap at 250ms via
+  // Promise.race so a real outage doesn't add multi-second latency
+  // before the fail-open kicks in. (Verified empirically 2026-05-13:
+  // an unreachable host caused ~4.6s elapsed without this guard.)
   let result;
   try {
-    result = await limiter.limit(key);
+    result = await Promise.race([
+      limiter.limit(key),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("upstash-timeout-250ms")), 250),
+      ),
+    ]);
   } catch (err) {
     console.warn(
       `[ratelimit] upstash error, failing open: tier=${tier} route=${route} err=${err instanceof Error ? err.message : String(err)}`,
