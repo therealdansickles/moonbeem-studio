@@ -18,7 +18,7 @@ import {
   windowCutoffIso,
   bucketTimeSeries,
   countByState,
-  countByCountry,
+  countByCity,
 } from "@/lib/dashboard/queries";
 import TitleDetailTabs, {
   type AnalyticsData,
@@ -285,7 +285,7 @@ async function buildAnalyticsData(
   const clicksQ = (() => {
     let q = supabase
       .from("external_clicks")
-      .select("country_code, region_code, clicked_at")
+      .select("country_code, region_code, city, clicked_at")
       .eq("title_id", titleId)
       .eq("is_bot", false);
     if (cutoff) q = q.gte("clicked_at", cutoff);
@@ -312,6 +312,7 @@ async function buildAnalyticsData(
   const clicks = (clicksRes.data ?? []) as Array<{
     country_code: string | null;
     region_code: string | null;
+    city: string | null;
     clicked_at: string;
   }>;
 
@@ -320,11 +321,16 @@ async function buildAnalyticsData(
     event_type: string;
     user_id: string | null;
     created_at: string;
+    country_code: string | null;
+    region_code: string | null;
+    city: string | null;
   }> = await (async () => {
     if (fanEditIds.length === 0) return [];
     let q = supabase
       .from("fan_edit_events")
-      .select("fan_edit_id, event_type, user_id, created_at")
+      .select(
+        "fan_edit_id, event_type, user_id, created_at, country_code, region_code, city",
+      )
       .in("fan_edit_id", fanEditIds);
     if (cutoff) q = q.gte("created_at", cutoff);
     const r = await q;
@@ -333,6 +339,9 @@ async function buildAnalyticsData(
       event_type: string;
       user_id: string | null;
       created_at: string;
+      country_code: string | null;
+      region_code: string | null;
+      city: string | null;
     }>;
   })();
 
@@ -357,10 +366,19 @@ async function buildAnalyticsData(
       region_code: c.region_code,
     })),
   );
-  const countryBreakdown = countByCountry(
-    clicks.map((c) => ({ country_code: c.country_code })),
-  );
-  const totalGeoClicks = countryBreakdown.reduce((s, c) => s + c.count, 0);
+  const cityBreakdown = countByCity([
+    ...clicks.map((c) => ({
+      city: c.city,
+      region_code: c.region_code,
+      country_code: c.country_code,
+    })),
+    ...events.map((e) => ({
+      city: e.city,
+      region_code: e.region_code,
+      country_code: e.country_code,
+    })),
+  ]);
+  const totalGeoEvents = cityBreakdown.reduce((s, c) => s + c.count, 0);
 
   const modalOpensByFe = new Map<string, number>();
   const platformClicksByFe = new Map<string, number>();
@@ -424,8 +442,8 @@ async function buildAnalyticsData(
     openRequests: openRequestsRes.count ?? 0,
     timeSeries,
     stateData: stateDataRecord,
-    countryBreakdown,
-    totalGeoClicks,
+    cityBreakdown,
+    totalGeoEvents,
     fanEditsComparison,
   };
 }

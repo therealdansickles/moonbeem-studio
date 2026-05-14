@@ -16,6 +16,7 @@ import {
   windowLabel,
   windowShortLabel,
   type TimeWindow,
+  type CityCount,
 } from "@/lib/dashboard/queries";
 
 export type FanEditRow = {
@@ -96,8 +97,8 @@ export type AnalyticsData = {
   timeSeries: { date: string; value: number }[];
   /** Plain object form of state code → click count (Map doesn't serialize). */
   stateData: Record<string, number>;
-  countryBreakdown: { country_code: string; count: number }[];
-  totalGeoClicks: number;
+  cityBreakdown: CityCount[];
+  totalGeoEvents: number;
   fanEditsComparison: AnalyticsFanEditRow[];
 };
 
@@ -1316,36 +1317,36 @@ function AnalyticsTab({
       <section className="flex flex-col gap-3">
         <h2 className="text-display-sm m-0">Geography</h2>
         <p className="text-body-sm text-moonbeem-ink-muted m-0">
-          /go/ click origins for this title ·{" "}
-          {data.totalGeoClicks.toLocaleString()} geo-tagged click
-          {data.totalGeoClicks === 1 ? "" : "s"} in window
+          /go/ click + consent-gated event origins for this title ·{" "}
+          {data.totalGeoEvents.toLocaleString()} geo-tagged event
+          {data.totalGeoEvents === 1 ? "" : "s"} in window
         </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="md:col-span-2 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
             <UsStateChoropleth data={stateMap} height={360} />
           </div>
           <div className="flex flex-col">
-            <DataTable<{ country_code: string; count: number }>
+            <DataTable<CityCount>
               columns={[
                 {
-                  key: "country",
-                  label: "Country",
+                  key: "city",
+                  label: "City",
                   render: (r) => (
-                    <span className="font-mono text-body-sm">
-                      {r.country_code}
-                    </span>
+                    <span className="text-body-sm">{r.label}</span>
                   ),
                 },
                 {
                   key: "count",
-                  label: "Clicks",
+                  label: "Events",
                   align: "right",
                   render: (r) => r.count.toLocaleString(),
                 },
               ]}
-              rows={data.countryBreakdown.slice(0, 10)}
-              rowKey={(r) => r.country_code}
-              emptyMessage="No geo-tagged clicks in this window."
+              rows={data.cityBreakdown.slice(0, 10)}
+              rowKey={(r) =>
+                `${r.country_code ?? ""}|${r.region_code ?? ""}|${r.city}`
+              }
+              emptyMessage="No location data available for this window."
             />
           </div>
         </div>

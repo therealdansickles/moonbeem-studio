@@ -33,7 +33,7 @@ import {
   windowShortLabel,
   bucketTimeSeries,
   countByState,
-  countByCountry,
+  countByCity,
   TIME_WINDOWS,
 } from "@/lib/dashboard/queries";
 
@@ -45,11 +45,15 @@ export const metadata: Metadata = {
 type EventRow = {
   user_id: string | null;
   created_at: string;
+  country_code: string | null;
+  region_code: string | null;
+  city: string | null;
 };
 
 type ClickRow = {
   country_code: string | null;
   region_code: string | null;
+  city: string | null;
   clicked_at: string;
 };
 
@@ -83,11 +87,13 @@ export default async function AdminDashboardPage(props: PageProps) {
 
   const supabase = createServiceRoleClient();
 
-  // Events query (window-filtered)
+  // Events query (window-filtered). Pulls geo columns too so the
+  // city table can combine consent-gated event geo with /go/ click
+  // geo into one ranking.
   const eventsQ = (() => {
     let q = supabase
       .from("fan_edit_events")
-      .select("user_id, created_at");
+      .select("user_id, created_at, country_code, region_code, city");
     if (cutoff) q = q.gte("created_at", cutoff);
     return q;
   })();
@@ -98,7 +104,7 @@ export default async function AdminDashboardPage(props: PageProps) {
   const clicksQ = (() => {
     let q = supabase
       .from("external_clicks")
-      .select("country_code, region_code, clicked_at")
+      .select("country_code, region_code, city, clicked_at")
       .eq("is_bot", false);
     if (cutoff) q = q.gte("clicked_at", cutoff);
     return q;
@@ -185,10 +191,23 @@ export default async function AdminDashboardPage(props: PageProps) {
       region_code: c.region_code,
     })),
   );
-  const countryBreakdown = countByCountry(
-    clicks.map((c) => ({ country_code: c.country_code })),
-  );
-  const totalGeoClicks = countryBreakdown.reduce((s, c) => s + c.count, 0);
+  // City table combines /go/ clicks (always geo-tagged when we have a
+  // header) with consent-gated fan_edit_events geo. Each row counts
+  // once regardless of source — the table is "where did people
+  // engage from", not "where did each source see traffic".
+  const cityBreakdown = countByCity([
+    ...clicks.map((c) => ({
+      city: c.city,
+      region_code: c.region_code,
+      country_code: c.country_code,
+    })),
+    ...events.map((e) => ({
+      city: e.city,
+      region_code: e.region_code,
+      country_code: e.country_code,
+    })),
+  ]);
+  const totalGeoEvents = cityBreakdown.reduce((s, c) => s + c.count, 0);
 
   // Hydrate top fan_edits with their best-available creator handle
   // (moonbeem_handle from public_creators where the FK resolves).
@@ -355,35 +374,36 @@ export default async function AdminDashboardPage(props: PageProps) {
         <section className="flex flex-col gap-3">
           <h2 className="text-display-sm m-0">Geography</h2>
           <p className="text-body-sm text-moonbeem-ink-muted m-0">
-            /go/ click origins, consent-gated · {totalGeoClicks.toLocaleString()}{" "}
-            geo-tagged click{totalGeoClicks === 1 ? "" : "s"} in window
+            /go/ click + consent-gated event origins ·{" "}
+            {totalGeoEvents.toLocaleString()} geo-tagged event
+            {totalGeoEvents === 1 ? "" : "s"} in window
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="md:col-span-2 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
               <UsStateChoropleth data={stateData} height={360} />
             </div>
             <div className="flex flex-col">
-              <DataTable<{ country_code: string; count: number }>
+              <DataTable<(typeof cityBreakdown)[number]>
                 columns={[
                   {
-                    key: "country",
-                    label: "Country",
+                    key: "city",
+                    label: "City",
                     render: (r) => (
-                      <span className="font-mono text-body-sm">
-                        {r.country_code}
-                      </span>
+                      <span className="text-body-sm">{r.label}</span>
                     ),
                   },
                   {
                     key: "count",
-                    label: "Clicks",
+                    label: "Events",
                     align: "right",
                     render: (r) => r.count.toLocaleString(),
                   },
                 ]}
-                rows={countryBreakdown.slice(0, 10)}
-                rowKey={(r) => r.country_code}
-                emptyMessage="No geo-tagged clicks in this window."
+                rows={cityBreakdown.slice(0, 10)}
+                rowKey={(r) =>
+                  `${r.country_code ?? ""}|${r.region_code ?? ""}|${r.city}`
+                }
+                emptyMessage="No location data available for this window."
               />
             </div>
           </div>

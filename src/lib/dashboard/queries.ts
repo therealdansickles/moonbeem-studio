@@ -126,3 +126,57 @@ export function countByCountry(
     .map(([country_code, count]) => ({ country_code, count }))
     .sort((a, b) => b.count - a.count);
 }
+
+export type CityCount = {
+  city: string;
+  region_code: string | null;
+  country_code: string | null;
+  count: number;
+  /** Display string: "Brooklyn, NY" (US) or "Toronto, CA" (non-US). */
+  label: string;
+};
+
+/**
+ * Aggregates rows from one or more geo-tagged sources (e.g.
+ * external_clicks + fan_edit_events) into a top-N city ranking.
+ * Rows without a city are dropped — they can't appear in a city
+ * table by definition, but they're still counted in the country
+ * totals upstream.
+ *
+ * Key is the (country_code, region_code, city) tuple so "Brooklyn,
+ * NY, US" and "Brooklyn, IA, US" don't collide.
+ */
+export function countByCity(
+  rows: {
+    city: string | null;
+    region_code: string | null;
+    country_code: string | null;
+  }[],
+): CityCount[] {
+  const m = new Map<string, CityCount>();
+  for (const r of rows) {
+    if (!r.city) continue;
+    const key = `${r.country_code ?? ""}|${r.region_code ?? ""}|${r.city}`;
+    const existing = m.get(key);
+    if (existing) {
+      existing.count++;
+      continue;
+    }
+    // Prefer region_code for US (e.g. "NY"); fall back to
+    // country_code for non-US since region codes are less
+    // recognizable internationally.
+    const tail =
+      r.country_code === "US" && r.region_code
+        ? r.region_code
+        : r.country_code ?? r.region_code ?? null;
+    const label = tail ? `${r.city}, ${tail}` : r.city;
+    m.set(key, {
+      city: r.city,
+      region_code: r.region_code ?? null,
+      country_code: r.country_code ?? null,
+      count: 1,
+      label,
+    });
+  }
+  return Array.from(m.values()).sort((a, b) => b.count - a.count);
+}
