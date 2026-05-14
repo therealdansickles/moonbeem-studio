@@ -11,6 +11,7 @@ import HeroNumber from "@/components/dashboard/HeroNumber";
 import TimeSeriesChart from "@/components/dashboard/TimeSeriesChart";
 import UsStateChoropleth from "@/components/dashboard/UsStateChoropleth";
 import DataTable, { type Column } from "@/components/dashboard/DataTable";
+import ConfirmModal from "@/components/ui/ConfirmModal";
 import {
   TIME_WINDOWS,
   windowLabel,
@@ -516,17 +517,19 @@ function ClipsList({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errorId, setErrorId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [pending, setPending] = useState<
+    { action: "delete" | "restore"; clip: ClipRow } | null
+  >(null);
 
-  async function deleteClip(id: string, label: string | null) {
-    const ok = window.confirm(
-      `Soft-delete clip ${label ?? id}? It will disappear from the public title page immediately. (Restorable from SQL today.)`,
-    );
-    if (!ok) return;
+  async function performAction() {
+    if (!pending) return;
+    const { action, clip } = pending;
+    const id = clip.id;
     setBusyId(id);
     setErrorId(null);
     setErrorMsg(null);
     try {
-      const res = await fetch(`/api/admin/clips/${id}/delete`, {
+      const res = await fetch(`/api/admin/clips/${id}/${action}`, {
         method: "POST",
       });
       const json = (await res.json().catch(() => ({}))) as {
@@ -540,9 +543,16 @@ function ClipsList({
       }
       setClips((cur) =>
         cur.map((c) =>
-          c.id === id ? { ...c, deleted_at: new Date().toISOString() } : c,
+          c.id === id
+            ? {
+                ...c,
+                deleted_at:
+                  action === "delete" ? new Date().toISOString() : null,
+              }
+            : c,
         ),
       );
+      setPending(null);
     } catch (err) {
       setErrorId(id);
       setErrorMsg(err instanceof Error ? err.message : String(err));
@@ -629,7 +639,7 @@ function ClipsList({
                 <td className="px-4 py-3 text-right">
                   <button
                     type="button"
-                    onClick={() => deleteClip(c.id, c.label)}
+                    onClick={() => setPending({ action: "delete", clip: c })}
                     disabled={busyId === c.id}
                     className="rounded-md border border-moonbeem-magenta/30 px-3 py-1 text-caption text-moonbeem-magenta hover:bg-moonbeem-magenta/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -658,7 +668,7 @@ function ClipsList({
                 key={c.id}
                 className="flex items-center justify-between gap-3"
               >
-                <span className="truncate">
+                <span className="min-w-0 flex-1 truncate">
                   {c.label ?? c.file_url ?? "(unnamed)"} ·{" "}
                   {formatDuration(c.duration_seconds)} ·{" "}
                   {formatBytes(c.file_size_bytes)}
@@ -667,9 +677,22 @@ function ClipsList({
                   {c.deleted_at &&
                     new Date(c.deleted_at).toLocaleDateString()}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => setPending({ action: "restore", clip: c })}
+                  disabled={busyId === c.id}
+                  className="rounded-md border border-moonbeem-pink/30 px-2.5 py-0.5 text-caption text-moonbeem-pink hover:bg-moonbeem-pink/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {busyId === c.id ? "Restoring…" : "Restore"}
+                </button>
               </li>
             ))}
           </ul>
+          {errorId && errorMsg && deleted.some((c) => c.id === errorId) && (
+            <p className="mt-3 text-caption text-moonbeem-magenta">
+              {errorMsg}
+            </p>
+          )}
         </details>
       )}
 
@@ -684,6 +707,29 @@ function ClipsList({
         . Soft-deleted clips drop out immediately. R2 objects are kept
         (purge job TBD).
       </p>
+
+      <ConfirmModal
+        isOpen={!!pending}
+        title={pending?.action === "restore" ? "Restore clip?" : "Delete this clip?"}
+        description={
+          pending?.action === "restore"
+            ? `Restore "${pending.clip.label ?? "this clip"}"? It will reappear on the public title page immediately.`
+            : `Soft-delete "${pending?.clip.label ?? "this clip"}"? It will disappear from the public title page immediately.`
+        }
+        detail={
+          pending?.action === "restore"
+            ? "The R2 object was kept after soft-delete, so the file is fully recoverable."
+            : "Reversible — open the Soft-deleted block and hit Restore."
+        }
+        confirmLabel={pending?.action === "restore" ? "Restore" : "Delete"}
+        tone={pending?.action === "restore" ? "primary" : "destructive"}
+        busy={!!busyId}
+        onConfirm={performAction}
+        onCancel={() => {
+          if (busyId) return;
+          setPending(null);
+        }}
+      />
     </div>
   );
 }
@@ -699,17 +745,19 @@ function StillsList({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errorId, setErrorId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [pending, setPending] = useState<
+    { action: "delete" | "restore"; still: StillRow } | null
+  >(null);
 
-  async function deleteStill(id: string, alt: string | null) {
-    const ok = window.confirm(
-      `Soft-delete still ${alt ?? id}? It will disappear from the public title page immediately. (Restorable from SQL today.)`,
-    );
-    if (!ok) return;
+  async function performAction() {
+    if (!pending) return;
+    const { action, still } = pending;
+    const id = still.id;
     setBusyId(id);
     setErrorId(null);
     setErrorMsg(null);
     try {
-      const res = await fetch(`/api/admin/stills/${id}/delete`, {
+      const res = await fetch(`/api/admin/stills/${id}/${action}`, {
         method: "POST",
       });
       const json = (await res.json().catch(() => ({}))) as {
@@ -723,9 +771,16 @@ function StillsList({
       }
       setStills((cur) =>
         cur.map((s) =>
-          s.id === id ? { ...s, deleted_at: new Date().toISOString() } : s,
+          s.id === id
+            ? {
+                ...s,
+                deleted_at:
+                  action === "delete" ? new Date().toISOString() : null,
+              }
+            : s,
         ),
       );
+      setPending(null);
     } catch (err) {
       setErrorId(id);
       setErrorMsg(err instanceof Error ? err.message : String(err));
@@ -795,7 +850,7 @@ function StillsList({
                 )}
                 <button
                   type="button"
-                  onClick={() => deleteStill(s.id, s.alt_text)}
+                  onClick={() => setPending({ action: "delete", still: s })}
                   disabled={busyId === s.id}
                   className="rounded-md border border-moonbeem-magenta/30 px-2.5 py-1 text-caption text-moonbeem-magenta hover:bg-moonbeem-magenta/10 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -821,7 +876,7 @@ function StillsList({
                 key={s.id}
                 className="flex items-center justify-between gap-3"
               >
-                <span className="truncate">
+                <span className="min-w-0 flex-1 truncate">
                   {s.alt_text ?? s.file_url ?? "(unnamed)"} ·{" "}
                   {formatBytes(s.file_size_bytes)}
                 </span>
@@ -829,9 +884,22 @@ function StillsList({
                   {s.deleted_at &&
                     new Date(s.deleted_at).toLocaleDateString()}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => setPending({ action: "restore", still: s })}
+                  disabled={busyId === s.id}
+                  className="rounded-md border border-moonbeem-pink/30 px-2.5 py-0.5 text-caption text-moonbeem-pink hover:bg-moonbeem-pink/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {busyId === s.id ? "Restoring…" : "Restore"}
+                </button>
               </li>
             ))}
           </ul>
+          {errorId && errorMsg && deleted.some((s) => s.id === errorId) && (
+            <p className="mt-3 text-caption text-moonbeem-magenta">
+              {errorMsg}
+            </p>
+          )}
         </details>
       )}
 
@@ -846,6 +914,29 @@ function StillsList({
         . Soft-deleted stills drop out immediately. R2 objects are kept
         (purge job TBD).
       </p>
+
+      <ConfirmModal
+        isOpen={!!pending}
+        title={pending?.action === "restore" ? "Restore still?" : "Delete this still?"}
+        description={
+          pending?.action === "restore"
+            ? `Restore "${pending.still.alt_text ?? "this still"}"? It will reappear on the public title page immediately.`
+            : `Soft-delete "${pending?.still.alt_text ?? "this still"}"? It will disappear from the public title page immediately.`
+        }
+        detail={
+          pending?.action === "restore"
+            ? "The R2 object was kept after soft-delete, so the image is fully recoverable."
+            : "Reversible — open the Soft-deleted block and hit Restore."
+        }
+        confirmLabel={pending?.action === "restore" ? "Restore" : "Delete"}
+        tone={pending?.action === "restore" ? "primary" : "destructive"}
+        busy={!!busyId}
+        onConfirm={performAction}
+        onCancel={() => {
+          if (busyId) return;
+          setPending(null);
+        }}
+      />
     </div>
   );
 }

@@ -1,0 +1,43 @@
+// POST /api/admin/stills/[id]/restore — undo a soft-delete on a still.
+//
+// Mirror of /api/admin/clips/[id]/restore. Sets stills.deleted_at to
+// NULL on a previously soft-deleted row; public RLS re-admits it.
+
+import { NextResponse, type NextRequest } from "next/server";
+import { requireSuperAdmin } from "@/lib/dal";
+import { createServiceRoleClient } from "@/lib/supabase/service";
+import { enforce } from "@/lib/ratelimit";
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function POST(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const session = await requireSuperAdmin();
+  const limit = await enforce(
+    "admin",
+    session.userId,
+    "admin/stills/[id]/restore",
+  );
+  if (!limit.ok) return limit.response;
+  const { id } = await params;
+  if (!UUID_RE.test(id)) {
+    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+  }
+
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("stills")
+    .update({ deleted_at: null })
+    .eq("id", id)
+    .not("deleted_at", "is", null)
+    .select("id, deleted_at")
+    .maybeSingle();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true, id, already_active: data === null });
+}
