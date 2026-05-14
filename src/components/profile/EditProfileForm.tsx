@@ -1,9 +1,19 @@
 "use client";
 
+import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { ProfileLink } from "@/lib/queries/profiles";
 import AvatarUploader from "./AvatarUploader";
+
+// Slim, position-ordered Top 12 row for the read-only editor display.
+export type EditTopTitle = {
+  title_id: string;
+  slug: string;
+  title: string;
+  poster_url: string | null;
+};
 
 type Props = {
   handle: string;
@@ -11,6 +21,7 @@ type Props = {
   initialBio: string;
   initialAvatarUrl: string | null;
   initialLinks: ProfileLink[];
+  topTitles: EditTopTitle[];
 };
 
 const MAX_DISPLAY_NAME = 50;
@@ -23,6 +34,7 @@ export default function EditProfileForm({
   initialBio,
   initialAvatarUrl,
   initialLinks,
+  topTitles,
 }: Props) {
   const router = useRouter();
   const [displayName, setDisplayName] = useState(initialDisplayName);
@@ -131,6 +143,62 @@ export default function EditProfileForm({
             {bio.length} / {MAX_BIO}
           </span>
         </label>
+
+        {/* Your top 12 — read-only here. Add, remove, reorder, search,
+            and browse all live in the dedicated builder at /me/top-12. */}
+        <section className="flex flex-col gap-2">
+          <span className="text-body-sm text-moonbeem-ink-muted">
+            {topTitles.length > 0 && topTitles.length < 12
+              ? `Your top 12 (${topTitles.length} picked)`
+              : "Your top 12"}
+          </span>
+          {topTitles.length === 0 ? (
+            <>
+              <p className="m-0 text-caption text-moonbeem-ink-subtle">
+                You haven&apos;t picked any films and series yet. Build your
+                top 12 to show your taste on your profile.
+              </p>
+              <Link
+                href="/me/top-12"
+                className="self-start rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-body-sm text-moonbeem-ink hover:border-moonbeem-pink hover:text-moonbeem-pink"
+              >
+                Build your top 12 →
+              </Link>
+            </>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-2">
+                {topTitles.map((t) => (
+                  <div
+                    key={t.title_id}
+                    className="relative aspect-[2/3] w-[52px] shrink-0 overflow-hidden rounded bg-moonbeem-navy/40"
+                  >
+                    {t.poster_url ? (
+                      <Image
+                        src={t.poster_url}
+                        alt={t.title}
+                        fill
+                        sizes="52px"
+                        unoptimized
+                        className="object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center p-1 text-center text-caption text-moonbeem-ink-subtle">
+                        {t.title}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <Link
+                href="/me/top-12"
+                className="self-start text-body-sm text-moonbeem-pink hover:opacity-90"
+              >
+                Manage your top 12 →
+              </Link>
+            </>
+          )}
+        </section>
 
         <fieldset className="flex flex-col gap-3">
           <legend className="text-body-sm text-moonbeem-ink-muted mb-1">

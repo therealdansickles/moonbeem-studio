@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { verifySession } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { type ProfileLink } from "@/lib/queries/profiles";
+import { getTopTitlesForUser, type ProfileLink } from "@/lib/queries/profiles";
 import EditProfileForm from "@/components/profile/EditProfileForm";
 import VerifySocialsCard from "@/components/me/VerifySocialsCard";
 
@@ -55,6 +55,10 @@ export default async function EditProfilePage() {
       .eq("creator_id", creator.id)
     : { data: [] };
 
+  // Top 12 — read-only on the profile editor; all management lives
+  // in the dedicated builder at /me/top-12.
+  const topTitles = await getTopTitlesForUser(session.userId);
+
   return (
     <>
       <EditProfileForm
@@ -63,6 +67,12 @@ export default async function EditProfilePage() {
         initialBio={(data.bio ?? "") as string}
         initialAvatarUrl={(data.avatar_url ?? null) as string | null}
         initialLinks={normalizeLinks(data.links)}
+        topTitles={topTitles.map((t) => ({
+          title_id: t.title_id,
+          slug: t.title.slug,
+          title: t.title.title,
+          poster_url: t.title.poster_url,
+        }))}
       />
       <div className="mx-auto flex max-w-2xl flex-col gap-8 px-6 pb-12">
         <VerifySocialsCard
