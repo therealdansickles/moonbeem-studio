@@ -1,11 +1,12 @@
 "use client";
 
-// Interactive grid for /lists/[slug]. Owns the same optimistic
-// add/remove state as the Top 12 builder, but for a flat membership
-// view (no ordering — that's the builder's job). Unmatched-catalog
-// positions render as explicit placeholders. Unauthenticated viewers
-// can browse freely; clicking +Add surfaces an inline sign-in prompt
-// rather than hitting the auth-gated API.
+// Interactive grid shared by every /lists/* page (curated [slug]
+// lists, Featured, Recently added). Owns the same optimistic
+// add/remove state as the Top 12 builder, for a flat membership
+// view (no ordering). Unmatched-catalog positions render as explicit
+// placeholders. Unauthenticated viewers can browse freely; clicking
+// +Add surfaces an inline sign-in prompt rather than hitting the
+// auth-gated API.
 
 import Link from "next/link";
 import { useState, useCallback } from "react";
@@ -29,13 +30,15 @@ function mutationError(err: unknown, fallback: string): string {
 }
 
 export default function ListPageClient({
-  listSlug,
+  redirectPath,
   slots,
   isAuthed,
   initialPickedIds,
   initialPickCount,
 }: {
-  listSlug: string;
+  // Where /login should return after sign-in — the current page path
+  // (e.g. "/lists/afi-top-100", "/lists/featured").
+  redirectPath: string;
   slots: ListSlot[];
   isAuthed: boolean;
   initialPickedIds: string[];
@@ -129,7 +132,7 @@ export default function ListPageClient({
             Sign in to add titles to your top 12.
           </p>
           <Link
-            href={`/login?redirect_to=/lists/${listSlug}`}
+            href={`/login?redirect_to=${encodeURIComponent(redirectPath)}`}
             className="inline-block rounded-md bg-moonbeem-pink px-4 py-1.5 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90"
           >
             Sign in →
@@ -154,7 +157,10 @@ export default function ListPageClient({
               fill
             />
           ) : (
-            <PlaceholderCard key={`gap-${slot.position}`} position={slot.position} />
+            <PlaceholderCard
+              key={`gap-${slot.position}`}
+              position={slot.position}
+            />
           ),
         )}
       </div>

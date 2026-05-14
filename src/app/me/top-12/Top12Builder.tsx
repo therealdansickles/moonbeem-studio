@@ -414,6 +414,8 @@ export default function Top12Builder({
                   atCapacity={atCapacity}
                   pendingIds={pendingIds}
                   onToggle={toggle}
+                  viewAllHref="/lists/featured"
+                  viewAllCount={featured.length}
                 />
                 {curatedLists.map((list) => (
                   <BrowseRow
@@ -435,6 +437,7 @@ export default function Top12Builder({
                   atCapacity={atCapacity}
                   pendingIds={pendingIds}
                   onToggle={toggle}
+                  viewAllHref="/lists/recently-added"
                 />
                 {/* By-partner sections are intentionally not rendered in
                     v1.5 — the catalog has too few partners with enough
