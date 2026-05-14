@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ALLOWED_SOCIAL_PLATFORMS,
   type SocialPlatform,
@@ -26,19 +27,34 @@ type Props = {
   // Pre-fetched on the server. The component refreshes via
   // /api/me/socials after each successful verification.
   initialSocials: SocialRow[];
+  // Same-origin path to return to after a successful verification —
+  // set when the user arrived here from a gate (Gating Phase 1).
+  // null = stay on /me/edit. Validated server-side in the page.
+  returnTo?: string | null;
 };
 
 const platformLabel = PLATFORM_LABEL;
 const bioWordFor = PLATFORM_BIO_LABEL;
 
-export default function VerifySocialsCard({ initialSocials }: Props) {
+export default function VerifySocialsCard({
+  initialSocials,
+  returnTo = null,
+}: Props) {
   const [socials, setSocials] = useState<SocialRow[]>(initialSocials);
+  const router = useRouter();
 
   async function refresh(): Promise<void> {
     const res = await fetch("/api/me/socials", { cache: "no-store" });
     if (!res.ok) return;
     const json = (await res.json()) as { socials: SocialRow[] };
     setSocials(json.socials ?? []);
+  }
+
+  // Called only on an actual verification success (not on visibility
+  // toggles). When the user came from a gate, send them back so they
+  // can re-take the action they were blocked on.
+  function handleVerified(): void {
+    if (returnTo) router.push(returnTo);
   }
 
   return (
@@ -60,6 +76,7 @@ export default function VerifySocialsCard({ initialSocials }: Props) {
               platform={p}
               row={row}
               onChange={refresh}
+              onVerified={handleVerified}
             />
           );
         })}
@@ -72,9 +89,15 @@ type PlatformRowProps = {
   platform: SocialPlatform;
   row: SocialRow | null;
   onChange: () => Promise<void>;
+  onVerified: () => void;
 };
 
-function PlatformRow({ platform, row, onChange }: PlatformRowProps) {
+function PlatformRow({
+  platform,
+  row,
+  onChange,
+  onVerified,
+}: PlatformRowProps) {
   const verified = !!row?.verified_at;
   const [handleInput, setHandleInput] = useState("");
   // Pending code state lives in-component (not persisted to DB-as-
@@ -170,6 +193,9 @@ function PlatformRow({ platform, row, onChange }: PlatformRowProps) {
       setPendingHandle(null);
       setHandleInput("");
       await onChange();
+      // Verification succeeded — if the user arrived from a gate,
+      // this returns them to where they were.
+      onVerified();
     } finally {
       setBusy(false);
     }

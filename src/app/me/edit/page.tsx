@@ -23,7 +23,22 @@ function normalizeLinks(raw: unknown): ProfileLink[] {
     .slice(0, 5);
 }
 
-export default async function EditProfilePage() {
+// Same-origin path guard for the ?return_to= gate flow — must be an
+// absolute path ("/...") and not a protocol-relative ("//...") or
+// absolute URL, so it can't be turned into an open redirect.
+function safeReturnTo(raw: string | undefined): string | null {
+  if (!raw) return null;
+  if (!raw.startsWith("/") || raw.startsWith("//")) return null;
+  return raw;
+}
+
+export default async function EditProfilePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ return_to?: string }>;
+}) {
+  const { return_to } = await searchParams;
+  const returnTo = safeReturnTo(return_to);
   const session = await verifySession();
   const supabase = await createClient();
   const { data } = await supabase
@@ -77,6 +92,7 @@ export default async function EditProfilePage() {
       <div className="mx-auto flex max-w-2xl flex-col gap-8 px-6 pb-12">
         <VerifySocialsCard
           initialSocials={(socials ?? []) as never}
+          returnTo={returnTo}
         />
       </div>
     </>

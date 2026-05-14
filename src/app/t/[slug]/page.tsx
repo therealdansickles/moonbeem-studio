@@ -19,6 +19,9 @@ import AboutCredits from "@/components/AboutCredits";
 import OfferButtonClient from "@/components/OfferButtonClient";
 import { createClient } from "@/lib/supabase/server";
 import { canViewTitle } from "@/lib/title-access";
+import { getCurrentProfile } from "@/lib/dal";
+import { getUserTier } from "@/lib/gating/get-user-tier";
+import { getUsageCount } from "@/lib/gating/usage-counts";
 import { Suspense } from "react";
 
 type PageProps = { params: Promise<{ slug: string }> };
@@ -136,6 +139,20 @@ export default async function TitlePage({ params }: PageProps) {
     }
   }
 
+  // Gating Phase 1 — the clips tab needs the viewer's tier + lifetime
+  // clip-download count for its quota affordance. Super-admins are
+  // coerced to "verified" for the UI (unlimited "Download"); the
+  // server-side gate still does the real bypass.
+  const gateProfile = await getCurrentProfile();
+  const isSuperAdmin = gateProfile?.role === "super_admin";
+  const clipTier = isSuperAdmin
+    ? "verified"
+    : await getUserTier(user?.id ?? null);
+  const clipDownloadUsage =
+    user && !isSuperAdmin
+      ? await getUsageCount(user.id, "download_clip")
+      : 0;
+
   const metaParts = [
     title.director,
     title.year ? String(title.year) : null,
@@ -226,7 +243,13 @@ export default async function TitlePage({ params }: PageProps) {
                 titlePosterUrl={title.poster_url}
               />
             }
-            videosContent={<VideosTab clips={clips} />}
+            videosContent={
+              <VideosTab
+                clips={clips}
+                tier={clipTier}
+                clipDownloadUsage={clipDownloadUsage}
+              />
+            }
             stillsContent={<StillsTab stills={stills} />}
           />
         </div>
