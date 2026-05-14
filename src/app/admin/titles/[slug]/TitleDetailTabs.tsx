@@ -7,6 +7,16 @@ import { useRouter, useSearchParams } from "next/navigation";
 import FanEditsUploadCard from "@/components/admin/FanEditsUploadCard";
 import UploadClient from "./upload/UploadClient";
 import DiscoverTab from "./DiscoverTab";
+import HeroNumber from "@/components/dashboard/HeroNumber";
+import TimeSeriesChart from "@/components/dashboard/TimeSeriesChart";
+import UsStateChoropleth from "@/components/dashboard/UsStateChoropleth";
+import DataTable, { type Column } from "@/components/dashboard/DataTable";
+import {
+  TIME_WINDOWS,
+  windowLabel,
+  windowShortLabel,
+  type TimeWindow,
+} from "@/lib/dashboard/queries";
 
 export type FanEditRow = {
   id: string;
@@ -59,10 +69,37 @@ type Tab =
   | "clips"
   | "stills"
   | "discover"
+  | "analytics"
   | "upload"
   | "settings";
 
 type PartnerOption = { id: string; slug: string; name: string };
+
+export type AnalyticsFanEditRow = {
+  id: string;
+  platform: string;
+  caption: string | null;
+  thumbnail_url: string | null;
+  view_count: number;
+  modal_opens: number;
+  platform_clicks: number;
+  creator_handle: string;
+};
+
+export type AnalyticsData = {
+  events: number;
+  uniqueSignedInUsers: number;
+  clicks: number;
+  totalSocialViews: number;
+  fanEditsCount: number;
+  openRequests: number;
+  timeSeries: { date: string; value: number }[];
+  /** Plain object form of state code → click count (Map doesn't serialize). */
+  stateData: Record<string, number>;
+  countryBreakdown: { country_code: string; count: number }[];
+  totalGeoClicks: number;
+  fanEditsComparison: AnalyticsFanEditRow[];
+};
 
 type Props = {
   titleId: string;
@@ -79,6 +116,8 @@ type Props = {
   clips: ClipRow[];
   stills: StillRow[];
   activeTab: Tab;
+  activeWindow: TimeWindow;
+  analytics: AnalyticsData | null;
 };
 
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -86,6 +125,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "clips", label: "Clips" },
   { id: "stills", label: "Stills" },
   { id: "discover", label: "Discover" },
+  { id: "analytics", label: "Analytics" },
   { id: "upload", label: "Upload" },
   { id: "settings", label: "Settings" },
 ];
@@ -245,6 +285,13 @@ export default function TitleDetailTabs(props: Props) {
             <DiscoverTab
               titleSlug={props.titleSlug}
               titleName={props.titleName}
+            />
+          )}
+          {tab === "analytics" && (
+            <AnalyticsTab
+              titleSlug={props.titleSlug}
+              activeWindow={props.activeWindow}
+              data={props.analytics}
             />
           )}
           {tab === "upload" && (
@@ -1163,4 +1210,228 @@ function SettingsTab({
       </section>
     </div>
   );
+}
+
+function AnalyticsTab({
+  titleSlug,
+  activeWindow,
+  data,
+}: {
+  titleSlug: string;
+  activeWindow: TimeWindow;
+  data: AnalyticsData | null;
+}) {
+  // Server should have populated data when ?tab=analytics; null means
+  // we just navigated and the route is still re-rendering. Render a
+  // shell so the layout doesn't jump.
+  if (!data) {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-8 text-center">
+        <p className="text-body-sm text-moonbeem-ink-muted m-0">
+          Loading analytics…
+        </p>
+      </div>
+    );
+  }
+
+  // Reconstruct the Map that UsStateChoropleth expects (we pass a plain
+  // object across the server/client boundary).
+  const stateMap = new Map(Object.entries(data.stateData));
+
+  return (
+    <div className="flex flex-col gap-10">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-body-sm text-moonbeem-ink-muted mr-1">
+          Window:
+        </span>
+        {TIME_WINDOWS.map((w) => {
+          const active = w === activeWindow;
+          const qs = new URLSearchParams();
+          qs.set("tab", "analytics");
+          if (w !== "7d") qs.set("window", w);
+          return (
+            <Link
+              key={w}
+              href={`/admin/titles/${titleSlug}?${qs.toString()}`}
+              scroll={false}
+              className={`rounded-md border px-3 py-1.5 text-body-sm transition-colors tabular-nums ${
+                active
+                  ? "border-moonbeem-pink bg-moonbeem-pink/10 text-moonbeem-pink"
+                  : "border-white/10 text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
+              }`}
+            >
+              {windowShortLabel(w)}
+            </Link>
+          );
+        })}
+        <span className="ml-2 text-caption text-moonbeem-ink-subtle">
+          {windowLabel(activeWindow)}
+        </span>
+      </div>
+
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4">
+        <HeroNumber
+          value={data.events.toLocaleString()}
+          label="Engagement events"
+        />
+        <HeroNumber
+          value={data.uniqueSignedInUsers.toLocaleString()}
+          label="Signed-in users (window)"
+        />
+        <HeroNumber
+          value={data.clicks.toLocaleString()}
+          label="/go/ clicks (humans)"
+        />
+        <HeroNumber
+          value={data.totalSocialViews.toLocaleString()}
+          label="Total social views"
+        />
+        <HeroNumber
+          value={data.fanEditsCount.toLocaleString()}
+          label="Active fan edits"
+        />
+        <HeroNumber
+          value={data.openRequests.toLocaleString()}
+          label="Open title requests"
+        />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-display-sm m-0">Engagement over time</h2>
+        <p className="text-body-sm text-moonbeem-ink-muted m-0">
+          Fan-edit modal events for this title ·{" "}
+          {activeWindow === "24h" ? "hourly" : "daily"} buckets
+        </p>
+        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+          {data.timeSeries.length === 0 ? (
+            <p className="text-body-sm text-moonbeem-ink-muted text-center py-12 m-0">
+              No engagement events in this window.
+            </p>
+          ) : (
+            <TimeSeriesChart data={data.timeSeries} yLabel="events" />
+          )}
+        </div>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-display-sm m-0">Geography</h2>
+        <p className="text-body-sm text-moonbeem-ink-muted m-0">
+          /go/ click origins for this title ·{" "}
+          {data.totalGeoClicks.toLocaleString()} geo-tagged click
+          {data.totalGeoClicks === 1 ? "" : "s"} in window
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="md:col-span-2 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+            <UsStateChoropleth data={stateMap} height={360} />
+          </div>
+          <div className="flex flex-col">
+            <DataTable<{ country_code: string; count: number }>
+              columns={[
+                {
+                  key: "country",
+                  label: "Country",
+                  render: (r) => (
+                    <span className="font-mono text-body-sm">
+                      {r.country_code}
+                    </span>
+                  ),
+                },
+                {
+                  key: "count",
+                  label: "Clicks",
+                  align: "right",
+                  render: (r) => r.count.toLocaleString(),
+                },
+              ]}
+              rows={data.countryBreakdown.slice(0, 10)}
+              rowKey={(r) => r.country_code}
+              emptyMessage="No geo-tagged clicks in this window."
+            />
+          </div>
+        </div>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-display-sm m-0">Fan edits</h2>
+        <p className="text-body-sm text-moonbeem-ink-muted m-0">
+          Every active fan edit for this title. View counts are lifetime;
+          modal opens and platform clicks are window-scoped.
+        </p>
+        <DataTable<AnalyticsFanEditRow>
+          columns={getFanEditComparisonColumns()}
+          rows={data.fanEditsComparison}
+          rowKey={(r) => r.id}
+          emptyMessage="No active fan edits for this title yet."
+        />
+      </section>
+    </div>
+  );
+}
+
+function getFanEditComparisonColumns(): Column<AnalyticsFanEditRow>[] {
+  return [
+    {
+      key: "thumb",
+      label: "",
+      render: (r) =>
+        r.thumbnail_url ? (
+          <div className="h-[60px] w-[40px] shrink-0 overflow-hidden rounded-sm bg-white/[0.03]">
+            <Image
+              src={r.thumbnail_url}
+              alt=""
+              width={40}
+              height={60}
+              className="h-full w-full object-cover"
+              unoptimized
+            />
+          </div>
+        ) : (
+          <div className="h-[60px] w-[40px] shrink-0 rounded-sm border border-white/10 bg-white/[0.03]" />
+        ),
+    },
+    {
+      key: "creator",
+      label: "Creator / platform",
+      render: (r) => (
+        <div className="flex flex-col">
+          <Link
+            href={`/admin/fan-edits/${r.id}`}
+            className="text-moonbeem-pink hover:opacity-90 text-body-sm"
+          >
+            @{r.creator_handle}
+          </Link>
+          <span className="text-caption text-moonbeem-ink-subtle">
+            {r.platform}
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: "caption",
+      label: "Caption",
+      render: (r) => (
+        <span className="text-body-sm text-moonbeem-ink-muted line-clamp-2 max-w-[280px] block">
+          {r.caption ?? "—"}
+        </span>
+      ),
+    },
+    {
+      key: "views",
+      label: "Views",
+      align: "right",
+      render: (r) => r.view_count.toLocaleString(),
+    },
+    {
+      key: "opens",
+      label: "Modal opens",
+      align: "right",
+      render: (r) => r.modal_opens.toLocaleString(),
+    },
+    {
+      key: "clicks",
+      label: "Platform clicks",
+      align: "right",
+      render: (r) => r.platform_clicks.toLocaleString(),
+    },
+  ];
 }

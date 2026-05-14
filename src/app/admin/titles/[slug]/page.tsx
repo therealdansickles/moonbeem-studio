@@ -13,7 +13,15 @@ import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { requireSuperAdminOr404 } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import {
+  parseWindow,
+  windowCutoffIso,
+  bucketTimeSeries,
+  countByState,
+  countByCountry,
+} from "@/lib/dashboard/queries";
 import TitleDetailTabs, {
+  type AnalyticsData,
   type ClipRow,
   type FanEditRow,
   type StillRow,
@@ -21,7 +29,7 @@ import TitleDetailTabs, {
 
 type PageProps = {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; window?: string | string[] }>;
 };
 
 export async function generateMetadata({
@@ -39,6 +47,7 @@ const ALLOWED_TABS = [
   "clips",
   "stills",
   "discover",
+  "analytics",
   "upload",
   "settings",
 ] as const;
@@ -57,7 +66,9 @@ export default async function AdminTitleDetailPage({
 }: PageProps) {
   await requireSuperAdminOr404();
   const { slug } = await params;
-  const { tab } = await searchParams;
+  const { tab, window: windowParam } = await searchParams;
+  const activeTab = parseTab(tab);
+  const activeWindow = parseWindow(windowParam);
 
   // Catch the bare /admin/titles route by way of typo / stale link.
   if (!slug || slug === "_") redirect("/admin");
@@ -215,6 +226,15 @@ export default async function AdminTitleDetailPage({
     name: string;
   }>;
 
+  // Analytics data — only fetched when the user is on (or landing on)
+  // the Analytics tab. Tab switches are client-side router.replace,
+  // which re-runs this server page; switching to ?tab=analytics here
+  // triggers the fetch on demand and other tabs stay cheap.
+  const analytics: AnalyticsData | null =
+    activeTab === "analytics"
+      ? await buildAnalyticsData(supabase, t.id, activeWindow)
+      : null;
+
   return (
     <TitleDetailTabs
       titleId={t.id}
@@ -230,7 +250,182 @@ export default async function AdminTitleDetailPage({
       fanEdits={fanEdits}
       clips={clips}
       stills={stills}
-      activeTab={parseTab(tab)}
+      activeTab={activeTab}
+      activeWindow={activeWindow}
+      analytics={analytics}
     />
   );
+}
+
+async function buildAnalyticsData(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  titleId: string,
+  win: ReturnType<typeof parseWindow>,
+): Promise<AnalyticsData> {
+  const cutoff = windowCutoffIso(win);
+
+  const fanEditsForTitleQ = supabase
+    .from("fan_edits")
+    .select(
+      "id, platform, embed_url, caption, view_count, creator_id, creator_handle_displayed, thumbnail_url",
+    )
+    .eq("title_id", titleId)
+    .eq("is_active", true)
+    .eq("verification_status", "auto_verified")
+    .is("deleted_at", null)
+    .order("view_count", { ascending: false, nullsFirst: false });
+
+  const openRequestsCountQ = supabase
+    .from("title_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("title_id", titleId)
+    .is("fulfilled_at", null)
+    .eq("request_type", "fan_edits");
+
+  const clicksQ = (() => {
+    let q = supabase
+      .from("external_clicks")
+      .select("country_code, region_code, clicked_at")
+      .eq("title_id", titleId)
+      .eq("is_bot", false);
+    if (cutoff) q = q.gte("clicked_at", cutoff);
+    return q;
+  })();
+
+  const [fanEditsRes, openRequestsRes, clicksRes] = await Promise.all([
+    fanEditsForTitleQ,
+    openRequestsCountQ,
+    clicksQ,
+  ]);
+
+  const fanEdits = (fanEditsRes.data ?? []) as Array<{
+    id: string;
+    platform: string;
+    embed_url: string;
+    caption: string | null;
+    view_count: number | null;
+    creator_id: string | null;
+    creator_handle_displayed: string | null;
+    thumbnail_url: string | null;
+  }>;
+  const fanEditIds = fanEdits.map((fe) => fe.id);
+  const clicks = (clicksRes.data ?? []) as Array<{
+    country_code: string | null;
+    region_code: string | null;
+    clicked_at: string;
+  }>;
+
+  const events: Array<{
+    fan_edit_id: string;
+    event_type: string;
+    user_id: string | null;
+    created_at: string;
+  }> = await (async () => {
+    if (fanEditIds.length === 0) return [];
+    let q = supabase
+      .from("fan_edit_events")
+      .select("fan_edit_id, event_type, user_id, created_at")
+      .in("fan_edit_id", fanEditIds);
+    if (cutoff) q = q.gte("created_at", cutoff);
+    const r = await q;
+    return (r.data ?? []) as Array<{
+      fan_edit_id: string;
+      event_type: string;
+      user_id: string | null;
+      created_at: string;
+    }>;
+  })();
+
+  const totalSocialViews = fanEdits.reduce(
+    (s, fe) => s + (fe.view_count ?? 0),
+    0,
+  );
+  const uniqueSignedInUsers = new Set(
+    events
+      .map((e) => e.user_id)
+      .filter((id): id is string => Boolean(id)),
+  ).size;
+
+  const timeSeries = bucketTimeSeries(
+    events.map((e) => e.created_at),
+    win,
+  );
+
+  const stateData = countByState(
+    clicks.map((c) => ({
+      country_code: c.country_code,
+      region_code: c.region_code,
+    })),
+  );
+  const countryBreakdown = countByCountry(
+    clicks.map((c) => ({ country_code: c.country_code })),
+  );
+  const totalGeoClicks = countryBreakdown.reduce((s, c) => s + c.count, 0);
+
+  const modalOpensByFe = new Map<string, number>();
+  const platformClicksByFe = new Map<string, number>();
+  for (const e of events) {
+    if (e.event_type === "modal_open") {
+      modalOpensByFe.set(
+        e.fan_edit_id,
+        (modalOpensByFe.get(e.fan_edit_id) ?? 0) + 1,
+      );
+    } else if (e.event_type === "view_on_platform_click") {
+      platformClicksByFe.set(
+        e.fan_edit_id,
+        (platformClicksByFe.get(e.fan_edit_id) ?? 0) + 1,
+      );
+    }
+  }
+
+  const creatorIds = Array.from(
+    new Set(
+      fanEdits
+        .map((fe) => fe.creator_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+  const handleByCreatorId = new Map<string, string>();
+  if (creatorIds.length > 0) {
+    const { data: creators } = await supabase
+      .from("public_creators")
+      .select("id, moonbeem_handle")
+      .in("id", creatorIds);
+    for (const c of creators ?? []) {
+      handleByCreatorId.set(c.id as string, c.moonbeem_handle as string);
+    }
+  }
+
+  const fanEditsComparison = fanEdits.map((fe) => ({
+    id: fe.id,
+    platform: fe.platform,
+    caption: fe.caption,
+    thumbnail_url: fe.thumbnail_url,
+    view_count: fe.view_count ?? 0,
+    modal_opens: modalOpensByFe.get(fe.id) ?? 0,
+    platform_clicks: platformClicksByFe.get(fe.id) ?? 0,
+    creator_handle:
+      (fe.creator_id && handleByCreatorId.get(fe.creator_id)) ||
+      fe.creator_handle_displayed ||
+      "anon",
+  }));
+
+  // Plain-object form for stateData so it serializes across the
+  // server/client boundary (Map is not JSON-friendly).
+  const stateDataRecord: Record<string, number> = {};
+  for (const [k, v] of stateData) stateDataRecord[k] = v;
+
+  return {
+    events: events.length,
+    uniqueSignedInUsers,
+    clicks: clicks.length,
+    totalSocialViews,
+    fanEditsCount: fanEdits.length,
+    openRequests: openRequestsRes.count ?? 0,
+    timeSeries,
+    stateData: stateDataRecord,
+    countryBreakdown,
+    totalGeoClicks,
+    fanEditsComparison,
+  };
 }

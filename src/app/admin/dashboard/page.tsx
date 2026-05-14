@@ -462,7 +462,7 @@ function getTopFanEditColumns(
         if (!slug) return <span>{title}</span>;
         return (
           <Link
-            href={`/admin/fan-edits/${r.id}`}
+            href={`/admin/titles/${slug}?tab=analytics`}
             className="text-moonbeem-ink hover:text-moonbeem-pink truncate block max-w-[280px]"
           >
             {title}
