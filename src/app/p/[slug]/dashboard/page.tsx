@@ -1030,13 +1030,10 @@ async function loadPartnerAnalytics(
     events.map((e) => e.created_at),
     win,
   );
-  const stateData = countByState(
-    clicks.map((c) => ({
-      country_code: c.country_code,
-      region_code: c.region_code,
-    })),
-  );
-  const cityBreakdown = countByCity([
+  // Choropleth + city table share the same combined-source feed.
+  // countByState filters to country_code === "US" so non-US geo
+  // drops out of the map without an explicit filter here.
+  const combinedGeoRows = [
     ...clicks.map((c) => ({
       city: c.city,
       region_code: c.region_code,
@@ -1047,7 +1044,9 @@ async function loadPartnerAnalytics(
       region_code: e.region_code,
       country_code: e.country_code,
     })),
-  ]);
+  ];
+  const stateData = countByState(combinedGeoRows);
+  const cityBreakdown = countByCity(combinedGeoRows);
   const totalGeoEvents = cityBreakdown.reduce((s, c) => s + c.count, 0);
 
   // Per-title rollups

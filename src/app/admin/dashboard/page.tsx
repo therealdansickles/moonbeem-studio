@@ -185,17 +185,12 @@ export default async function AdminDashboardPage(props: PageProps) {
     win,
   );
 
-  const stateData = countByState(
-    clicks.map((c) => ({
-      country_code: c.country_code,
-      region_code: c.region_code,
-    })),
-  );
-  // City table combines /go/ clicks (always geo-tagged when we have a
-  // header) with consent-gated fan_edit_events geo. Each row counts
-  // once regardless of source — the table is "where did people
-  // engage from", not "where did each source see traffic".
-  const cityBreakdown = countByCity([
+  // Choropleth + city table share the same combined-source feed so
+  // a partner asking "why is the map thinner than the city list?"
+  // doesn't have a real answer — they're the same data now. countByState
+  // already filters to country_code === "US", so non-US event geo
+  // drops naturally and only state-level signals colour the map.
+  const combinedGeoRows = [
     ...clicks.map((c) => ({
       city: c.city,
       region_code: c.region_code,
@@ -206,7 +201,9 @@ export default async function AdminDashboardPage(props: PageProps) {
       region_code: e.region_code,
       country_code: e.country_code,
     })),
-  ]);
+  ];
+  const stateData = countByState(combinedGeoRows);
+  const cityBreakdown = countByCity(combinedGeoRows);
   const totalGeoEvents = cityBreakdown.reduce((s, c) => s + c.count, 0);
 
   // Hydrate top fan_edits with their best-available creator handle

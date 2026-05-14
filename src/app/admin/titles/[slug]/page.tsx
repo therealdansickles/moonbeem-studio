@@ -360,13 +360,10 @@ async function buildAnalyticsData(
     win,
   );
 
-  const stateData = countByState(
-    clicks.map((c) => ({
-      country_code: c.country_code,
-      region_code: c.region_code,
-    })),
-  );
-  const cityBreakdown = countByCity([
+  // Choropleth + city table share the same combined-source feed.
+  // countByState filters to US naturally so non-US geo drops out
+  // of the map and only colours states.
+  const combinedGeoRows = [
     ...clicks.map((c) => ({
       city: c.city,
       region_code: c.region_code,
@@ -377,7 +374,9 @@ async function buildAnalyticsData(
       region_code: e.region_code,
       country_code: e.country_code,
     })),
-  ]);
+  ];
+  const stateData = countByState(combinedGeoRows);
+  const cityBreakdown = countByCity(combinedGeoRows);
   const totalGeoEvents = cityBreakdown.reduce((s, c) => s + c.count, 0);
 
   const modalOpensByFe = new Map<string, number>();
