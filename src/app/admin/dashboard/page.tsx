@@ -393,8 +393,8 @@ export default async function AdminDashboardPage(props: PageProps) {
         <section className="flex flex-col gap-3">
           <h2 className="text-display-sm m-0">Top performers</h2>
           <p className="text-body-sm text-moonbeem-ink-muted m-0">
-            Lifetime view counts from EnsembleData refresh cycle, not
-            window-scoped.
+            Lifetime view counts across all fan edits. Not affected by
+            the time window above.
           </p>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="flex flex-col gap-2">
