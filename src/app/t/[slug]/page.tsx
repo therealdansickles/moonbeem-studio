@@ -139,19 +139,22 @@ export default async function TitlePage({ params }: PageProps) {
     }
   }
 
-  // Gating Phase 1 — the clips tab needs the viewer's tier + lifetime
-  // clip-download count for its quota affordance. Super-admins are
-  // coerced to "verified" for the UI (unlimited "Download"); the
-  // server-side gate still does the real bypass.
+  // Gating — the clips + stills tabs need the viewer's tier and
+  // lifetime download counts for their quota affordances.
+  // Super-admins are coerced to "verified" for the UI (unlimited
+  // "Download"); the server-side gate still does the real bypass.
   const gateProfile = await getCurrentProfile();
   const isSuperAdmin = gateProfile?.role === "super_admin";
-  const clipTier = isSuperAdmin
+  const effectiveTier = isSuperAdmin
     ? "verified"
     : await getUserTier(user?.id ?? null);
-  const clipDownloadUsage =
+  const [clipDownloadUsage, stillDownloadUsage] =
     user && !isSuperAdmin
-      ? await getUsageCount(user.id, "download_clip")
-      : 0;
+      ? await Promise.all([
+          getUsageCount(user.id, "download_clip"),
+          getUsageCount(user.id, "download_still"),
+        ])
+      : [0, 0];
 
   const metaParts = [
     title.director,
@@ -246,11 +249,17 @@ export default async function TitlePage({ params }: PageProps) {
             videosContent={
               <VideosTab
                 clips={clips}
-                tier={clipTier}
+                tier={effectiveTier}
                 clipDownloadUsage={clipDownloadUsage}
               />
             }
-            stillsContent={<StillsTab stills={stills} />}
+            stillsContent={
+              <StillsTab
+                stills={stills}
+                tier={effectiveTier}
+                stillDownloadUsage={stillDownloadUsage}
+              />
+            }
           />
         </div>
       </div>
