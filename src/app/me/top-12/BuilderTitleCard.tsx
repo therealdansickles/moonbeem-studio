@@ -14,25 +14,34 @@ export default function BuilderTitleCard({
   atCapacity,
   pending,
   onToggle,
+  fill = false,
 }: {
   title: BuilderTitle;
   isAdded: boolean;
   atCapacity: boolean;
   pending: boolean;
   onToggle: () => void;
+  // fill=false (default): fixed 130px, shrink-0 — the carousel rows
+  // on /me/top-12. fill=true: width fills the parent cell — the
+  // responsive grid on /lists/[slug].
+  fill?: boolean;
 }) {
   const addDisabled = !isAdded && atCapacity;
   const meta = [title.year, title.distributor].filter(Boolean).join(" · ");
 
   return (
-    <div className="flex w-[130px] shrink-0 flex-col gap-2">
+    <div
+      className={`flex flex-col gap-2 ${
+        fill ? "w-full" : "w-[130px] shrink-0"
+      }`}
+    >
       <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-moonbeem-navy/40">
         {title.poster_url ? (
           <Image
             src={title.poster_url}
             alt={`${title.title} poster`}
             fill
-            sizes="130px"
+            sizes={fill ? "(max-width: 640px) 45vw, 200px" : "130px"}
             unoptimized
             className="object-cover"
           />
