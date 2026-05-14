@@ -17,10 +17,10 @@ const PINK_FILL_BTN =
   "inline-block self-start rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90";
 
 // Secondary violet-fill CTA — same shape as the pink button but the
-// brand's purple accent (moonbeem-violet), so "Verify a handle" reads
-// as primary and "Browse Moonbeem" reads as the alternate path.
+// brand's purple accent (moonbeem-violet). No self-start: the
+// "Browse Moonbeem" block centers it via the parent's items-center.
 const PURPLE_FILL_BTN =
-  "inline-block self-start rounded-md bg-moonbeem-violet px-4 py-2 text-body-sm font-semibold text-moonbeem-ink transition-opacity hover:opacity-90";
+  "inline-block rounded-md bg-moonbeem-violet px-4 py-2 text-body-sm font-semibold text-moonbeem-ink transition-opacity hover:opacity-90";
 
 type SocialPlatform = "tiktok" | "instagram" | "twitter" | "youtube";
 
@@ -163,6 +163,14 @@ export default async function MePage() {
     verifiedSocials.length === 0 &&
     top12Count === 0;
 
+  // "Browse Moonbeem" standalone block — the next nudge for a user
+  // who has started a Top 12 but hasn't verified a handle yet.
+  // Inverse-ish of the welcome banner: it appears once top12Count
+  // crosses 0, and disappears the moment any handle is verified.
+  // (v1 has no explicit dismiss — the conditions handle visibility.)
+  const showBrowseMoonbeem =
+    top12Count >= 1 && verifiedSocials.length === 0;
+
   return (
     <div className="min-h-screen px-6 py-12 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]">
       <div className="mx-auto flex max-w-2xl flex-col gap-10">
@@ -290,6 +298,20 @@ export default async function MePage() {
           </div>
         </section>
 
+        {/* Browse Moonbeem — standalone nudge between Top 12 and
+            Verified accounts. Shown only once the user has started a
+            Top 12 and still has no verified handle. */}
+        {showBrowseMoonbeem && (
+          <div className="flex flex-col items-center gap-2 py-2">
+            <p className="m-0 text-caption text-moonbeem-ink-subtle">
+              Keep exploring
+            </p>
+            <Link href="/" className={PURPLE_FILL_BTN}>
+              Browse Moonbeem
+            </Link>
+          </div>
+        )}
+
         {/* 3. Verified accounts */}
         <section>
           <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
@@ -343,13 +365,6 @@ export default async function MePage() {
                   ))}
                 </ul>
               )}
-            {/* Always-on alternate path — "browse for a while first" is
-                a legitimate option per the welcome banner's closing line.
-                Violet fill keeps it visually distinct from the pink
-                "Verify a handle" primary. */}
-            <Link href="/" className={PURPLE_FILL_BTN}>
-              Browse Moonbeem
-            </Link>
           </div>
         </section>
 
