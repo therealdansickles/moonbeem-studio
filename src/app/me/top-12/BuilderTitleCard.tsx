@@ -31,7 +31,7 @@ export default function BuilderTitleCard({
 
   return (
     <div
-      className={`flex flex-col gap-2 ${
+      className={`flex select-none flex-col gap-2 ${
         fill ? "w-full" : "w-[130px] shrink-0"
       }`}
     >
@@ -43,7 +43,8 @@ export default function BuilderTitleCard({
             fill
             sizes={fill ? "(max-width: 640px) 45vw, 200px" : "130px"}
             unoptimized
-            className="object-cover"
+            draggable={false}
+            className="select-none object-cover pointer-events-none"
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center p-2 text-center">
