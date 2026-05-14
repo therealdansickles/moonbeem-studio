@@ -83,6 +83,14 @@ export default function ListPageClient({
         return next;
       });
       setPickCount((c) => c - 1);
+      // Defensive fallback: anonymous adds are already pre-empted by
+      // the isAuthed check in handleToggle, but if a 403 (auth_required)
+      // does come back from the gated endpoint, surface the same
+      // sign-in prompt rather than a generic error.
+      if (err instanceof FetchJsonError && err.status === 403) {
+        setShowSignInPrompt(true);
+        return;
+      }
       setErrorMsg(mutationError(err, "Couldn't add that title. Try again."));
     } finally {
       markPending(t.id, false);

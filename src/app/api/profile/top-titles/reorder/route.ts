@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { verifySession } from "@/lib/dal";
+import { getCurrentProfile } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
-import { enforce } from "@/lib/ratelimit";
+import { enforce, getIp } from "@/lib/ratelimit";
+import { getUserTier } from "@/lib/gating/get-user-tier";
+import { canPerform } from "@/lib/gating/can-perform";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -9,9 +11,26 @@ const UUID_RE =
 type Entry = { title_id: string; position: number };
 
 export async function POST(request: NextRequest) {
-  const session = await verifySession();
-  const limit = await enforce("userWrites", session.userId, "profile/top-titles/reorder");
+  // Gating Phase 2 — gated by save_to_top12 for consistency with
+  // add/remove. No user_events row: reordering is internal
+  // organization, not a discoverable signal.
+  const profile = await getCurrentProfile();
+  const userId = profile?.userId ?? null;
+  const isSuperAdmin = profile?.role === "super_admin";
+
+  const limit = await enforce(
+    "userWrites",
+    userId ?? getIp(request),
+    "profile/top-titles/reorder",
+  );
   if (!limit.ok) return limit.response;
+
+  const tier = await getUserTier(userId);
+  const gate = canPerform(tier, "save_to_top12", 0, isSuperAdmin);
+  if (!gate.allowed) {
+    return NextResponse.json({ error: gate.reason }, { status: 403 });
+  }
+  const uid = userId as string;
 
   let body: { positions?: Entry[] };
   try {
@@ -63,7 +82,7 @@ export async function POST(request: NextRequest) {
   const { data: existing, error: fetchErr } = await supabase
     .from("user_top_titles")
     .select("id, title_id, position")
-    .eq("user_id", session.userId);
+    .eq("user_id", uid);
   if (fetchErr) {
     return NextResponse.json({ error: fetchErr.message }, { status: 500 });
   }

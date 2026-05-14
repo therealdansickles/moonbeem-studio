@@ -1,15 +1,34 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { verifySession } from "@/lib/dal";
+import { getCurrentProfile } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
-import { enforce } from "@/lib/ratelimit";
+import { enforce, getIp } from "@/lib/ratelimit";
+import { getUserTier } from "@/lib/gating/get-user-tier";
+import { canPerform } from "@/lib/gating/can-perform";
+import { logUserEvent } from "@/lib/events/log-event";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request: NextRequest) {
-  const session = await verifySession();
-  const limit = await enforce("userWrites", session.userId, "profile/top-titles/remove");
+  // Gating Phase 2 — gated by save_to_top12 (same capability covers
+  // managing the list). Anon -> structured 403 (auth_required).
+  const profile = await getCurrentProfile();
+  const userId = profile?.userId ?? null;
+  const isSuperAdmin = profile?.role === "super_admin";
+
+  const limit = await enforce(
+    "userWrites",
+    userId ?? getIp(request),
+    "profile/top-titles/remove",
+  );
   if (!limit.ok) return limit.response;
+
+  const tier = await getUserTier(userId);
+  const gate = canPerform(tier, "save_to_top12", 0, isSuperAdmin);
+  if (!gate.allowed) {
+    return NextResponse.json({ error: gate.reason }, { status: 403 });
+  }
+  const uid = userId as string;
 
   let body: { title_id?: string };
   try {
@@ -27,7 +46,7 @@ export async function POST(request: NextRequest) {
   const { data: existing, error: fetchErr } = await supabase
     .from("user_top_titles")
     .select("id, title_id, position")
-    .eq("user_id", session.userId)
+    .eq("user_id", uid)
     .order("position", { ascending: true });
   if (fetchErr) {
     return NextResponse.json({ error: fetchErr.message }, { status: 500 });
@@ -35,13 +54,14 @@ export async function POST(request: NextRequest) {
 
   const target = (existing ?? []).find((r) => r.title_id === titleId);
   if (!target) {
+    // Nothing to remove — idempotent success, no event logged.
     return NextResponse.json({ success: true });
   }
 
   const { error: delErr } = await supabase
     .from("user_top_titles")
     .delete()
-    .eq("user_id", session.userId)
+    .eq("user_id", uid)
     .eq("title_id", titleId);
   if (delErr) {
     return NextResponse.json({ error: delErr.message }, { status: 500 });
@@ -75,6 +95,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
   }
+
+  await logUserEvent({
+    user_id: uid,
+    event_type: "remove_from_top12",
+    resource_type: "title",
+    resource_id: titleId,
+    title_id: titleId,
+    tier_at_event: tier,
+  });
 
   return NextResponse.json({ success: true });
 }
