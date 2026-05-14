@@ -2,9 +2,11 @@ import Image from "next/image";
 import Link from "next/link";
 import { verifySession } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { getTopTitlesForUser } from "@/lib/queries/profiles";
 import { SignOutButton } from "@/components/SignOutButton";
 import PlatformIcon from "@/components/PlatformIcon";
 import PayoutsControls from "@/components/me/PayoutsControls";
+import WelcomeBanner from "@/components/me/WelcomeBanner";
 
 const MIN_WITHDRAWAL_CENTS = 1000;
 
@@ -22,10 +24,12 @@ export default async function MePage() {
 
   const service = createServiceRoleClient();
 
-  // user profile (handle, display_name, bio, avatar)
+  // user profile (handle, display_name, bio, avatar, banner state)
   const { data: userRow } = await service
     .from("users")
-    .select("handle, display_name, bio, avatar_url")
+    .select(
+      "handle, display_name, bio, avatar_url, onboarding_banner_dismissed_at",
+    )
     .eq("id", session.userId)
     .maybeSingle();
 
@@ -132,6 +136,21 @@ export default async function MePage() {
   const verifiedSocials =
     (socials ?? []) as Array<{ platform: SocialPlatform; handle: string }>;
 
+  // Top 12 picks — drives the "Your top 12" section's graduated
+  // empty / partial / full state, and (with verified socials) the
+  // welcome-banner trigger.
+  const topTitles = await getTopTitlesForUser(session.userId);
+  const top12Count = topTitles.length;
+
+  // Welcome banner shows only for a genuine first-time user: no
+  // verified socials, no Top 12 picks, and no prior dismissal.
+  const bannerDismissedAt =
+    (userRow?.onboarding_banner_dismissed_at as string | null) ?? null;
+  const showWelcomeBanner =
+    bannerDismissedAt === null &&
+    verifiedSocials.length === 0 &&
+    top12Count === 0;
+
   return (
     <div className="min-h-screen px-6 py-12 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]">
       <div className="mx-auto flex max-w-2xl flex-col gap-10">
@@ -176,7 +195,89 @@ export default async function MePage() {
           </Link>
         </header>
 
-        {/* Verified socials (read-only display) */}
+        {showWelcomeBanner && <WelcomeBanner handle={handle} />}
+
+        {/* 1. Your fan edits — no real data wired yet; always the
+            editorial empty state for now. */}
+        <section>
+          <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
+            Your fan edits
+          </h2>
+          <div className="mt-3 border-t border-white/10 pt-3">
+            <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
+              Fan edits you&apos;ve made on social platforms will appear here
+              once they&apos;re attributed to your verified accounts. Each edit
+              shows view counts, partner attribution, and earnings.
+            </p>
+            <Link
+              href="/"
+              className="mt-3 inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
+            >
+              Browse fan edits other creators have made →
+            </Link>
+          </div>
+        </section>
+
+        {/* 2. Your top 12 — graduated state: 0 picks, 1-11, or 12. */}
+        <section>
+          <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
+            Your top 12
+            {top12Count > 0 && top12Count < 12 ? ` (${top12Count} picked)` : ""}
+          </h2>
+          <div className="mt-3 border-t border-white/10 pt-3">
+            {top12Count === 0 ? (
+              <>
+                <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
+                  Pick films that mean something to you. They&apos;ll show on
+                  your profile so others can see your taste.
+                </p>
+                <p className="mt-2 text-body-sm text-moonbeem-ink-subtle m-0">
+                  3 minimum, 12 maximum.
+                </p>
+                <Link
+                  href="/me/top-12"
+                  className="mt-3 inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
+                >
+                  Pick films →
+                </Link>
+              </>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {topTitles.map((t) => (
+                    <div
+                      key={t.id}
+                      className="relative aspect-[2/3] w-[60px] shrink-0 overflow-hidden rounded-md bg-moonbeem-navy/40"
+                    >
+                      {t.title.poster_url ? (
+                        <Image
+                          src={t.title.poster_url}
+                          alt={t.title.title}
+                          fill
+                          sizes="60px"
+                          unoptimized
+                          className="object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center p-1 text-center text-caption text-moonbeem-ink-subtle">
+                          {t.title.title}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <Link
+                  href="/me/top-12"
+                  className="mt-3 inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
+                >
+                  {top12Count === 12 ? "Edit your list →" : "Add more films →"}
+                </Link>
+              </>
+            )}
+          </div>
+        </section>
+
+        {/* 3. Verified accounts */}
         <section>
           <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
             Verified accounts
@@ -184,16 +285,19 @@ export default async function MePage() {
           <div className="mt-3 border-t border-white/10 pt-3">
             {verifiedSocials.length === 0
               ? (
-                <p className="text-body-sm text-moonbeem-ink-subtle">
-                  No verified accounts yet.{" "}
+                <>
+                  <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
+                    If you make fan edits on TikTok, Instagram, or X, verifying
+                    your handle lets you claim them on Moonbeem. Once verified,
+                    your edits show up automatically, attributed to you.
+                  </p>
                   <Link
                     href="/me/edit"
-                    className="text-moonbeem-pink hover:underline"
+                    className="mt-3 inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
                   >
-                    Verify your socials
+                    Verify a handle →
                   </Link>
-                  {" "}to claim attribution.
-                </p>
+                </>
               )
               : (
                 <ul className="flex flex-wrap gap-2">
@@ -207,7 +311,9 @@ export default async function MePage() {
                       <span className="text-emerald-300" aria-hidden="true">
                         ✓
                       </span>
-                      <span className="sr-only">verified</span>
+                      <span className="sr-only">
+                        verified on {platformLabel[s.platform]}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -215,8 +321,8 @@ export default async function MePage() {
           </div>
         </section>
 
-        {/* Earnings — read-only summary, no withdrawal yet (Stripe
-            Connect lands tomorrow). */}
+        {/* 4. Earnings — read-only summary. Empty state has no CTA
+            (a proper earnings explainer is banked for v2). */}
         <section>
           <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
             Earnings
@@ -224,16 +330,11 @@ export default async function MePage() {
           <div className="mt-3 border-t border-white/10 pt-3">
             {verifiedSocials.length === 0 && totalCents === 0
               ? (
-                <p className="text-body-sm text-moonbeem-ink-subtle">
-                  Earnings will be claimable after you verify a social
-                  account.{" "}
-                  <Link
-                    href="/me/edit"
-                    className="text-moonbeem-pink hover:underline"
-                  >
-                    Verify your socials
-                  </Link>
-                  .
+                <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
+                  When you create authorized fan edits, partners pay you for
+                  views and clicks through to their content. Earnings appear
+                  here once you&apos;ve verified a social handle and started
+                  getting attribution.
                 </p>
               )
               : (
@@ -309,32 +410,34 @@ export default async function MePage() {
           </div>
         </section>
 
-        {/* My fan edits — placeholder until we have real data here */}
-        <section>
-          <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
-            My fan edits
-          </h2>
-          <div className="mt-3 border-t border-white/10 pt-3">
-            <p className="text-body-sm text-moonbeem-ink-subtle">
-              Fan edits attributed to your verified handles will appear here.
-            </p>
-          </div>
-        </section>
-
-        {/* Recent activity — placeholder for now */}
+        {/* 5. Recent activity — informational empty state, no CTA. */}
         <section>
           <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
             Recent activity
           </h2>
           <div className="mt-3 border-t border-white/10 pt-3">
-            <p className="text-body-sm text-moonbeem-ink-subtle">
-              Nothing yet. We'll surface plays, modal opens, and edits here
-              as they happen.
+            <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
+              Plays, edits, and other activity from people watching and
+              engaging with your work will show up here.
+            </p>
+            <p className="mt-2 text-body-sm text-moonbeem-ink-subtle m-0">
+              Once you&apos;ve published edits or built your top 12,
+              you&apos;ll start seeing activity.
             </p>
           </div>
         </section>
 
-        <div className="mt-4 flex justify-center">
+        <div className="mt-2 flex flex-col items-center gap-4">
+          <p className="text-caption text-moonbeem-ink-subtle m-0">
+            Questions? Get in touch at{" "}
+            <a
+              href="mailto:hello@moonbeem.xyz"
+              className="text-moonbeem-ink-muted hover:text-moonbeem-pink"
+            >
+              hello@moonbeem.xyz
+            </a>
+            .
+          </p>
           <SignOutButton />
         </div>
       </div>
