@@ -31,8 +31,14 @@ export default function Footer() {
             >
               Privacy
             </Link>
+            <Link
+              href="/terms-of-service"
+              className="text-body-sm text-moonbeem-ink-muted transition-colors hover:text-moonbeem-pink"
+            >
+              Terms
+            </Link>
             <a
-              href="mailto:privacy@moonbeem.xyz"
+              href="mailto:hello@moonbeem.xyz"
               className="text-body-sm text-moonbeem-ink-muted transition-colors hover:text-moonbeem-pink"
             >
               Contact
