@@ -39,7 +39,7 @@ export default function Footer() {
             </a>
           </nav>
           <p className="m-0 text-caption text-moonbeem-ink-subtle">
-            © 2026 Moonbeem Studio Inc.
+            © 2026 Moonbeem, Inc.
           </p>
         </div>
       </div>

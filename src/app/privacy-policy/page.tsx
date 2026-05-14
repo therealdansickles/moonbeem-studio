@@ -45,7 +45,7 @@ export default function PrivacyPolicyPage() {
         <Section heading="Who we are">
           <p>
             Moonbeem is an authorized fan distribution platform for media.
-            We&apos;re operated by Moonbeem Studio Inc. Reach us at{" "}
+            We&apos;re operated by Moonbeem, Inc. Reach us at{" "}
             <a
               className="text-moonbeem-pink hover:opacity-90"
               href="mailto:privacy@moonbeem.xyz"
