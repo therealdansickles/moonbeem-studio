@@ -36,6 +36,21 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  async redirects() {
+    return [
+      // /browse is a de facto alias for the homepage today — the
+      // homepage (/) carries Trending Edits, Featured titles, the
+      // marquee, and the carousels. The old /browse "Catalog browser
+      // coming soon" placeholder is gone; "Browse" stays in the nav
+      // and now lands somewhere real via this 308. Remove this
+      // redirect when a proper /browse catalog browser ships.
+      {
+        source: "/browse",
+        destination: "/",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       // Security response headers — applied to all routes. Vercel
