@@ -44,8 +44,8 @@ export default function PrivacyPolicyPage() {
 
         <Section heading="Who we are">
           <p>
-            Moonbeem is an authorized fan distribution platform for independent
-            film. We&apos;re operated by Moonbeem Studio Inc. Reach us at{" "}
+            Moonbeem is an authorized fan distribution platform for media.
+            We&apos;re operated by Moonbeem Studio Inc. Reach us at{" "}
             <a
               className="text-moonbeem-pink hover:opacity-90"
               href="mailto:privacy@moonbeem.xyz"
@@ -100,56 +100,29 @@ export default function PrivacyPolicyPage() {
 
         <Section heading="Third-party processors">
           <p>
-            Moonbeem relies on the following providers, each acting as a data
-            processor under our control:
+            We share personal information with third-party service providers
+            who help us operate Moonbeem. These processors fall into the
+            following categories:
           </p>
           <ul className="flex flex-col gap-2 list-disc pl-5">
-            <li>
-              <strong className="text-moonbeem-ink">Supabase</strong> (United
-              States) — primary database and authentication
-            </li>
-            <li>
-              <strong className="text-moonbeem-ink">Vercel</strong> (United
-              States) — application hosting, edge routing, IP-derived geo
-              headers
-            </li>
-            <li>
-              <strong className="text-moonbeem-ink">Cloudflare R2</strong>{" "}
-              (United States) — image and video file storage
-            </li>
-            <li>
-              <strong className="text-moonbeem-ink">Stripe</strong> (United
-              States) — payment processing and Connect payouts
-            </li>
-            <li>
-              <strong className="text-moonbeem-ink">Resend</strong> (United
-              States) — transactional email delivery
-            </li>
-            <li>
-              <strong className="text-moonbeem-ink">
-                Microsoft Clarity
-              </strong>{" "}
-              (United States) — anonymous session recording, only when you
-              grant session-recording consent
-            </li>
-            <li>
-              <strong className="text-moonbeem-ink">Google Analytics 4</strong>{" "}
-              (United States) — aggregate event analytics, only when you grant
-              analytics consent
-            </li>
-            <li>
-              <strong className="text-moonbeem-ink">EnsembleData</strong>{" "}
-              (Cyprus) — social platform engagement metrics for fan-edit content
-              already public on TikTok, Instagram, YouTube, and X
-            </li>
-            <li>
-              <strong className="text-moonbeem-ink">Upstash</strong> (United
-              States) — rate-limit and queue state
-            </li>
+            <li>Database and authentication infrastructure</li>
+            <li>Web hosting and content delivery</li>
+            <li>File and media storage</li>
+            <li>Payment processing</li>
+            <li>Transactional email delivery</li>
+            <li>Social media analytics</li>
+            <li>Product analytics and error monitoring</li>
+            <li>Rate limiting and caching infrastructure</li>
           </ul>
           <p>
-            Each provider has its own privacy policy. Inquiries about specific
-            processors can be directed to privacy@moonbeem.xyz.
+            A current list of named processors is available on request. Contact{" "}
+            <a
+              className="text-moonbeem-pink hover:opacity-90"
+              href="mailto:privacy@moonbeem.xyz"
+            >
+              privacy@moonbeem.xyz
+            </a>{" "}
+            for details.
           </p>
         </Section>
 
@@ -189,7 +162,8 @@ export default function PrivacyPolicyPage() {
           <p>You can:</p>
           <ul className="flex flex-col gap-2 list-disc pl-5">
             <li>
-              <strong className="text-moonbeem-ink">Access</strong> your data —
+              <strong className="text-moonbeem-ink mr-0.5">Access</strong> your
+              data —
               email{" "}
               <a
                 className="text-moonbeem-pink hover:opacity-90"
@@ -200,8 +174,8 @@ export default function PrivacyPolicyPage() {
               from the address on your account
             </li>
             <li>
-              <strong className="text-moonbeem-ink">Correct</strong> account
-              fields — update your profile from the{" "}
+              <strong className="text-moonbeem-ink mr-0.5">Correct</strong>{" "}
+              account fields — update your profile from the{" "}
               <Link
                 className="text-moonbeem-pink hover:opacity-90"
                 href="/me/edit"
@@ -211,15 +185,16 @@ export default function PrivacyPolicyPage() {
               page
             </li>
             <li>
-              <strong className="text-moonbeem-ink">Delete</strong> your account
-              — email privacy@moonbeem.xyz; we remove your account and
+              <strong className="text-moonbeem-ink mr-0.5">Delete</strong> your
+              account — email privacy@moonbeem.xyz; we remove your account and
               cascade-delete the data we control within 30 days. Financial
               records retained for tax purposes are excepted (we&apos;ll
               explain what stays and why)
             </li>
             <li>
-              <strong className="text-moonbeem-ink">Opt out</strong> of analytics
-              or session recording — use the consent banner, or open Privacy
+              <strong className="text-moonbeem-ink mr-0.5">Opt out</strong> of
+              analytics or session recording — use the consent banner, or open
+              Privacy
               settings from the banner&apos;s &ldquo;Customize&rdquo; button
             </li>
           </ul>
