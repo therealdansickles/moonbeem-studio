@@ -214,6 +214,12 @@ export default function TitleRowControls({
         >
           Manage fan edits →
         </Link>
+        <Link
+          href={`/admin/titles/${slug}?tab=analytics`}
+          className="rounded-md border border-white/10 px-3 py-1 text-moonbeem-ink-muted hover:border-moonbeem-pink/40 hover:text-moonbeem-pink"
+        >
+          Analytics →
+        </Link>
       </div>
 
       {errorMsg && (
