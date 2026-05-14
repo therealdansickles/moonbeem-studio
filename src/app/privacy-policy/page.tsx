@@ -209,6 +209,14 @@ export default function PrivacyPolicyPage() {
             </li>
           </ul>
           <p>
+            <Link
+              className="text-moonbeem-pink hover:opacity-90"
+              href="/me/privacy-settings"
+            >
+              Manage your consent settings →
+            </Link>
+          </p>
+          <p>
             EU, UK, and Swiss visitors have additional rights under GDPR,
             UK-GDPR, and Swiss FADP. The rights above apply to you, plus you
             can object to processing or lodge a complaint with your national
