@@ -40,6 +40,16 @@ export default function PrivacyPolicyPage() {
             </a>
             .
           </p>
+          <p className="text-body text-moonbeem-ink-muted leading-relaxed m-0">
+            This Privacy Policy works alongside our{" "}
+            <Link
+              className="text-moonbeem-pink hover:opacity-90"
+              href="/terms-of-service"
+            >
+              Terms of Service
+            </Link>
+            , which govern your use of the Moonbeem platform.
+          </p>
         </header>
 
         <Section heading="Who we are">
