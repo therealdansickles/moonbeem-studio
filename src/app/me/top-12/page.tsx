@@ -23,7 +23,23 @@ import Top12Builder, {
   type BuilderTitle,
   type BuilderPick,
   type PartnerSection,
+  type CuratedListSection,
 } from "./Top12Builder";
+
+const CURATED_TITLES_PER_LIST = 24;
+
+type CuratedTitleJoin = {
+  curated_list_id: string;
+  position: number;
+  titles: {
+    id: string;
+    slug: string;
+    title: string;
+    poster_url: string | null;
+    year: number | null;
+    distributor: string | null;
+  } | null;
+};
 
 export const metadata: Metadata = {
   title: "Build your top 12 · Moonbeem",
@@ -86,10 +102,56 @@ export default async function Top12BuilderPage() {
     }))
     .filter((section) => section.titles.length > 0);
 
+  // Curated discovery carousels (AFI Top 100, Greatest TV Shows, ...).
+  // Visible lists ordered by display_order; their titles joined and
+  // position-ordered. One batched curated_list_titles query covers
+  // all lists; grouped + capped per list in JS.
+  const { data: curatedListRows } = await service
+    .from("curated_lists")
+    .select("id, slug, name, display_order")
+    .eq("is_visible", true)
+    .order("display_order");
+  const curatedListIds = (curatedListRows ?? []).map((l) => l.id as string);
+  const { data: curatedTitleRows } = curatedListIds.length
+    ? await service
+        .from("curated_list_titles")
+        .select(
+          "curated_list_id, position, titles:title_id(id, slug, title, poster_url, year, distributor)",
+        )
+        .in("curated_list_id", curatedListIds)
+        .order("position")
+    : { data: [] };
+
+  const curatedTitlesByList = new Map<string, BuilderTitle[]>();
+  for (const row of (curatedTitleRows ?? []) as unknown as CuratedTitleJoin[]) {
+    const t = row.titles;
+    if (!t) continue;
+    const arr = curatedTitlesByList.get(row.curated_list_id) ?? [];
+    if (arr.length < CURATED_TITLES_PER_LIST) {
+      arr.push({
+        id: t.id,
+        slug: t.slug,
+        title: t.title,
+        poster_url: t.poster_url,
+        year: t.year,
+        distributor: t.distributor,
+      });
+    }
+    curatedTitlesByList.set(row.curated_list_id, arr);
+  }
+  const curatedLists: CuratedListSection[] = (curatedListRows ?? [])
+    .map((l) => ({
+      slug: l.slug as string,
+      name: l.name as string,
+      titles: curatedTitlesByList.get(l.id as string) ?? [],
+    }))
+    .filter((section) => section.titles.length > 0);
+
   return (
     <Top12Builder
       initialPicks={initialPicks}
       featured={featuredTitles}
+      curatedLists={curatedLists}
       recentlyAdded={recentlyAdded}
       byPartner={byPartner}
     />

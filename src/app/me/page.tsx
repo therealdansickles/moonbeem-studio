@@ -16,6 +16,12 @@ const MIN_WITHDRAWAL_CENTS = 1000;
 const PINK_FILL_BTN =
   "inline-block self-start rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90";
 
+// Secondary violet-fill CTA — same shape as the pink button but the
+// brand's purple accent (moonbeem-violet), so "Verify a handle" reads
+// as primary and "Browse Moonbeem" reads as the alternate path.
+const PURPLE_FILL_BTN =
+  "inline-block self-start rounded-md bg-moonbeem-violet px-4 py-2 text-body-sm font-semibold text-moonbeem-ink transition-opacity hover:opacity-90";
+
 type SocialPlatform = "tiktok" | "instagram" | "twitter" | "youtube";
 
 const platformLabel: Record<SocialPlatform, string> = {
@@ -338,8 +344,10 @@ export default async function MePage() {
                 </ul>
               )}
             {/* Always-on alternate path — "browse for a while first" is
-                a legitimate option per the welcome banner's closing line. */}
-            <Link href="/" className={PINK_FILL_BTN}>
+                a legitimate option per the welcome banner's closing line.
+                Violet fill keeps it visually distinct from the pink
+                "Verify a handle" primary. */}
+            <Link href="/" className={PURPLE_FILL_BTN}>
               Browse Moonbeem
             </Link>
           </div>

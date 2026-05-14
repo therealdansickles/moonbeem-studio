@@ -58,6 +58,12 @@ export type PartnerSection = {
   titles: BuilderTitle[];
 };
 
+export type CuratedListSection = {
+  slug: string;
+  name: string;
+  titles: BuilderTitle[];
+};
+
 const MAX_PICKS = 12;
 const MIN_PICKS = 3;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -73,10 +79,14 @@ function mutationError(err: unknown, fallback: string): string {
 export default function Top12Builder({
   initialPicks,
   featured,
+  curatedLists,
   recentlyAdded,
 }: {
   initialPicks: BuilderPick[];
   featured: BuilderTitle[];
+  // Editorial discovery carousels (AFI Top 100, Greatest TV Shows,
+  // ...), already ordered by display_order from the page query.
+  curatedLists: CuratedListSection[];
   recentlyAdded: BuilderTitle[];
   // byPartner is still wired end to end — the page query builds it
   // and passes it down — but it is not rendered in v1.5 (see the
@@ -400,6 +410,17 @@ export default function Top12Builder({
                   pendingIds={pendingIds}
                   onToggle={toggle}
                 />
+                {curatedLists.map((list) => (
+                  <BrowseRow
+                    key={list.slug}
+                    heading={list.name}
+                    titles={list.titles}
+                    pickedIds={pickedIds}
+                    atCapacity={atCapacity}
+                    pendingIds={pendingIds}
+                    onToggle={toggle}
+                  />
+                ))}
                 <BrowseRow
                   heading="Recently added"
                   titles={recentlyAdded}
