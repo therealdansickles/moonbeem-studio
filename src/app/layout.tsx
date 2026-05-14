@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import "./globals.css";
 import { inter, jost } from "./fonts";
 import TopNav from "@/components/TopNav";
+import Footer from "@/components/Footer";
 import FanEditModalProvider from "@/components/FanEditModalProvider";
 import ConsentProvider from "@/components/consent/ConsentProvider";
 import ConsentBanner from "@/components/consent/ConsentBanner";
@@ -71,6 +72,7 @@ export default async function RootLayout({
           <FanEditModalProvider>
             <TopNav />
             <main className="flex-1 flex flex-col">{children}</main>
+            <Footer />
             <ConsentBanner />
           </FanEditModalProvider>
         </ConsentProvider>
