@@ -12,6 +12,7 @@
 // service role is required.
 
 import Link from "next/link";
+import Image from "next/image";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getCurrentProfile, getUser } from "@/lib/dal";
@@ -23,10 +24,28 @@ import TopPerformersCardClient from "@/components/p/TopPerformersCardClient";
 import InitialAvatar from "@/components/p/InitialAvatar";
 import { rankTierClass } from "@/components/p/rankTier";
 import { formatMetric } from "@/lib/format";
+import HeroNumber from "@/components/dashboard/HeroNumber";
+import TimeSeriesChart from "@/components/dashboard/TimeSeriesChart";
+import UsStateChoropleth from "@/components/dashboard/UsStateChoropleth";
+import DataTable, { type Column } from "@/components/dashboard/DataTable";
+import {
+  TIME_WINDOWS,
+  parseWindow,
+  windowCutoffIso,
+  windowLabel,
+  windowShortLabel,
+  bucketTimeSeries,
+  countByState,
+  countByCity,
+  type TimeWindow,
+} from "@/lib/dashboard/queries";
 
 type SocialPlatform = "tiktok" | "instagram" | "twitter" | "youtube";
 
-type PageProps = { params: Promise<{ slug: string }> };
+type PageProps = {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ window?: string | string[] }>;
+};
 
 export async function generateMetadata({
   params,
@@ -743,8 +762,374 @@ function HeroTile({
   );
 }
 
-export default async function PartnerDashboardPage({ params }: PageProps) {
+type TitleRollupRow = {
+  id: string;
+  slug: string;
+  title: string;
+  poster_url: string | null;
+  fan_edit_count: number;
+  total_social_views: number;
+  modal_opens: number;
+  platform_clicks: number;
+  go_clicks: number;
+  open_requests: number;
+};
+
+function PerTitleRollup({
+  titles,
+  perTitle,
+  isSuperAdmin,
+}: {
+  titles: Array<{
+    id: string;
+    slug: string;
+    title: string;
+    poster_url: string | null;
+  }>;
+  perTitle: Array<{
+    title_id: string;
+    fan_edit_count: number;
+    total_social_views: number;
+    modal_opens: number;
+    platform_clicks: number;
+    go_clicks: number;
+    open_requests: number;
+  }>;
+  isSuperAdmin: boolean;
+}) {
+  const metricsByTitle = new Map(perTitle.map((p) => [p.title_id, p]));
+  const rows: TitleRollupRow[] = titles
+    .map((t) => {
+      const m = metricsByTitle.get(t.id);
+      return {
+        id: t.id,
+        slug: t.slug,
+        title: t.title,
+        poster_url: t.poster_url,
+        fan_edit_count: m?.fan_edit_count ?? 0,
+        total_social_views: m?.total_social_views ?? 0,
+        modal_opens: m?.modal_opens ?? 0,
+        platform_clicks: m?.platform_clicks ?? 0,
+        go_clicks: m?.go_clicks ?? 0,
+        open_requests: m?.open_requests ?? 0,
+      };
+    })
+    .sort((a, b) => b.total_social_views - a.total_social_views);
+
+  const columns: Column<TitleRollupRow>[] = [
+    {
+      key: "poster",
+      label: "",
+      render: (r) =>
+        r.poster_url ? (
+          <div className="h-[60px] w-[40px] shrink-0 overflow-hidden rounded-sm bg-white/[0.03]">
+            <Image
+              src={r.poster_url}
+              alt=""
+              width={40}
+              height={60}
+              className="h-full w-full object-cover"
+              unoptimized
+            />
+          </div>
+        ) : (
+          <div className="h-[60px] w-[40px] shrink-0 rounded-sm border border-white/10 bg-white/[0.03]" />
+        ),
+    },
+    {
+      key: "title",
+      label: "Title",
+      render: (r) =>
+        isSuperAdmin ? (
+          <Link
+            href={`/admin/titles/${r.slug}?tab=analytics`}
+            className="text-moonbeem-pink hover:opacity-90 text-body-sm"
+          >
+            {r.title}
+          </Link>
+        ) : (
+          <Link
+            href={`/t/${r.slug}`}
+            className="text-moonbeem-ink hover:text-moonbeem-pink text-body-sm"
+          >
+            {r.title}
+          </Link>
+        ),
+    },
+    {
+      key: "edits",
+      label: "Edits",
+      align: "right",
+      render: (r) => r.fan_edit_count.toLocaleString(),
+    },
+    {
+      key: "views",
+      label: "Views",
+      align: "right",
+      render: (r) => r.total_social_views.toLocaleString(),
+    },
+    {
+      key: "opens",
+      label: "Modal opens",
+      align: "right",
+      render: (r) => r.modal_opens.toLocaleString(),
+    },
+    {
+      key: "go",
+      label: "/go/ clicks",
+      align: "right",
+      render: (r) => r.go_clicks.toLocaleString(),
+    },
+    {
+      key: "requests",
+      label: "Open requests",
+      align: "right",
+      render: (r) => r.open_requests.toLocaleString(),
+    },
+  ];
+
+  return (
+    <DataTable<TitleRollupRow>
+      columns={columns}
+      rows={rows}
+      rowKey={(r) => r.id}
+      emptyMessage="No active titles."
+    />
+  );
+}
+
+type PartnerAnalytics = {
+  events: number;
+  uniqueSignedInUsers: number;
+  goClicks: number;
+  openRequests: number;
+  activeTitlesCount: number;
+  totalSocialViews: number;
+  timeSeries: { date: string; value: number }[];
+  stateData: Map<string, number>;
+  cityBreakdown: ReturnType<typeof countByCity>;
+  totalGeoEvents: number;
+  perTitle: Array<{
+    title_id: string;
+    fan_edit_count: number;
+    total_social_views: number;
+    modal_opens: number;
+    platform_clicks: number;
+    go_clicks: number;
+    open_requests: number;
+  }>;
+};
+
+async function loadPartnerAnalytics(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  activeTitleIds: string[],
+  win: TimeWindow,
+  cutoff: string | null,
+): Promise<PartnerAnalytics> {
+  const empty: PartnerAnalytics = {
+    events: 0,
+    uniqueSignedInUsers: 0,
+    goClicks: 0,
+    openRequests: 0,
+    activeTitlesCount: 0,
+    totalSocialViews: 0,
+    timeSeries: bucketTimeSeries([], win),
+    stateData: new Map(),
+    cityBreakdown: [],
+    totalGeoEvents: 0,
+    perTitle: [],
+  };
+  if (activeTitleIds.length === 0) return empty;
+
+  // Active fan_edits for the partner's titles — drives the per-title
+  // rollup (fan_edit_count, view sum) and bounds the event lookup.
+  const fanEditsQ = supabase
+    .from("fan_edits")
+    .select("id, title_id, view_count")
+    .in("title_id", activeTitleIds)
+    .eq("is_active", true)
+    .eq("verification_status", "auto_verified")
+    .is("deleted_at", null);
+
+  const clicksQ = (() => {
+    let q = supabase
+      .from("external_clicks")
+      .select("title_id, country_code, region_code, city, clicked_at")
+      .in("title_id", activeTitleIds)
+      .eq("is_bot", false);
+    if (cutoff) q = q.gte("clicked_at", cutoff);
+    return q;
+  })();
+
+  const openRequestsQ = supabase
+    .from("title_requests")
+    .select("title_id")
+    .in("title_id", activeTitleIds)
+    .is("fulfilled_at", null)
+    .eq("request_type", "fan_edits");
+
+  const [fanEditsRes, clicksRes, openRequestsRes] = await Promise.all([
+    fanEditsQ,
+    clicksQ,
+    openRequestsQ,
+  ]);
+
+  const fanEdits = (fanEditsRes.data ?? []) as Array<{
+    id: string;
+    title_id: string;
+    view_count: number | null;
+  }>;
+  const clicks = (clicksRes.data ?? []) as Array<{
+    title_id: string;
+    country_code: string | null;
+    region_code: string | null;
+    city: string | null;
+    clicked_at: string;
+  }>;
+  const openRequests = (openRequestsRes.data ?? []) as { title_id: string }[];
+
+  const fanEditIds = fanEdits.map((fe) => fe.id);
+  const events: Array<{
+    fan_edit_id: string;
+    event_type: string;
+    user_id: string | null;
+    created_at: string;
+    country_code: string | null;
+    region_code: string | null;
+    city: string | null;
+  }> = await (async () => {
+    if (fanEditIds.length === 0) return [];
+    let q = supabase
+      .from("fan_edit_events")
+      .select(
+        "fan_edit_id, event_type, user_id, created_at, country_code, region_code, city",
+      )
+      .in("fan_edit_id", fanEditIds);
+    if (cutoff) q = q.gte("created_at", cutoff);
+    const r = await q;
+    return (r.data ?? []) as Array<{
+      fan_edit_id: string;
+      event_type: string;
+      user_id: string | null;
+      created_at: string;
+      country_code: string | null;
+      region_code: string | null;
+      city: string | null;
+    }>;
+  })();
+
+  const totalSocialViews = fanEdits.reduce(
+    (s, fe) => s + (fe.view_count ?? 0),
+    0,
+  );
+  const uniqueSignedInUsers = new Set(
+    events.map((e) => e.user_id).filter((id): id is string => Boolean(id)),
+  ).size;
+
+  const timeSeries = bucketTimeSeries(
+    events.map((e) => e.created_at),
+    win,
+  );
+  const stateData = countByState(
+    clicks.map((c) => ({
+      country_code: c.country_code,
+      region_code: c.region_code,
+    })),
+  );
+  const cityBreakdown = countByCity([
+    ...clicks.map((c) => ({
+      city: c.city,
+      region_code: c.region_code,
+      country_code: c.country_code,
+    })),
+    ...events.map((e) => ({
+      city: e.city,
+      region_code: e.region_code,
+      country_code: e.country_code,
+    })),
+  ]);
+  const totalGeoEvents = cityBreakdown.reduce((s, c) => s + c.count, 0);
+
+  // Per-title rollups
+  const fanEditIdsByTitle = new Map<string, string[]>();
+  const fanEditCountByTitle = new Map<string, number>();
+  const socialViewsByTitle = new Map<string, number>();
+  for (const fe of fanEdits) {
+    const arr = fanEditIdsByTitle.get(fe.title_id) ?? [];
+    arr.push(fe.id);
+    fanEditIdsByTitle.set(fe.title_id, arr);
+    fanEditCountByTitle.set(
+      fe.title_id,
+      (fanEditCountByTitle.get(fe.title_id) ?? 0) + 1,
+    );
+    socialViewsByTitle.set(
+      fe.title_id,
+      (socialViewsByTitle.get(fe.title_id) ?? 0) + (fe.view_count ?? 0),
+    );
+  }
+  const titleByFanEdit = new Map<string, string>();
+  for (const [tid, ids] of fanEditIdsByTitle) {
+    for (const fid of ids) titleByFanEdit.set(fid, tid);
+  }
+  const modalOpensByTitle = new Map<string, number>();
+  const platformClicksByTitle = new Map<string, number>();
+  for (const e of events) {
+    const tid = titleByFanEdit.get(e.fan_edit_id);
+    if (!tid) continue;
+    if (e.event_type === "modal_open") {
+      modalOpensByTitle.set(tid, (modalOpensByTitle.get(tid) ?? 0) + 1);
+    } else if (e.event_type === "view_on_platform_click") {
+      platformClicksByTitle.set(
+        tid,
+        (platformClicksByTitle.get(tid) ?? 0) + 1,
+      );
+    }
+  }
+  const goClicksByTitle = new Map<string, number>();
+  for (const c of clicks) {
+    goClicksByTitle.set(c.title_id, (goClicksByTitle.get(c.title_id) ?? 0) + 1);
+  }
+  const openRequestsByTitle = new Map<string, number>();
+  for (const r of openRequests) {
+    openRequestsByTitle.set(
+      r.title_id,
+      (openRequestsByTitle.get(r.title_id) ?? 0) + 1,
+    );
+  }
+
+  const perTitle = activeTitleIds.map((tid) => ({
+    title_id: tid,
+    fan_edit_count: fanEditCountByTitle.get(tid) ?? 0,
+    total_social_views: socialViewsByTitle.get(tid) ?? 0,
+    modal_opens: modalOpensByTitle.get(tid) ?? 0,
+    platform_clicks: platformClicksByTitle.get(tid) ?? 0,
+    go_clicks: goClicksByTitle.get(tid) ?? 0,
+    open_requests: openRequestsByTitle.get(tid) ?? 0,
+  }));
+
+  return {
+    events: events.length,
+    uniqueSignedInUsers,
+    goClicks: clicks.length,
+    openRequests: openRequests.length,
+    activeTitlesCount: activeTitleIds.length,
+    totalSocialViews,
+    timeSeries,
+    stateData,
+    cityBreakdown,
+    totalGeoEvents,
+    perTitle,
+  };
+}
+
+export default async function PartnerDashboardPage({
+  params,
+  searchParams,
+}: PageProps) {
   const { slug } = await params;
+  const sp = await searchParams;
+  const win = parseWindow(sp.window);
+  const cutoff = windowCutoffIso(win);
 
   // Auth + membership check at the page level. We deliberately do NOT
   // redirect to /login on missing auth — the dashboard URL is a real
@@ -787,10 +1172,18 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
 
   const { data: titles } = await supabase
     .from("titles")
-    .select("id, slug, title")
-    .eq("partner_id", partner.id);
-  const titleRows = titles ?? [];
-  const titleIds = titleRows.map((t) => t.id as string);
+    .select("id, slug, title, poster_url, is_active")
+    .eq("partner_id", partner.id)
+    .is("deleted_at", null);
+  const titleRows = (titles ?? []) as Array<{
+    id: string;
+    slug: string;
+    title: string;
+    poster_url: string | null;
+    is_active: boolean;
+  }>;
+  const titleIds = titleRows.map((t) => t.id);
+  const activeTitleIds = titleRows.filter((t) => t.is_active).map((t) => t.id);
 
   const [metrics, topPerformers, topCreators, allEdits, requestedTitles] =
     await Promise.all([
@@ -809,6 +1202,17 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
     loadDailyGrowth(supabase, fanEditIdsForTracking, titleIds),
     loadTrackingStartDay(supabase, fanEditIdsForTracking),
   ]);
+
+  // Window-scoped analytical layer — Visx time-series, US choropleth,
+  // city table, and a per-title rollup. Folded in from the now-deleted
+  // /admin/partners/[slug]/dashboard. Scope is the partner's active
+  // titles only; soft-deleted titles drop out naturally above.
+  const analytics = await loadPartnerAnalytics(
+    supabase,
+    activeTitleIds,
+    win,
+    cutoff,
+  );
 
   // Per-title CPM rates + this-month earnings rollup for the
   // "Pay creators" card.
@@ -852,9 +1256,24 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
     <div className="min-h-screen px-6 py-12 bg-[radial-gradient(ellipse_at_top,_#1a0f3a_0%,_#0a0a14_60%)]">
       <div className="mx-auto max-w-6xl">
         <div className="flex items-center justify-between">
-          <span className="font-wordmark text-heading-md text-moonbeem-pink">
-            moonbeem.
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="font-wordmark text-heading-md text-moonbeem-pink">
+              moonbeem.
+            </span>
+            {isSuperAdmin && (
+              <>
+                <span className="rounded-full bg-moonbeem-pink/15 px-2.5 py-0.5 text-caption font-medium text-moonbeem-pink">
+                  Super admin view
+                </span>
+                <Link
+                  href="/admin/dashboard"
+                  className="text-caption text-moonbeem-ink-muted hover:text-moonbeem-pink"
+                >
+                  Admin overview →
+                </Link>
+              </>
+            )}
+          </div>
           {partner.logo_url
             ? (
               <img
@@ -901,6 +1320,115 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
           />
         </div>
 
+        {/* Window-scoped analytical section — Visx primitives layered
+            on top of the existing presentation aesthetic. Controls the
+            engagement tiles, time-series, geography, and per-title
+            rollup below. Lifetime hero tiles above are not affected. */}
+        <div className="mt-12 flex flex-wrap items-center gap-2">
+          <span className="text-body-sm text-moonbeem-ink-muted mr-1">
+            Window:
+          </span>
+          {TIME_WINDOWS.map((w) => {
+            const active = w === win;
+            return (
+              <Link
+                key={w}
+                href={
+                  w === "7d"
+                    ? `/p/${partner.slug}/dashboard`
+                    : `/p/${partner.slug}/dashboard?window=${w}`
+                }
+                scroll={false}
+                className={`rounded-md border px-3 py-1.5 text-body-sm transition-colors tabular-nums ${
+                  active
+                    ? "border-moonbeem-pink bg-moonbeem-pink/10 text-moonbeem-pink"
+                    : "border-white/10 text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
+                }`}
+              >
+                {windowShortLabel(w)}
+              </Link>
+            );
+          })}
+          <span className="ml-2 text-caption text-moonbeem-ink-subtle">
+            {windowLabel(win)}
+          </span>
+        </div>
+
+        <section className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
+          <HeroNumber
+            value={analytics.events.toLocaleString()}
+            label="Engagement events"
+          />
+          <HeroNumber
+            value={analytics.uniqueSignedInUsers.toLocaleString()}
+            label="Signed-in users"
+          />
+          <HeroNumber
+            value={analytics.goClicks.toLocaleString()}
+            label="/go/ clicks (humans)"
+          />
+          <HeroNumber
+            value={analytics.openRequests.toLocaleString()}
+            label="Open title requests"
+          />
+        </section>
+
+        <section className="mt-10 flex flex-col gap-3">
+          <h2 className="text-display-sm m-0">Engagement over time</h2>
+          <p className="text-body-sm text-moonbeem-ink-muted m-0">
+            Fan-edit modal events across this partner&apos;s catalog ·{" "}
+            {win === "24h" ? "hourly" : "daily"} buckets
+          </p>
+          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+            {analytics.timeSeries.length === 0 ||
+            analytics.events === 0 ? (
+              <p className="text-body-sm text-moonbeem-ink-muted text-center py-12 m-0">
+                No engagement events in this window.
+              </p>
+            ) : (
+              <TimeSeriesChart data={analytics.timeSeries} yLabel="events" />
+            )}
+          </div>
+        </section>
+
+        <section className="mt-10 flex flex-col gap-3">
+          <h2 className="text-display-sm m-0">Geography</h2>
+          <p className="text-body-sm text-moonbeem-ink-muted m-0">
+            /go/ click + consent-gated event origins ·{" "}
+            {analytics.totalGeoEvents.toLocaleString()} geo-tagged event
+            {analytics.totalGeoEvents === 1 ? "" : "s"} in window
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="md:col-span-2 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+              <UsStateChoropleth data={analytics.stateData} height={360} />
+            </div>
+            <div className="flex flex-col">
+              <DataTable<(typeof analytics.cityBreakdown)[number]>
+                columns={[
+                  {
+                    key: "city",
+                    label: "City",
+                    render: (r) => (
+                      <span className="text-body-sm">{r.label}</span>
+                    ),
+                  },
+                  {
+                    key: "count",
+                    label: "Events",
+                    align: "right",
+                    render: (r) => r.count.toLocaleString(),
+                  },
+                ]}
+                rows={analytics.cityBreakdown.slice(0, 10)}
+                rowKey={(r) =>
+                  `${r.country_code ?? ""}|${r.region_code ?? ""}|${r.city}`
+                }
+                emptyMessage="No location data available for this window."
+              />
+            </div>
+          </div>
+        </section>
+
         <div className="mt-10 grid grid-cols-1 gap-4 lg:grid-cols-2">
           <TopPerformersCard
             performers={topPerformers}
@@ -909,6 +1437,22 @@ export default async function PartnerDashboardPage({ params }: PageProps) {
           />
           <TopCreatorsCard creators={topCreators} />
         </div>
+
+        {titleRows.filter((t) => t.is_active).length > 1 && (
+          <section className="mt-10 flex flex-col gap-3">
+            <h2 className="text-display-sm m-0">Titles</h2>
+            <p className="text-body-sm text-moonbeem-ink-muted m-0">
+              Every active title in this catalog. View counts are
+              lifetime; modal opens, platform clicks, and /go/ clicks
+              are window-scoped.
+            </p>
+            <PerTitleRollup
+              titles={titleRows.filter((t) => t.is_active)}
+              perTitle={analytics.perTitle}
+              isSuperAdmin={isSuperAdmin}
+            />
+          </section>
+        )}
 
         <div className="mt-10">
           <RequestedTitlesCard requestedTitles={requestedTitles} />
