@@ -132,7 +132,10 @@ export default function ProfileView({
             Top 12
           </h2>
         </div>
-        <Top12Grid topTitles={topTitles} isOwner={isOwner} />
+        {/* /c/[handle] is a pure viewing surface — Top 12 management
+            (add, remove, reorder) lives on /me/top-12. The grid always
+            renders read-only here, even for the profile owner. */}
+        <Top12Grid topTitles={topTitles} isOwner={false} />
       </section>
     </div>
   );
