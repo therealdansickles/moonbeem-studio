@@ -102,7 +102,7 @@ export default async function Top12BuilderPage() {
     }))
     .filter((section) => section.titles.length > 0);
 
-  // Curated discovery carousels (AFI Top 100, Greatest TV Shows, ...).
+  // Curated discovery carousels (AFI Top 100, Top Rated Series, ...).
   // Visible lists ordered by display_order; their titles joined and
   // position-ordered. One batched curated_list_titles query covers
   // all lists; grouped + capped per list in JS.
