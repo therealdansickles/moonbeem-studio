@@ -19,6 +19,7 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getUserTier } from "@/lib/gating/get-user-tier";
 import { getUsageCount, incrementUsageCount } from "@/lib/gating/usage-counts";
 import { canPerform } from "@/lib/gating/can-perform";
+import { logUserEvent } from "@/lib/events/log-event";
 import { buildContentDisposition } from "@/lib/r2/upload";
 import { enforce, getIp } from "@/lib/ratelimit";
 
@@ -63,7 +64,7 @@ export async function GET(
   const supabase = createServiceRoleClient();
   const { data: clip } = await supabase
     .from("clips")
-    .select("file_url, label")
+    .select("file_url, label, title_id")
     .eq("id", id)
     .is("deleted_at", null)
     .maybeSingle();
@@ -78,11 +79,26 @@ export async function GET(
     return NextResponse.json({ error: "fetch_failed" }, { status: 502 });
   }
 
-  // Increment AFTER R2 confirms the asset is fetchable — a 404 / 5xx
-  // from R2 doesn't cost the user a quota slot. Super-admins are
-  // never counted; anonymous users can't reach this point.
+  // user_action_counts tracks lifetime usage for signed-in non-super-
+  // admin users across all tiers. Verified users continue
+  // incrementing for analytics; the gate (canPerform above) only
+  // restricts the signed_in tier — verified users pass freely
+  // regardless of count. Super-admins are not counted. Incremented
+  // AFTER R2 confirms the asset is fetchable — a 404 / 5xx from R2
+  // doesn't cost a quota slot.
   if (userId && !isSuperAdmin) {
     await incrementUsageCount(userId, "download_clip");
+  }
+  // Full ledger — every signed-in download, super-admins included.
+  if (userId) {
+    await logUserEvent({
+      user_id: userId,
+      event_type: "download_clip",
+      resource_type: "clip",
+      resource_id: id,
+      title_id: (clip.title_id as string | null) ?? undefined,
+      tier_at_event: tier,
+    });
   }
 
   const label =
