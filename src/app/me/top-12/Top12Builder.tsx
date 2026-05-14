@@ -74,11 +74,14 @@ export default function Top12Builder({
   initialPicks,
   featured,
   recentlyAdded,
-  byPartner,
 }: {
   initialPicks: BuilderPick[];
   featured: BuilderTitle[];
   recentlyAdded: BuilderTitle[];
+  // byPartner is still wired end to end — the page query builds it
+  // and passes it down — but it is not rendered in v1.5 (see the
+  // discovery surface below). Kept on the type so the plumbing
+  // survives; re-destructure it to bring the sections back.
   byPartner: PartnerSection[];
 }) {
   const router = useRouter();
@@ -241,8 +244,9 @@ export default function Top12Builder({
             Build your top 12
           </h1>
           <p className="m-0 max-w-2xl text-body text-moonbeem-ink-muted leading-relaxed">
-            Pick films that mean something to you. They&apos;ll show on your
-            profile so others can see your taste.
+            Pick films and series that mean something to you. They&apos;ll show
+            on your profile, and you&apos;ll earn from rentals and purchases
+            that come through your profile.
           </p>
           <p className="m-0 text-body-sm text-moonbeem-ink-subtle">
             3 minimum, 12 maximum. Add or remove anytime.
@@ -404,17 +408,14 @@ export default function Top12Builder({
                   pendingIds={pendingIds}
                   onToggle={toggle}
                 />
-                {byPartner.map((section) => (
-                  <BrowseRow
-                    key={section.partner.id}
-                    heading={section.partner.name}
-                    titles={section.titles}
-                    pickedIds={pickedIds}
-                    atCapacity={atCapacity}
-                    pendingIds={pendingIds}
-                    onToggle={toggle}
-                  />
-                ))}
+                {/* By-partner sections are intentionally not rendered in
+                    v1.5 — the catalog has too few partners with enough
+                    titles for the grouping to read well. The byPartner
+                    prop, the page query that builds it, the PartnerSection
+                    type, and BrowseRow itself all stay in place. To bring
+                    the sections back, re-destructure byPartner above and
+                    map it to <BrowseRow> rows here. v2 trigger: >= 3
+                    partners with >= 3 titles each. */}
               </>
             )}
           </div>

@@ -45,7 +45,11 @@ export default function BuilderTitleCard({
         )}
       </div>
 
-      <div className="flex flex-col gap-0.5">
+      {/* flex-1 lets the text block absorb the height difference
+          between 1- and 2-line titles (and the optional meta line),
+          so the button below always lands at the same vertical
+          position across every card in a row. */}
+      <div className="flex flex-1 flex-col gap-0.5">
         <p className="m-0 line-clamp-2 text-caption font-medium leading-tight text-moonbeem-ink">
           {title.title}
         </p>

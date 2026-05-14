@@ -79,7 +79,7 @@ export default function WelcomeBanner({ handle }: { handle: string }) {
             Curate your top 12
           </p>
           <p className="text-body-sm text-moonbeem-ink-muted m-0">
-            Pick films you love. They&apos;ll show on your profile.
+            Pick films and series you love. They&apos;ll show on your profile.
           </p>
           <button
             type="button"

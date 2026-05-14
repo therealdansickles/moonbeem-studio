@@ -10,6 +10,12 @@ import WelcomeBanner from "@/components/me/WelcomeBanner";
 
 const MIN_WITHDRAWAL_CENTS = 1000;
 
+// Primary pink-fill CTA — matches the welcome banner's "Pick films →"
+// button exactly so the page's calls-to-action read as one system.
+// self-start keeps it natural-width inside the flex-col section body.
+const PINK_FILL_BTN =
+  "inline-block self-start rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90";
+
 type SocialPlatform = "tiktok" | "instagram" | "twitter" | "youtube";
 
 const platformLabel: Record<SocialPlatform, string> = {
@@ -228,8 +234,9 @@ export default async function MePage() {
             {top12Count === 0 ? (
               <>
                 <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
-                  Pick films that mean something to you. They&apos;ll show on
-                  your profile so others can see your taste.
+                  Pick films and series that mean something to you.
+                  They&apos;ll show on your profile so others can see your
+                  taste.
                 </p>
                 <p className="mt-2 text-body-sm text-moonbeem-ink-subtle m-0">
                   3 minimum, 12 maximum.
@@ -282,21 +289,33 @@ export default async function MePage() {
           <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
             Verified accounts
           </h2>
-          <div className="mt-3 border-t border-white/10 pt-3">
+          <div className="mt-3 flex flex-col gap-3 border-t border-white/10 pt-3">
             {verifiedSocials.length === 0
               ? (
                 <>
                   <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
-                    If you make fan edits on TikTok, Instagram, or X, verifying
-                    your handle lets you claim them on Moonbeem. Once verified,
-                    your edits show up automatically, attributed to you.
+                    Verify your account to upload your fan edits from TikTok,
+                    Instagram, X, and YouTube. Your edits will be attributed to
+                    the titles you love, and you&apos;ll earn from views and
+                    transactions.
                   </p>
-                  <Link
-                    href="/me/edit"
-                    className="mt-3 inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
-                  >
-                    Verify a handle →
-                  </Link>
+                  {/* Once the user has started a Top 12, verification is
+                      their clear next step — promote the CTA to a pink
+                      fill button. Otherwise it stays a quiet text link. */}
+                  {top12Count >= 1
+                    ? (
+                      <Link href="/me/edit" className={PINK_FILL_BTN}>
+                        Verify a handle →
+                      </Link>
+                    )
+                    : (
+                      <Link
+                        href="/me/edit"
+                        className="self-start text-body-sm text-moonbeem-pink hover:opacity-90"
+                      >
+                        Verify a handle →
+                      </Link>
+                    )}
                 </>
               )
               : (
@@ -318,6 +337,11 @@ export default async function MePage() {
                   ))}
                 </ul>
               )}
+            {/* Always-on alternate path — "browse for a while first" is
+                a legitimate option per the welcome banner's closing line. */}
+            <Link href="/" className={PINK_FILL_BTN}>
+              Browse Moonbeem
+            </Link>
           </div>
         </section>
 
