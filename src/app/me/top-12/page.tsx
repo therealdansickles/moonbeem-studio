@@ -123,9 +123,14 @@ export default async function Top12BuilderPage() {
     : { data: [] };
 
   const curatedTitlesByList = new Map<string, BuilderTitle[]>();
+  const curatedTotalByList = new Map<string, number>();
   for (const row of (curatedTitleRows ?? []) as unknown as CuratedTitleJoin[]) {
     const t = row.titles;
     if (!t) continue;
+    curatedTotalByList.set(
+      row.curated_list_id,
+      (curatedTotalByList.get(row.curated_list_id) ?? 0) + 1,
+    );
     const arr = curatedTitlesByList.get(row.curated_list_id) ?? [];
     if (arr.length < CURATED_TITLES_PER_LIST) {
       arr.push({
@@ -144,6 +149,7 @@ export default async function Top12BuilderPage() {
       slug: l.slug as string,
       name: l.name as string,
       titles: curatedTitlesByList.get(l.id as string) ?? [],
+      totalCount: curatedTotalByList.get(l.id as string) ?? 0,
     }))
     .filter((section) => section.titles.length > 0);
 

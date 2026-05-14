@@ -14,6 +14,7 @@
 // save step — "Done for now" just routes back to /me.
 
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   DndContext,
@@ -62,7 +63,10 @@ export type PartnerSection = {
 export type CuratedListSection = {
   slug: string;
   name: string;
+  // titles is the carousel preview (capped); totalCount is the full
+  // list size, used for the "View all N →" link to /lists/[slug].
   titles: BuilderTitle[];
+  totalCount: number;
 };
 
 const MAX_PICKS = 12;
@@ -420,6 +424,8 @@ export default function Top12Builder({
                     atCapacity={atCapacity}
                     pendingIds={pendingIds}
                     onToggle={toggle}
+                    viewAllHref={`/lists/${list.slug}`}
+                    viewAllCount={list.totalCount}
                   />
                 ))}
                 <BrowseRow
@@ -454,6 +460,8 @@ function BrowseRow({
   atCapacity,
   pendingIds,
   onToggle,
+  viewAllHref,
+  viewAllCount,
 }: {
   heading: string;
   titles: BuilderTitle[];
@@ -461,6 +469,10 @@ function BrowseRow({
   atCapacity: boolean;
   pendingIds: Set<string>;
   onToggle: (t: BuilderTitle) => void;
+  // Only the curated-list rows pass these — they have a dedicated
+  // /lists/[slug] page. Featured / Recently added stay preview-only.
+  viewAllHref?: string;
+  viewAllCount?: number;
 }) {
   // Click-and-drag horizontal scroll on desktop (touch scroll stays
   // native). The hook also suppresses the click that would otherwise
@@ -469,9 +481,19 @@ function BrowseRow({
   if (titles.length === 0) return null;
   return (
     <section>
-      <h2 className="mb-3 text-caption font-medium uppercase tracking-wider text-moonbeem-pink">
-        {heading}
-      </h2>
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h2 className="text-caption font-medium uppercase tracking-wider text-moonbeem-pink">
+          {heading}
+        </h2>
+        {viewAllHref && (
+          <Link
+            href={viewAllHref}
+            className="shrink-0 text-caption text-moonbeem-ink-muted transition-colors hover:text-moonbeem-pink"
+          >
+            View all{viewAllCount != null ? ` ${viewAllCount}` : ""} →
+          </Link>
+        )}
+      </div>
       <div
         ref={scrollRef}
         className="flex gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
