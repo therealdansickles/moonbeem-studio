@@ -15,6 +15,7 @@ import { enforce } from "@/lib/ratelimit";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { BioFetchError, fetchBio } from "@/lib/ensembledata/bio";
+import { logUserEvent } from "@/lib/events/log-event";
 import {
   isSocialPlatform,
   normalizeHandle,
@@ -48,7 +49,7 @@ export async function POST(request: NextRequest) {
   const service = createServiceRoleClient();
   const { data: row, error: readErr } = await service
     .from("creator_socials")
-    .select("verification_code, verification_started_at")
+    .select("id, verification_code, verification_started_at")
     .eq("platform", platform)
     .ilike("handle", handle)
     .maybeSingle();
@@ -111,5 +112,18 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
+
+  // Full ledger — the verification just succeeded. tier_at_event is
+  // "signed_in": that's what they were when they verified; this
+  // event is the moment they become "verified".
+  await logUserEvent({
+    user_id: session.userId,
+    event_type: "verify_social",
+    resource_type: "social_handle",
+    resource_id: row.id as string,
+    tier_at_event: "signed_in",
+    metadata: { platform, handle },
+  });
+
   return NextResponse.json({ verified: true, creator_id: creatorId });
 }
