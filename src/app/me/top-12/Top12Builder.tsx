@@ -33,6 +33,7 @@ import {
   FetchJsonError,
   RateLimitedError,
 } from "@/lib/fetch-json";
+import { useDragScroll } from "@/hooks/useDragScroll";
 import SortablePickCard from "./SortablePickCard";
 import BuilderTitleCard from "./BuilderTitleCard";
 
@@ -84,7 +85,7 @@ export default function Top12Builder({
 }: {
   initialPicks: BuilderPick[];
   featured: BuilderTitle[];
-  // Editorial discovery carousels (AFI Top 100, Greatest TV Shows,
+  // Editorial discovery carousels (AFI Top 100, Top Rated Series,
   // ...), already ordered by display_order from the page query.
   curatedLists: CuratedListSection[];
   recentlyAdded: BuilderTitle[];
@@ -461,13 +462,20 @@ function BrowseRow({
   pendingIds: Set<string>;
   onToggle: (t: BuilderTitle) => void;
 }) {
+  // Click-and-drag horizontal scroll on desktop (touch scroll stays
+  // native). The hook also suppresses the click that would otherwise
+  // fire on a card's +Add button when the press was actually a drag.
+  const scrollRef = useDragScroll();
   if (titles.length === 0) return null;
   return (
     <section>
       <h2 className="mb-3 text-caption font-medium uppercase tracking-wider text-moonbeem-pink">
         {heading}
       </h2>
-      <div className="flex gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div
+        ref={scrollRef}
+        className="flex gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
         {titles.map((t) => (
           <BuilderTitleCard
             key={t.id}
