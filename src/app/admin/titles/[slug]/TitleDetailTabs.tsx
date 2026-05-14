@@ -606,6 +606,22 @@ function ClipsList({
                           unoptimized
                           className="object-cover"
                         />
+                      ) : c.file_url ? (
+                        // Browser-rendered poster frame as a stopgap
+                        // until the ffmpeg pipeline lands. `#t=0.1`
+                        // tells the browser to seek to ~0.1s and
+                        // render that frame as the still; preload
+                        // metadata is enough to load the byte range
+                        // for that frame. Falls back gracefully to
+                        // the navy placeholder when the browser/codec
+                        // combo doesn't honour the fragment seek.
+                        <video
+                          src={`${c.file_url}#t=0.1`}
+                          preload="metadata"
+                          muted
+                          playsInline
+                          className="absolute inset-0 h-full w-full object-cover"
+                        />
                       ) : null}
                     </div>
                     {c.file_url ? (
