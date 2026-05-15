@@ -10,7 +10,7 @@
 //   - rejected → /c/{handle} (profile, where unattributed edits sit)
 //
 // All copy follows the brand-voice rules: no exclamation marks, no em
-// dashes, "Hey," opener, "More soon, The Moonbeem team" sign-off.
+// dashes, "Hey Beemer," opener, "More soon, Team Moonbeem" sign-off.
 
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getOrigin } from "./origin";
@@ -43,7 +43,9 @@ export function buildFanEditEmail(args: BuildArgs): {
   text: string;
 } {
   const { variant, handle, titleName, titleSlug, reason, origin } = args;
-  const greeting = handle ? `Hey ${escapeHtml(handle)},` : "Hey,";
+  // Standard branded greeting. Handle is kept for profile-link
+  // resolution below but not used in the salutation.
+  const greeting = "Hey Beemer,";
   const titleNameEsc = escapeHtml(titleName);
   const titleHref = `${origin}/t/${encodeURIComponent(titleSlug)}`;
   const profileHref = handle
@@ -70,7 +72,7 @@ export function buildFanEditEmail(args: BuildArgs): {
         "You're receiving this because you just submitted a fan edit on Moonbeem.",
     });
     const text = [
-      handle ? `Hey ${handle},` : "Hey,",
+      "Hey Beemer,",
       "",
       `Your edit for ${titleName} is in our review queue. Most edits get approved within 24 hours.`,
       "",
@@ -79,7 +81,7 @@ export function buildFanEditEmail(args: BuildArgs): {
       `View your pending edits: ${meHref}`,
       "",
       "More soon,",
-      "The Moonbeem team",
+      "Team Moonbeem",
     ].join("\n");
     return {
       subject: "Your fan edit is pending review",
@@ -107,7 +109,7 @@ export function buildFanEditEmail(args: BuildArgs): {
         "You're receiving this because a fan edit you submitted was approved.",
     });
     const text = [
-      handle ? `Hey ${handle},` : "Hey,",
+      "Hey Beemer,",
       "",
       `Your edit for ${titleName} is now live on Moonbeem with attribution to you.`,
       "",
@@ -116,7 +118,7 @@ export function buildFanEditEmail(args: BuildArgs): {
       "You'll start earning from views and clicks through your profile.",
       "",
       "More soon,",
-      "The Moonbeem team",
+      "Team Moonbeem",
     ].join("\n");
     return {
       subject: "Your fan edit is live",
@@ -153,7 +155,7 @@ export function buildFanEditEmail(args: BuildArgs): {
       "You're receiving this because a fan edit you submitted needs another look.",
   });
   const textLines = [
-    handle ? `Hey ${handle},` : "Hey,",
+    "Hey Beemer,",
     "",
     `We couldn't attribute your edit for ${titleName} to that specific title.`,
     "",
@@ -169,7 +171,7 @@ export function buildFanEditEmail(args: BuildArgs): {
     `See your profile: ${profileHref}`,
     "",
     "More soon,",
-    "The Moonbeem team",
+    "Team Moonbeem",
   );
   return {
     subject: "About your recent fan edit submission",

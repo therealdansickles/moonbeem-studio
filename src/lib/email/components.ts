@@ -50,6 +50,7 @@ export type WrapArgs = {
 export function wrap(args: WrapArgs): string {
   const { innerHtml, origin, unsubscribeUrl, reasonLine } = args;
   const wordmarkUrl = `${origin}/`;
+  const logoSrc = `${origin}/moonbeem-logo.png`;
 
   const unsubFragment = unsubscribeUrl
     ? `<a href="${unsubscribeUrl}" style="color:${COLORS.inkSubtle};text-decoration:underline;">Stop these emails</a>`
@@ -60,13 +61,20 @@ export function wrap(args: WrapArgs): string {
     : "";
 
   return `<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Moonbeem</title></head>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>moonbeem.</title></head>
 <body style="margin:0;padding:0;background:${COLORS.bg};font-family:${FONT_STACK};color:${COLORS.ink};-webkit-font-smoothing:antialiased;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${COLORS.bg};">
     <tr><td align="center" style="padding:32px 16px;">
       <table role="presentation" width="540" cellpadding="0" cellspacing="0" border="0" style="max-width:540px;width:100%;">
         <tr><td style="padding:0 0 24px;">
-          <a href="${wordmarkUrl}" style="text-decoration:none;color:${COLORS.ink};font-weight:700;letter-spacing:-0.01em;font-size:20px;">Moonbeem</a>
+          <a href="${wordmarkUrl}" style="text-decoration:none;display:inline-block;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+              <td style="vertical-align:middle;padding-right:10px;">
+                <img src="${logoSrc}" alt="moonbeem." width="32" height="32" style="display:block;border:0;outline:none;text-decoration:none;">
+              </td>
+              <td style="vertical-align:middle;font-weight:700;letter-spacing:-0.02em;font-size:22px;color:${COLORS.violet};">moonbeem.</td>
+            </tr></table>
+          </a>
         </td></tr>
         <tr><td style="font-size:16px;line-height:1.6;color:${COLORS.ink};">
 ${innerHtml}
@@ -113,5 +121,5 @@ export function bulletList(items: string[]): string {
 }
 
 export function signoff(line: string = "More soon,"): string {
-  return paragraph(`${escapeHtml(line)}<br>The Moonbeem team`);
+  return paragraph(`${escapeHtml(line)}<br>Team Moonbeem`);
 }

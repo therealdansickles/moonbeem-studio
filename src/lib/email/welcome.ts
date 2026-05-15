@@ -25,7 +25,11 @@ export function buildWelcomeEmail(args: BuildArgs): {
   text: string;
 } {
   const { handle, origin } = args;
-  const greeting = handle ? `Hey ${escapeHtml(handle)},` : "Hey,";
+  // Standard branded greeting — uses 'Beemer' as the universal
+  // community term. Handle stays in the args signature for callers
+  // that want it later but isn't used here.
+  void handle;
+  const greeting = "Hey Beemer,";
 
   const innerHtml = [
     paragraph(greeting),
@@ -53,7 +57,7 @@ export function buildWelcomeEmail(args: BuildArgs): {
   });
 
   const text = [
-    handle ? `Hey ${handle},` : "Hey,",
+    "Hey Beemer,",
     "",
     "You're in. Moonbeem is the authorized fan distribution network for media.",
     "",
@@ -67,7 +71,7 @@ export function buildWelcomeEmail(args: BuildArgs): {
     "Questions? Reply to this email or reach us at hello@moonbeem.studio.",
     "",
     "More soon,",
-    "The Moonbeem team",
+    "Team Moonbeem",
   ].join("\n");
 
   return {
