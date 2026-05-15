@@ -3,10 +3,12 @@ import Link from "next/link";
 import { verifySession } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getTopTitlesForUser } from "@/lib/queries/profiles";
+import { getFanEditsForCreator } from "@/lib/queries/titles";
 import { SignOutButton } from "@/components/SignOutButton";
 import PlatformIcon from "@/components/PlatformIcon";
 import PayoutsControls from "@/components/me/PayoutsControls";
 import WelcomeBanner from "@/components/me/WelcomeBanner";
+import ProfileFanEditCard from "@/components/profile/ProfileFanEditCard";
 
 const MIN_WITHDRAWAL_CENTS = 1000;
 
@@ -154,6 +156,14 @@ export default async function MePage() {
   const topTitles = await getTopTitlesForUser(session.userId);
   const top12Count = topTitles.length;
 
+  // Fan edits attributed to this user's creator — empty array when
+  // no creator row exists or when none are attributed yet. Renders
+  // a grid when populated, falls back to the editorial empty state
+  // below.
+  const fanEdits = creator
+    ? await getFanEditsForCreator(creator.id)
+    : [];
+
   // Welcome banner shows only for a genuine first-time user: no
   // verified socials, no Top 12 picks, and no prior dismissal.
   const bannerDismissedAt =
@@ -217,24 +227,47 @@ export default async function MePage() {
 
         {showWelcomeBanner && <WelcomeBanner handle={handle} />}
 
-        {/* 1. Your fan edits — no real data wired yet; always the
-            editorial empty state for now. */}
+        {/* 1. Your fan edits — grid when this user's creator has any
+            attributed edits; editorial empty state otherwise. */}
         <section>
           <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
             Your fan edits
+            {fanEdits.length > 0 ? ` (${fanEdits.length})` : ""}
           </h2>
           <div className="mt-3 border-t border-white/10 pt-3">
-            <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
-              Fan edits you&apos;ve made on social platforms will appear here
-              once they&apos;re attributed to your verified accounts. Each edit
-              shows view counts, partner attribution, and earnings.
-            </p>
-            <Link
-              href="/"
-              className="mt-3 inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
-            >
-              Browse fan edits other creators have made →
-            </Link>
+            {fanEdits.length > 0 ? (
+              <>
+                <div className="grid grid-cols-2 items-start gap-3 sm:grid-cols-3 md:gap-4 lg:grid-cols-4">
+                  {fanEdits.map((fe, i) => (
+                    <ProfileFanEditCard
+                      key={fe.id}
+                      fanEdit={fe}
+                      eager={i < 4}
+                    />
+                  ))}
+                </div>
+                <Link
+                  href="/"
+                  className="mt-4 inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
+                >
+                  Browse fan edits other creators have made →
+                </Link>
+              </>
+            ) : (
+              <>
+                <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
+                  Fan edits you&apos;ve made on social platforms will appear here
+                  once they&apos;re attributed to your verified accounts. Each edit
+                  shows view counts, partner attribution, and earnings.
+                </p>
+                <Link
+                  href="/"
+                  className="mt-3 inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
+                >
+                  Browse fan edits other creators have made →
+                </Link>
+              </>
+            )}
           </div>
         </section>
 

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Profile, TopTitle } from "@/lib/queries/profiles";
+import type { FanEditWithTitle } from "@/lib/queries/titles";
 import {
   PLATFORM_LABEL,
   buildSocialProfileUrl,
@@ -7,11 +8,13 @@ import {
 import PlatformIcon from "@/components/PlatformIcon";
 import AvatarCircle from "./AvatarCircle";
 import Top12Grid from "./Top12Grid";
+import ProfileFanEditCard from "./ProfileFanEditCard";
 
 type Props = {
   profile: Profile | null;
   handle: string;
   topTitles: TopTitle[];
+  fanEdits: FanEditWithTitle[];
   isOwner: boolean;
 };
 
@@ -19,6 +22,7 @@ export default function ProfileView({
   profile,
   handle,
   topTitles,
+  fanEdits,
   isOwner,
 }: Props) {
   if (!profile) {
@@ -137,6 +141,24 @@ export default function ProfileView({
             renders read-only here, even for the profile owner. */}
         <Top12Grid topTitles={topTitles} isOwner={false} />
       </section>
+
+      {/* Fan edits attributed to this creator. Omitted entirely when
+          empty — strangers viewing the profile don't need the
+          empty-state coaching that /me carries. */}
+      {fanEdits.length > 0 && (
+        <section className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-pink uppercase m-0">
+              Fan edits
+            </h2>
+          </div>
+          <div className="grid grid-cols-2 items-start gap-3 sm:grid-cols-3 md:gap-4 lg:grid-cols-4">
+            {fanEdits.map((fe, i) => (
+              <ProfileFanEditCard key={fe.id} fanEdit={fe} eager={i < 4} />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

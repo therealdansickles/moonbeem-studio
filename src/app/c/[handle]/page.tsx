@@ -3,6 +3,7 @@ import {
   getProfileByHandle,
   getTopTitlesForUser,
 } from "@/lib/queries/profiles";
+import { getFanEditsForCreator } from "@/lib/queries/titles";
 import ProfileView from "@/components/profile/ProfileView";
 
 export default async function ProfilePage({
@@ -23,12 +24,16 @@ export default async function ProfilePage({
         profile={null}
         handle={profile?.handle ?? handle}
         topTitles={[]}
+        fanEdits={[]}
         isOwner={false}
       />
     );
   }
 
-  const topTitles = await getTopTitlesForUser(profile.user_id);
+  const [topTitles, fanEdits] = await Promise.all([
+    getTopTitlesForUser(profile.user_id),
+    getFanEditsForCreator(profile.creator_id),
+  ]);
   const isOwner = currentUser?.userId === profile.user_id;
 
   return (
@@ -36,6 +41,7 @@ export default async function ProfilePage({
       profile={profile}
       handle={profile.handle}
       topTitles={topTitles}
+      fanEdits={fanEdits}
       isOwner={isOwner}
     />
   );

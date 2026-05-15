@@ -507,6 +507,58 @@ export async function getRecentFanEdits(
   });
 }
 
+// Fan edits owned by a single creator across the catalog. Powers the
+// "Fan edits" sections on /me and /c/[handle]. Mirrors the
+// getRecentFanEdits shape so the card components consume one type.
+export async function getFanEditsForCreator(
+  creatorId: string,
+  options: { limit?: number } = {},
+): Promise<FanEditWithTitle[]> {
+  const limit = options.limit ?? 24;
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("fan_edits")
+    .select(
+      "id, title_id, platform, embed_url, thumbnail_url, creator_handle_displayed, creator_id, created_at, titles!inner(slug, title, poster_url, is_active)",
+    )
+    .eq("creator_id", creatorId)
+    .eq("is_active", true)
+    .eq("verification_status", "auto_verified")
+    .is("deleted_at", null)
+    .eq("titles.is_active", true)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error || !data) return [];
+  const rows = (data as unknown as FanEditJoinRow[]).filter(
+    (r) => r.titles && r.titles.poster_url,
+  );
+  if (rows.length === 0) return [];
+
+  // Resolve the single creator's moonbeem_handle once (all rows
+  // share it).
+  const { data: creators } = await supabase
+    .from("public_creators")
+    .select("id, moonbeem_handle")
+    .eq("id", creatorId)
+    .maybeSingle();
+  const moonbeemHandle = (creators?.moonbeem_handle as string | null) ?? null;
+
+  return rows.map((r) => ({
+    id: r.id,
+    title_id: r.title_id,
+    creator_handle: moonbeemHandle ?? r.creator_handle_displayed ?? "anon",
+    creator_handle_displayed: r.creator_handle_displayed,
+    creator_moonbeem_handle: moonbeemHandle,
+    platform: r.platform,
+    embed_url: r.embed_url,
+    thumbnail_url: r.thumbnail_url,
+    title_slug: r.titles!.slug,
+    title_name: r.titles!.title,
+    title_poster_url: r.titles!.poster_url!,
+    created_at: r.created_at,
+  }));
+}
+
 // Trending fan edits — top N by view-count delta over the past 24h.
 // Uses existing view_tracking_snapshots data (no new schema, no new
 // cron, no first-run NULL trap). Snapshots are written by the
