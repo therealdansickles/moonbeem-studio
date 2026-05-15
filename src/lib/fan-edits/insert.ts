@@ -36,9 +36,21 @@ export type AdminFanEditInput = {
   // Derived from URL via parseFanEditUrl; required to enforce the
   // (title_id, post_id) unique index correctly.
   postId: string;
-  // Optional — present on TikTok/Twitter (extracted from path) and
-  // Instagram (returned by EnsembleData). YouTube generally null.
+  // The social handle that posted the content (TikTok/Twitter from
+  // URL path, Instagram from EnsembleData). Stored in
+  // creator_handle_displayed. Distinct from the Moonbeem creator who
+  // gets attribution credit (see attributedCreatorId).
   handle?: string | null;
+  // Path 1 (admin override): the Moonbeem creator who should receive
+  // attribution. When set, becomes fan_edits.creator_id directly —
+  // no stub creation. Lets admins attach a post to an existing
+  // creator without affecting that creator's creator_socials links.
+  //
+  // Path 2 (auto): when null, the legacy behavior kicks in —
+  // find_or_create_stub_creator(handle, platform) creates a stub
+  // if no creator is linked yet, or returns the existing creator_id
+  // for that (platform, handle) pair.
+  attributedCreatorId?: string | null;
   // Optional caption / notes / posted_at overrides. When omitted,
   // values come from the EnsembleData fetch (where available).
   caption?: string | null;
@@ -114,27 +126,40 @@ export async function adminInsertFanEdit(
     };
   }
 
-  // Resolve creator stub. The RPC is upsert-shaped — existing
-  // (platform, handle) returns the existing creator_id; otherwise a
-  // stub creator + creator_socials row is created in one transaction.
+  // Resolve creator_id. Two paths:
+  //   1. Admin override (attributedCreatorId set) → use it directly.
+  //      Do not run the stub-creator RPC. The Moonbeem creator
+  //      already exists; we want to attach this post to them
+  //      regardless of whether their creator_socials links cover
+  //      (platform, handle).
+  //   2. Auto (attributedCreatorId null) → legacy find_or_create_
+  //      stub_creator(handle, platform). Creates a stub if no
+  //      creator is linked for that (platform, handle); otherwise
+  //      reuses the existing creator_id.
+  //
+  // creator_handle_displayed always holds the SOCIAL handle that
+  // posted (not the Moonbeem handle) — independent of which path
+  // populated creator_id.
   let creatorId: string | null = null;
   let displayedHandle: string | null = null;
   if (input.handle) {
-    displayedHandle = input.handle.replace(/^@+/, "").trim().toLowerCase();
-    if (displayedHandle) {
-      const { data: stubId, error: stubErr } = await sb.rpc(
-        "find_or_create_stub_creator",
-        { p_handle: displayedHandle, p_platform: input.platform },
-      );
-      if (stubErr) {
-        return {
-          ok: false,
-          kind: "stub_creator_failed",
-          reason: `stub creator resolution failed: ${stubErr.message}`,
-        };
-      }
-      creatorId = stubId as string;
+    displayedHandle = input.handle.replace(/^@+/, "").trim().toLowerCase() || null;
+  }
+  if (input.attributedCreatorId) {
+    creatorId = input.attributedCreatorId;
+  } else if (displayedHandle) {
+    const { data: stubId, error: stubErr } = await sb.rpc(
+      "find_or_create_stub_creator",
+      { p_handle: displayedHandle, p_platform: input.platform },
+    );
+    if (stubErr) {
+      return {
+        ok: false,
+        kind: "stub_creator_failed",
+        reason: `stub creator resolution failed: ${stubErr.message}`,
+      };
     }
+    creatorId = stubId as string;
   }
 
   // Metrics: use the prefetched copy if the caller already paid the

@@ -15,7 +15,14 @@ import type { FetchEngagementResult } from "@/lib/ensembledata/client";
 type Body = {
   url?: string;
   title_id?: string;
+  // The social handle that posted the content. Admin can override
+  // the URL-parsed handle here if it's wrong or missing.
   handle?: string | null;
+  // Path 1 — admin's explicit attribution choice. When set, the
+  // insert short-circuits creator stub resolution and stamps this
+  // creator_id on the fan_edits row. When null, the legacy
+  // find_or_create_stub_creator flow runs against (platform, handle).
+  attributed_creator_id?: string | null;
   caption?: string | null;
   notes?: string | null;
   // Cached preview metrics — passed through to skip a second fetch.
@@ -76,12 +83,21 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // attributed_creator_id is only honored when it's a valid UUID.
+  // Anything else (empty string, garbage) silently falls back to
+  // the stub-creator path.
+  const attributedCreatorId =
+    body.attributed_creator_id && UUID_RE.test(body.attributed_creator_id)
+      ? body.attributed_creator_id
+      : null;
+
   const result = await adminInsertFanEdit({
     titleId: body.title_id,
     embedUrl: parsed.normalizedUrl,
     platform: parsed.platform,
     postId: parsed.contentId,
     handle,
+    attributedCreatorId,
     caption: body.caption ?? null,
     prefetchedMetrics: body.metrics ?? null,
   });
