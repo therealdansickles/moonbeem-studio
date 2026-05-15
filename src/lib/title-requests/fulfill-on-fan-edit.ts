@@ -25,12 +25,24 @@ export async function fulfillTitleRequestsForFanEdit(
   titleId: string,
   fanEditId: string,
 ): Promise<FulfillResult> {
-  // Atomically flip every open request for this title. The partial
-  // index idx_title_requests_open keeps this O(open-rows-for-this-title).
+  // Scope the update to request_type='fan_edits' only.
+  //
+  // Before this filter, the UPDATE also marked clips_and_stills
+  // requests fulfilled and collected their user_ids — which were
+  // then passed to notifyTitleRequesters with the explicit userIds
+  // parameter, bypassing the request_type filter inside that
+  // function (Block 2.1). The result was bystander emails to
+  // clips_and_stills requesters about a fan_edit upload AND silent
+  // closure of their actual request.
+  //
+  // Now: clips_and_stills requests stay open until an admin
+  // uploads matching content. Only fan_edits requests close + emit
+  // recipient emails when a fan_edit is imported.
   const { data: updated, error } = await supabase
     .from("title_requests")
     .update({ fulfilled_at: new Date().toISOString() })
     .eq("title_id", titleId)
+    .eq("request_type", "fan_edits")
     .is("fulfilled_at", null)
     .select("user_id");
   if (error) {
