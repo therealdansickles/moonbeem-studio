@@ -61,6 +61,16 @@ export type AdminFanEditInput = {
   // inserter trusts them and skips the EnsembleData round-trip. When
   // null, the inserter does the fetch itself.
   prefetchedMetrics?: FetchEngagementResult | null;
+  // Block 3 user-submission state. 'auto_verified' (default) is for
+  // admin imports — row is immediately public-readable. 'pending' is
+  // for user URL-paste submissions awaiting admin review. The admin
+  // queue flips 'pending' → 'approved' or 'rejected' via dedicated
+  // routes, NOT via this helper.
+  verificationStatus?: "auto_verified" | "pending";
+  // Who submitted. NULL for admin imports (default); set to the
+  // session user_id for user submissions. FK to users.id with ON
+  // DELETE SET NULL.
+  createdByUserId?: string | null;
 };
 
 export type AdminFanEditResult =
@@ -235,6 +245,7 @@ export async function adminInsertFanEdit(
   const caption = input.caption ? input.caption.slice(0, CAPTION_MAX) : null;
   const postedAt = input.postedAtIso ?? metrics.posted_at ?? null;
 
+  const verificationStatus = input.verificationStatus ?? "auto_verified";
   const insertRow = {
     title_id: input.titleId,
     creator_id: creatorId,
@@ -253,7 +264,8 @@ export async function adminInsertFanEdit(
     duration_seconds: metrics.duration_seconds ?? null,
     aspect_ratio: metrics.aspect_ratio ?? null,
     thumbnail_source: metrics.thumbnail_url ? "ensembledata" : null,
-    verification_status: "auto_verified",
+    verification_status: verificationStatus,
+    created_by_user_id: input.createdByUserId ?? null,
     view_tracking_status: "active",
     last_refreshed_at: new Date().toISOString(),
   };
@@ -271,20 +283,24 @@ export async function adminInsertFanEdit(
     };
   }
 
-  // Fire request-fulfillment side effect; failures are logged but
-  // don't roll back the insert.
-  try {
-    await fulfillTitleRequestsForFanEdit(
-      sb,
-      input.titleId,
-      inserted.id as string,
-    );
-  } catch (e) {
-    console.error("fulfillTitleRequestsForFanEdit failed (admin insert)", {
-      titleId: input.titleId,
-      fanEditId: inserted.id,
-      error: e instanceof Error ? e.message : String(e),
-    });
+  // Fire request-fulfillment side effect ONLY for rows that are
+  // immediately public-readable. Pending user submissions don't
+  // fulfill requests until an admin approves them — the approve
+  // route fires this hook explicitly at that point.
+  if (verificationStatus === "auto_verified") {
+    try {
+      await fulfillTitleRequestsForFanEdit(
+        sb,
+        input.titleId,
+        inserted.id as string,
+      );
+    } catch (e) {
+      console.error("fulfillTitleRequestsForFanEdit failed (admin insert)", {
+        titleId: input.titleId,
+        fanEditId: inserted.id,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
   }
 
   return {

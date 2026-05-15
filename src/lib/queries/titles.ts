@@ -507,6 +507,162 @@ export async function getRecentFanEdits(
   });
 }
 
+// Block 3 user-submission queries. Pending / rejected fan_edits never
+// surface on public profiles or title pages (their RLS keeps anon out
+// already); these helpers run via service-role for the submitter's
+// own /me + the admin queue.
+export type UserSubmissionFanEdit = {
+  id: string;
+  title_id: string;
+  title_slug: string;
+  title_name: string;
+  title_poster_url: string | null;
+  platform: "tiktok" | "instagram" | "twitter" | "youtube";
+  embed_url: string;
+  thumbnail_url: string | null;
+  created_at: string;
+  rejection_reason: string | null;
+  post_id: string | null;
+};
+
+async function getUserSubmissionFanEdits(args: {
+  userId: string;
+  status: "pending" | "rejected";
+  limit: number;
+}): Promise<UserSubmissionFanEdit[]> {
+  const sb = createServiceRoleClient();
+  const { data } = await sb
+    .from("fan_edits")
+    .select(
+      "id, title_id, platform, embed_url, thumbnail_url, created_at, rejection_reason, post_id, titles!inner(slug, title, poster_url)",
+    )
+    .eq("created_by_user_id", args.userId)
+    .eq("verification_status", args.status)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(args.limit);
+  const rows = (data ?? []) as unknown as Array<{
+    id: string;
+    title_id: string;
+    platform: string;
+    embed_url: string;
+    thumbnail_url: string | null;
+    created_at: string;
+    rejection_reason: string | null;
+    post_id: string | null;
+    titles: {
+      slug: string;
+      title: string;
+      poster_url: string | null;
+    } | null;
+  }>;
+  return rows
+    .filter((r) => r.titles)
+    .map((r) => ({
+      id: r.id,
+      title_id: r.title_id,
+      title_slug: r.titles!.slug,
+      title_name: r.titles!.title,
+      title_poster_url: r.titles!.poster_url,
+      platform: r.platform as "tiktok" | "instagram" | "twitter" | "youtube",
+      embed_url: r.embed_url,
+      thumbnail_url: r.thumbnail_url,
+      created_at: r.created_at,
+      rejection_reason: r.rejection_reason,
+      post_id: r.post_id,
+    }));
+}
+
+export async function getPendingFanEditsForUser(
+  userId: string,
+  limit = 24,
+): Promise<UserSubmissionFanEdit[]> {
+  return getUserSubmissionFanEdits({ userId, status: "pending", limit });
+}
+
+export async function getRejectedFanEditsForUser(
+  userId: string,
+  limit = 24,
+): Promise<UserSubmissionFanEdit[]> {
+  return getUserSubmissionFanEdits({ userId, status: "rejected", limit });
+}
+
+export type PendingQueueRow = UserSubmissionFanEdit & {
+  submitter_user_id: string;
+  submitter_handle: string | null;
+  submitter_email: string | null;
+};
+
+// Admin queue — FIFO across all pending user submissions.
+export async function getPendingFanEditQueue(
+  limit = 50,
+  offset = 0,
+): Promise<PendingQueueRow[]> {
+  const sb = createServiceRoleClient();
+  const { data } = await sb
+    .from("fan_edits")
+    .select(
+      "id, title_id, platform, embed_url, thumbnail_url, created_at, rejection_reason, post_id, created_by_user_id, titles!inner(slug, title, poster_url)",
+    )
+    .eq("verification_status", "pending")
+    .is("deleted_at", null)
+    .not("created_by_user_id", "is", null)
+    .order("created_at", { ascending: true })
+    .range(offset, offset + limit - 1);
+  const rows = (data ?? []) as unknown as Array<{
+    id: string;
+    title_id: string;
+    platform: string;
+    embed_url: string;
+    thumbnail_url: string | null;
+    created_at: string;
+    rejection_reason: string | null;
+    post_id: string | null;
+    created_by_user_id: string;
+    titles: {
+      slug: string;
+      title: string;
+      poster_url: string | null;
+    } | null;
+  }>;
+  if (rows.length === 0) return [];
+  const userIds = Array.from(new Set(rows.map((r) => r.created_by_user_id)));
+  const { data: users } = await sb
+    .from("users")
+    .select("id, handle, email")
+    .in("id", userIds);
+  const userMap = new Map(
+    (users ?? []).map((u) => [
+      u.id as string,
+      {
+        handle: (u.handle as string | null) ?? null,
+        email: (u.email as string | null) ?? null,
+      },
+    ]),
+  );
+  return rows
+    .filter((r) => r.titles)
+    .map((r) => {
+      const u = userMap.get(r.created_by_user_id) ?? { handle: null, email: null };
+      return {
+        id: r.id,
+        title_id: r.title_id,
+        title_slug: r.titles!.slug,
+        title_name: r.titles!.title,
+        title_poster_url: r.titles!.poster_url,
+        platform: r.platform as "tiktok" | "instagram" | "twitter" | "youtube",
+        embed_url: r.embed_url,
+        thumbnail_url: r.thumbnail_url,
+        created_at: r.created_at,
+        rejection_reason: r.rejection_reason,
+        post_id: r.post_id,
+        submitter_user_id: r.created_by_user_id,
+        submitter_handle: u.handle,
+        submitter_email: u.email,
+      };
+    });
+}
+
 // Fan edits owned by a single creator across the catalog. Powers the
 // "Fan edits" sections on /me and /c/[handle]. Mirrors the
 // getRecentFanEdits shape so the card components consume one type.
@@ -523,7 +679,12 @@ export async function getFanEditsForCreator(
     )
     .eq("creator_id", creatorId)
     .eq("is_active", true)
-    .eq("verification_status", "auto_verified")
+    // Block 3: 'approved' (admin-approved user submissions) and
+    // 'auto_verified' (legacy admin imports) are both publicly
+    // readable. 'pending' and 'rejected' user-submitted rows stay
+    // off /c/[handle] and /me's "Your fan edits" — they're surfaced
+    // via dedicated query helpers below.
+    .in("verification_status", ["auto_verified", "approved"])
     .is("deleted_at", null)
     .eq("titles.is_active", true)
     .order("created_at", { ascending: false })
