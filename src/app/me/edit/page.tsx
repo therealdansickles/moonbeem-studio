@@ -32,6 +32,12 @@ function safeReturnTo(raw: string | undefined): string | null {
   return raw;
 }
 
+// Block 3.2: detect when return_to points at a fan-edit upload page
+// so we can render the verification-nudge banner. Strict pattern —
+// won't fire on /c/[handle] (profile), only /c/[handle]/upload with
+// any handle and any query string.
+const UPLOAD_RETURN_TO_RE = /^\/c\/[^/]+\/upload(\?.*)?$/;
+
 export default async function EditProfilePage({
   searchParams,
 }: {
@@ -74,8 +80,43 @@ export default async function EditProfilePage({
   // in the dedicated builder at /me/top-12.
   const topTitles = await getTopTitlesForUser(session.userId);
 
+  // Block 3.2 onboarding nudge: when the user got bounced here from
+  // a /c/[handle]/upload attempt AND they have no verified socials
+  // yet, surface a banner explaining why they need to verify. The
+  // "no verified socials" check is defensive — if they're already
+  // verified they wouldn't have been bounced, but a direct visit
+  // with the return_to query param shouldn't surface the nudge.
+  const hasAnyVerifiedSocial = ((socials ?? []) as Array<{
+    verified_at: string | null;
+  }>).some((s) => !!s.verified_at);
+  const showUploadNudge =
+    !!returnTo &&
+    UPLOAD_RETURN_TO_RE.test(returnTo) &&
+    !hasAnyVerifiedSocial;
+
   return (
     <>
+      {showUploadNudge && (
+        <div className="mx-auto mt-8 max-w-2xl px-6">
+          <div className="rounded-2xl border border-moonbeem-violet/40 bg-moonbeem-violet/10 p-5">
+            <h2 className="m-0 font-wordmark text-heading-sm text-moonbeem-ink">
+              Verify a social account to upload
+            </h2>
+            <p className="mt-2 text-body-sm text-moonbeem-ink-muted leading-relaxed">
+              Fan edits attribute to a verified social handle. Verify your
+              TikTok, Instagram, or X account below. It takes about 30 seconds.
+              Once you&apos;re verified, your upload will pick up where you left
+              off.
+            </p>
+            <a
+              href="#verify-socials"
+              className="mt-3 inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
+            >
+              Start verifying →
+            </a>
+          </div>
+        </div>
+      )}
       <EditProfileForm
         handle={data.handle as string}
         initialDisplayName={(data.display_name ?? "") as string}
@@ -89,7 +130,10 @@ export default async function EditProfilePage({
           poster_url: t.title.poster_url,
         }))}
       />
-      <div className="mx-auto flex max-w-2xl flex-col gap-8 px-6 pb-12">
+      <div
+        id="verify-socials"
+        className="mx-auto flex max-w-2xl flex-col gap-8 px-6 pb-12 scroll-mt-8"
+      >
         <VerifySocialsCard
           initialSocials={(socials ?? []) as never}
           returnTo={returnTo}
