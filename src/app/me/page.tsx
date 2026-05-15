@@ -326,16 +326,16 @@ export default async function MePage() {
                   once they&apos;re attributed to your verified accounts. Each edit
                   shows view counts, partner attribution, and earnings.
                 </p>
-                <div className="mt-3 flex flex-col gap-2">
+                <div className="mt-3 flex flex-col items-start gap-3">
                   <Link
                     href={`/c/${handle}/upload`}
-                    className="inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
+                    className="rounded-md border border-white/15 bg-white/5 px-4 py-2 text-body-sm text-moonbeem-ink transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
                   >
-                    Or add one directly →
+                    Add fan edit
                   </Link>
                   <Link
                     href="/"
-                    className="inline-block text-body-sm text-moonbeem-ink-muted hover:text-moonbeem-pink"
+                    className="text-body-sm text-moonbeem-ink-muted hover:text-moonbeem-pink"
                   >
                     Browse fan edits other creators have made →
                   </Link>

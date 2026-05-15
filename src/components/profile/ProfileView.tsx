@@ -121,22 +121,29 @@ export default function ProfileView({
           )}
         </div>
         {isOwner && (
-          <div className="flex shrink-0 flex-col items-end gap-2">
-            <Link
-              href="/me/edit"
-              className="rounded-md border border-white/15 bg-white/5 px-4 py-2 text-body-sm text-moonbeem-ink transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
-            >
-              Edit profile
-            </Link>
-            <Link
-              href={`/c/${handle}/upload`}
-              className="text-body-sm text-moonbeem-ink-muted hover:text-moonbeem-pink"
-            >
-              Add fan edit →
-            </Link>
-          </div>
+          <Link
+            href="/me/edit"
+            className="self-start rounded-md border border-white/15 bg-white/5 px-4 py-2 text-body-sm text-moonbeem-ink transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
+          >
+            Edit profile
+          </Link>
         )}
       </header>
+
+      {/* Block 3.1: owner-only Add-fan-edit button. Sits above the
+          Top 12 so it's in the natural reading flow from header →
+          first action. Matches the Edit profile button's visual
+          register — same rounded outlined treatment, no pink fill. */}
+      {isOwner && (
+        <div className="flex">
+          <Link
+            href={`/c/${handle}/upload`}
+            className="rounded-md border border-white/15 bg-white/5 px-4 py-2 text-body-sm text-moonbeem-ink transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
+          >
+            Add fan edit
+          </Link>
+        </div>
+      )}
 
       <section className="flex flex-col gap-4">
         <div className="flex items-center justify-between">

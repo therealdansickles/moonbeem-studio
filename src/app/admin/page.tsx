@@ -366,6 +366,21 @@ async function loadOpenRequestCount(
   return count ?? 0;
 }
 
+// Block 3.1: pending user fan-edit submissions awaiting review.
+// Surfaced as a count badge next to the queue link so the admin
+// can see at a glance whether there's work to do.
+async function loadPendingFanEditCount(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+): Promise<number> {
+  const { count } = await supabase
+    .from("fan_edits")
+    .select("id", { count: "exact", head: true })
+    .eq("verification_status", "pending")
+    .is("deleted_at", null)
+    .not("created_by_user_id", "is", null);
+  return count ?? 0;
+}
+
 export default async function AdminLanding() {
   await requireSuperAdminOr404();
   const supabase = createServiceRoleClient();
@@ -378,6 +393,7 @@ export default async function AdminLanding() {
     earnings,
     latestRunsMap,
     openRequestCount,
+    pendingFanEditCount,
   ] = await Promise.all([
     loadTitles(supabase, partners),
     loadCatalogCounts(supabase),
@@ -388,6 +404,7 @@ export default async function AdminLanding() {
       "view_tracking_trigger",
     ]),
     loadOpenRequestCount(supabase),
+    loadPendingFanEditCount(supabase),
   ]);
   const lastRuns: Partial<Record<AdminActionKey, AdminActionRun>> = {};
   for (const [k, v] of latestRunsMap) lastRuns[k] = v;
@@ -444,6 +461,18 @@ export default async function AdminLanding() {
               className="rounded-md border border-white/10 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
             >
               Bulk CSV upload →
+            </Link>
+            <Link
+              href="/admin/fan-edits/queue"
+              className="rounded-md border border-white/10 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
+            >
+              Review queue
+              {pendingFanEditCount > 0 ? (
+                <span className="ml-2 inline-flex items-center justify-center rounded-full bg-moonbeem-pink/20 px-2 py-0.5 text-caption text-moonbeem-pink">
+                  {pendingFanEditCount}
+                </span>
+              ) : null}
+              {" →"}
             </Link>
             <Link
               href="/admin/requests"
