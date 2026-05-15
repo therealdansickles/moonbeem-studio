@@ -1,9 +1,11 @@
-// Deprecated: fan-edits CSV import is now scoped to a specific title
-// at /admin/titles/[slug]?tab=upload. Visitors landing here go back
-// to /admin to pick a title.
+import { requireSuperAdmin } from "@/lib/dal";
+import BulkUploadClient from "./BulkUploadClient";
 
-import { redirect } from "next/navigation";
+export const metadata = {
+  title: "Bulk fan-edit upload — Moonbeem admin",
+};
 
-export default function DeprecatedFanEditsUploadRoute() {
-  redirect("/admin");
+export default async function Page() {
+  await requireSuperAdmin();
+  return <BulkUploadClient />;
 }
