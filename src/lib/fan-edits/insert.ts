@@ -22,6 +22,8 @@ import {
   type FetchEngagementResult,
 } from "@/lib/ensembledata/client";
 import { fulfillTitleRequestsForFanEdit } from "@/lib/title-requests/fulfill-on-fan-edit";
+import { proxyThumbnailToR2 } from "./thumbnail-proxy";
+import { getR2PublicUrl } from "@/lib/r2/client";
 import type { Platform } from "./url-parser";
 
 const UUID_RE =
@@ -177,6 +179,36 @@ export async function adminInsertFanEdit(
   // EnsembleData errors don't block the insert — view-tracking will
   // retry on the next sweep. We just record what we have.
   // (Counters fall back to 0 via schema default when null.)
+
+  // Thumbnail proxy: Block 2.1 added this for the single-URL flow at
+  // /fetch-metadata so the admin preview <img> renders reliably.
+  // Bulk imports skipped that preview step, so without this fan_edits
+  // landed with raw IG/TikTok CDN URLs that 403 on cross-origin
+  // loads. Always proxy here, but skip when the URL is already on
+  // our R2 bucket (the single-URL preview already proxied it — same
+  // post_id → same key → second upload would just be wasted bytes).
+  // Fail-soft: on R2 failure, keep whatever URL we had so the row
+  // isn't blocked from inserting.
+  if (metrics.thumbnail_url) {
+    let r2Prefix: string | null = null;
+    try {
+      r2Prefix = getR2PublicUrl().replace(/\/$/, "");
+    } catch {
+      // R2 unconfigured in this environment — skip proxy entirely.
+    }
+    const alreadyOnR2 =
+      r2Prefix !== null && metrics.thumbnail_url.startsWith(r2Prefix);
+    if (!alreadyOnR2 && r2Prefix !== null) {
+      const proxied = await proxyThumbnailToR2({
+        platform: input.platform,
+        postId: input.postId,
+        thumbnailUrl: metrics.thumbnail_url,
+      });
+      if (proxied) {
+        metrics = { ...metrics, thumbnail_url: proxied };
+      }
+    }
+  }
 
   // Caption: prefer caller override, else nothing. The metrics return
   // doesn't currently surface caption; the existing import route
