@@ -165,6 +165,173 @@ type TopTitleJoinRow = {
   } | null;
 };
 
+export type UnclaimedStub = {
+  stubCreatorId: string;
+  platform: SocialPlatform;
+  socialHandle: string;
+  fanEditCount: number;
+  thumbnails: string[];
+  // Which heuristic matched the stub to the user. 'verified_social'
+  // (the stub's social handle matches one the user has already
+  // verified — strongest signal) > 'user_handle' (matches the user's
+  // Moonbeem handle after underscore-normalization).
+  matchType: "verified_social" | "user_handle";
+};
+
+// Returns stubs that plausibly belong to `userId` so /me can prompt
+// the user to verify the underlying social and claim the edits.
+//
+// Match rules (per Block 2.5):
+//   (a) creator_socials.handle equals users.handle (case-insensitive)
+//   (b) lower(replace(cs.handle, '_', '')) equals the same of users.handle
+//       — covers "dan_sickles" ↔ "dansickles"
+//   (c) cs.handle equals (or normalizes to) any handle on a
+//       creator_socials row already verified by this user
+//
+// Only stubs that have at least one ACTIVE non-deleted fan_edit
+// attached are returned — there's no point prompting to claim an
+// empty stub. Stubs already soft-deleted are excluded.
+//
+// Service-role client. The route invokes this from a server component
+// after `verifySession`, so the user identity is already bound; we
+// just need to bypass RLS on creator_socials + creators.
+export async function getUnclaimedStubEditsForUser(
+  userId: string,
+): Promise<UnclaimedStub[]> {
+  const sb = createServiceRoleClient();
+
+  // 1. User's Moonbeem handle.
+  const { data: user } = await sb
+    .from("users")
+    .select("handle")
+    .eq("id", userId)
+    .maybeSingle();
+  const userHandle = (user?.handle as string | null) ?? null;
+  if (!userHandle) return [];
+
+  // 2. User's owned creators + their verified socials.
+  const { data: ownedCreators } = await sb
+    .from("creators")
+    .select("id")
+    .eq("user_id", userId)
+    .is("deleted_at", null);
+  const ownedIds = (ownedCreators ?? []).map((c) => c.id as string);
+  let verifiedHandles: string[] = [];
+  if (ownedIds.length > 0) {
+    const { data: socials } = await sb
+      .from("creator_socials")
+      .select("handle")
+      .in("creator_id", ownedIds)
+      .not("verified_at", "is", null);
+    verifiedHandles = (socials ?? [])
+      .map((s) => s.handle as string | null)
+      .filter((h): h is string => !!h);
+  }
+
+  // 3. Normalized candidate handles (used for fuzzy match).
+  const normalize = (h: string) =>
+    h.toLowerCase().replace(/[_.\s]/g, "");
+  const normalizedUserHandle = normalize(userHandle);
+  const normalizedVerified = new Set(verifiedHandles.map(normalize));
+  const exactVerified = new Set(
+    verifiedHandles.map((h) => h.toLowerCase()),
+  );
+
+  // 4. Pull candidate stub socials. We over-fetch (any unverified
+  // social on a stub) and filter in JS — the population is small
+  // (~111 socials total per recon 2.4).
+  const { data: stubSocialsRaw } = await sb
+    .from("creator_socials")
+    .select("creator_id, platform, handle, creators!inner(id, user_id, is_stub, deleted_at)")
+    .eq("creators.is_stub", true)
+    .is("creators.user_id", null)
+    .is("creators.deleted_at", null);
+  const candidates = (stubSocialsRaw ?? []) as Array<{
+    creator_id: string;
+    platform: string;
+    handle: string | null;
+  }>;
+
+  // 5. Apply match rules and dedupe by stub_creator_id.
+  type Hit = {
+    stubCreatorId: string;
+    platform: SocialPlatform;
+    socialHandle: string;
+    matchType: UnclaimedStub["matchType"];
+  };
+  const hits: Hit[] = [];
+  for (const c of candidates) {
+    if (!c.handle) continue;
+    if (
+      !ALLOWED_SOCIAL_PLATFORMS.includes(c.platform as SocialPlatform)
+    ) {
+      continue;
+    }
+    const normH = normalize(c.handle);
+    let match: UnclaimedStub["matchType"] | null = null;
+    if (exactVerified.has(c.handle.toLowerCase()) || normalizedVerified.has(normH)) {
+      match = "verified_social";
+    } else if (normH === normalizedUserHandle) {
+      match = "user_handle";
+    }
+    if (!match) continue;
+    hits.push({
+      stubCreatorId: c.creator_id,
+      platform: c.platform as SocialPlatform,
+      socialHandle: c.handle,
+      matchType: match,
+    });
+  }
+  if (hits.length === 0) return [];
+
+  // 6. Count + thumbnail-sample fan_edits per stub. Batch one query.
+  const stubIds = Array.from(new Set(hits.map((h) => h.stubCreatorId)));
+  const { data: edits } = await sb
+    .from("fan_edits")
+    .select("id, creator_id, thumbnail_url, created_at")
+    .in("creator_id", stubIds)
+    .eq("is_active", true)
+    .eq("verification_status", "auto_verified")
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false });
+  const byCreator = new Map<
+    string,
+    { count: number; thumbnails: string[] }
+  >();
+  for (const e of edits ?? []) {
+    const cid = e.creator_id as string;
+    const entry = byCreator.get(cid) ?? { count: 0, thumbnails: [] };
+    entry.count += 1;
+    const thumb = (e.thumbnail_url as string | null) ?? null;
+    if (thumb && entry.thumbnails.length < 3) entry.thumbnails.push(thumb);
+    byCreator.set(cid, entry);
+  }
+
+  // 7. Stitch and prune — drop stubs with zero active edits.
+  const out: UnclaimedStub[] = [];
+  for (const hit of hits) {
+    const counts = byCreator.get(hit.stubCreatorId);
+    if (!counts || counts.count === 0) continue;
+    out.push({
+      stubCreatorId: hit.stubCreatorId,
+      platform: hit.platform,
+      socialHandle: hit.socialHandle,
+      fanEditCount: counts.count,
+      thumbnails: counts.thumbnails,
+      matchType: hit.matchType,
+    });
+  }
+  // Strongest signal first (verified_social before user_handle),
+  // then by edit-count desc.
+  out.sort((a, b) => {
+    if (a.matchType !== b.matchType) {
+      return a.matchType === "verified_social" ? -1 : 1;
+    }
+    return b.fanEditCount - a.fanEditCount;
+  });
+  return out;
+}
+
 export async function getTopTitlesForUser(
   userId: string,
 ): Promise<TopTitle[]> {

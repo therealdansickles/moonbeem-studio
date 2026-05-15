@@ -2,7 +2,10 @@ import Image from "next/image";
 import Link from "next/link";
 import { verifySession } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { getTopTitlesForUser } from "@/lib/queries/profiles";
+import {
+  getTopTitlesForUser,
+  getUnclaimedStubEditsForUser,
+} from "@/lib/queries/profiles";
 import { getFanEditsForCreator } from "@/lib/queries/titles";
 import { SignOutButton } from "@/components/SignOutButton";
 import PlatformIcon from "@/components/PlatformIcon";
@@ -164,6 +167,11 @@ export default async function MePage() {
     ? await getFanEditsForCreator(creator.id)
     : [];
 
+  // Stub creators with edits that look like they belong to this user
+  // (handle match or already-verified-social match). Surfaces an
+  // "Edits to claim" prompt; only renders when non-empty.
+  const unclaimedStubs = await getUnclaimedStubEditsForUser(session.userId);
+
   // Welcome banner shows only for a genuine first-time user: no
   // verified socials, no Top 12 picks, and no prior dismissal.
   const bannerDismissedAt =
@@ -270,6 +278,62 @@ export default async function MePage() {
             )}
           </div>
         </section>
+
+        {/* 1.5. Edits to claim — only renders when stubs plausibly
+            belong to this user are surfaced by
+            getUnclaimedStubEditsForUser. */}
+        {unclaimedStubs.length > 0 && (
+          <section>
+            <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
+              Edits to claim
+            </h2>
+            <div className="mt-3 border-t border-white/10 pt-3">
+              <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
+                We&apos;ve found edits attributed to social handles that
+                look like yours. Verify the handle to claim them.
+              </p>
+              <ul className="mt-4 flex flex-col gap-3">
+                {unclaimedStubs.map((stub) => (
+                  <li
+                    key={stub.stubCreatorId}
+                    className="flex items-center gap-3 rounded-md border border-white/10 bg-white/[0.02] p-3"
+                  >
+                    {stub.thumbnails.length > 0 ? (
+                      <div className="flex shrink-0 -space-x-2">
+                        {stub.thumbnails.slice(0, 3).map((src, i) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            key={src}
+                            src={src}
+                            alt=""
+                            width={40}
+                            height={40}
+                            className="h-10 w-10 rounded-md border border-white/15 bg-black/40 object-cover"
+                            style={{ zIndex: 3 - i }}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="min-w-0 flex-1">
+                      <p className="m-0 text-body-sm text-moonbeem-ink">
+                        {stub.fanEditCount} edit
+                        {stub.fanEditCount === 1 ? "" : "s"} as @
+                        {stub.socialHandle} on{" "}
+                        {platformLabel[stub.platform as SocialPlatform]}
+                      </p>
+                    </div>
+                    <Link
+                      href="/me/edit?return_to=/me"
+                      className="shrink-0 text-body-sm text-moonbeem-pink hover:opacity-90"
+                    >
+                      Verify to claim →
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
+        )}
 
         {/* 2. Your top 12 — graduated state: 0 picks, 1-11, or 12. */}
         <section>
