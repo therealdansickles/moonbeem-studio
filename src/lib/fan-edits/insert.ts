@@ -176,9 +176,28 @@ export async function adminInsertFanEdit(
     });
   }
 
-  // EnsembleData errors don't block the insert — view-tracking will
-  // retry on the next sweep. We just record what we have.
-  // (Counters fall back to 0 via schema default when null.)
+  // Bail on metadata-fetch errors before we touch the DB. Previous
+  // behavior: ignored metrics.error and inserted whatever-was-returned,
+  // which produced ghost rows with creator_id=NULL, thumbnail_url=NULL,
+  // view_count=0 when EnsembleData responded 200 with {data: null}
+  // (e.g. DXsInL4DTFr smoke test 2026-05-15). The five error
+  // categories ('not_found' | 'private' | 'rate_limited' | 'transient'
+  // | 'parse_error') all mean we couldn't reliably fetch metadata —
+  // none of them justify creating a row. Caller surfaces the reason in
+  // the bulk_import_jobs outcome.
+  //
+  // Note: a successful fetch with empty engagement counts (e.g. an IG
+  // carousel with hidden likes) returns metrics.error === null and
+  // proceeds normally; the bail only fires on actual fetch failures.
+  if (metrics.error) {
+    return {
+      ok: false,
+      kind: "metrics_fetch_failed",
+      reason:
+        `metadata unavailable (${metrics.error}) — post may be private, deleted, ` +
+        `geo-restricted, URL format mismatch, or EnsembleData transient failure`,
+    };
+  }
 
   // Thumbnail proxy: Block 2.1 added this for the single-URL flow at
   // /fetch-metadata so the admin preview <img> renders reliably.
