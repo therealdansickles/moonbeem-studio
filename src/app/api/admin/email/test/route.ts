@@ -118,9 +118,13 @@ export async function GET(request: NextRequest) {
       break;
   }
 
+  // No subject prefix — production-identical so inbox triage isn't
+  // confused by mode-marker text leaking into the real Subject line.
+  // The route is gated to super-admins, which is the actual "this is
+  // a test" boundary.
   const result = await sendBrandedEmail({
     to,
-    subject: `[test] ${rendered.subject}`,
+    subject: rendered.subject,
     html: rendered.html,
     text: rendered.text,
   });

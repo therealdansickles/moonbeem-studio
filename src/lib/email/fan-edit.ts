@@ -141,7 +141,7 @@ export function buildFanEditEmail(args: BuildArgs): {
     ),
     reasonFragment,
     paragraph(
-      "Your edit is still on your profile in the unattributed section. If you'd like to appeal or discuss, reply to this email.",
+      "Your edit appears in the Rejected submissions section on your profile. If you'd like to appeal or discuss, reply to this email.",
     ),
     button({ href: profileHref, label: "See your profile" }),
     signoff(),
@@ -166,7 +166,7 @@ export function buildFanEditEmail(args: BuildArgs): {
   }
   textLines.push(
     "",
-    "Your edit is still on your profile in the unattributed section. If you'd like to appeal or discuss, reply to this email.",
+    "Your edit appears in the Rejected submissions section on your profile. If you'd like to appeal or discuss, reply to this email.",
     "",
     `See your profile: ${profileHref}`,
     "",
