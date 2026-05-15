@@ -32,39 +32,9 @@ Dashboard: **Project → Authentication → Emails → Templates → Magic Link*
 Sign in to Moonbeem
 ```
 
-**Body (HTML):** paste the full block below. The `{{ .ConfirmationURL }}` placeholder is Supabase's; everything else is plain HTML.
+**Body (HTML):** the template lives at `email-templates/supabase-magic-link.html` so the paste target is unambiguous. Open that file, select all (`cmd+a`), copy, and paste into the Supabase template body field. Do NOT copy from the markdown block in this doc — markdown fence lines (` ```html ` / ` ``` `) will appear as literal text in the rendered email.
 
-```html
-<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Moonbeem</title></head>
-<body style="margin:0;padding:0;background:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#121212;-webkit-font-smoothing:antialiased;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;">
-    <tr><td align="center" style="padding:32px 16px;">
-      <table role="presentation" width="540" cellpadding="0" cellspacing="0" border="0" style="max-width:540px;width:100%;">
-        <tr><td style="padding:0 0 24px;">
-          <a href="https://moonbeem.studio/" style="text-decoration:none;color:#121212;font-weight:700;letter-spacing:-0.01em;font-size:20px;">Moonbeem</a>
-        </td></tr>
-        <tr><td style="font-size:16px;line-height:1.6;color:#121212;">
-          <p style="margin:0 0 16px;">Hey,</p>
-          <p style="margin:0 0 16px;">Click the button below to sign in to Moonbeem. The link expires in 60 minutes.</p>
-          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;"><tr><td style="border-radius:8px;background:#7c3aed;">
-            <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:12px 22px;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;border-radius:8px;">Sign in to Moonbeem</a>
-          </td></tr></table>
-          <p style="margin:0 0 16px;">If you didn't request this, you can ignore this email.</p>
-          <p style="margin:0 0 16px;">More soon,<br>The Moonbeem team</p>
-        </td></tr>
-        <tr><td style="border-top:1px solid #e6e6e6;padding:24px 0 0;">
-          <p style="font-size:12px;line-height:1.6;color:#8a8a8a;margin:0;">
-            <a href="https://moonbeem.studio/privacy-policy" style="color:#8a8a8a;">Privacy</a>
-            &middot;
-            <a href="https://moonbeem.studio/terms-of-service" style="color:#8a8a8a;">Terms</a>
-          </p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body></html>
-```
+The template's only Supabase placeholder is `{{ .ConfirmationURL }}` (the magic-link URL).
 
 Click **Save**.
 
