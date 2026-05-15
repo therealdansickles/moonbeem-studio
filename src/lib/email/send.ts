@@ -16,7 +16,12 @@ function getResendFrom(): string {
       "RESEND_FROM_EMAIL is not set. Set the verified Resend sender (e.g. hello@moonbeem.studio) in .env.local.",
     );
   }
-  return from;
+  // If the env value already carries a display name ('Name <email>'),
+  // respect it. Otherwise wrap with 'Moonbeem' so inboxes render the
+  // brand instead of the local-part. Resend's API accepts either form
+  // in the From header.
+  if (from.includes("<")) return from;
+  return `Moonbeem <${from}>`;
 }
 
 function getResendKey(): string {
