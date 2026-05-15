@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ALLOWED_SOCIAL_PLATFORMS,
   type SocialPlatform,
@@ -42,6 +42,7 @@ export default function VerifySocialsCard({
 }: Props) {
   const [socials, setSocials] = useState<SocialRow[]>(initialSocials);
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   async function refresh(): Promise<void> {
     const res = await fetch("/api/me/socials", { cache: "no-store" });
@@ -55,6 +56,39 @@ export default function VerifySocialsCard({
   // can re-take the action they were blocked on.
   function handleVerified(): void {
     if (returnTo) router.push(returnTo);
+  }
+
+  // Prefill from URL query params (Block 2.5 → 2.5.1 follow-up).
+  // /me's "Edits to claim" CTA sends users here with
+  // ?platform=X&handle=Y so the right platform row auto-expands with
+  // the handle filled in. Skip silently when:
+  //   - either param missing
+  //   - platform isn't in the allowed list
+  //   - the user already has a verified or pending row for that
+  //     platform (don't clobber active state)
+  // Compute once from initialSocials (not the reactive `socials`) so
+  // a successful verify mid-page-life doesn't re-trigger the prefill.
+  const paramPlatform = searchParams.get("platform");
+  const paramHandle = searchParams.get("handle");
+  const prefillForPlatform: SocialPlatform | null = (() => {
+    if (!paramPlatform || !paramHandle) return null;
+    if (
+      !ALLOWED_SOCIAL_PLATFORMS.includes(paramPlatform as SocialPlatform)
+    ) {
+      return null;
+    }
+    const existing = initialSocials.find((s) => s.platform === paramPlatform);
+    if (existing?.verified_at) return null;
+    if (existing?.verification_code) return null;
+    return paramPlatform as SocialPlatform;
+  })();
+  let decodedHandle: string | null = null;
+  if (prefillForPlatform && paramHandle) {
+    try {
+      decodedHandle = decodeURIComponent(paramHandle);
+    } catch {
+      decodedHandle = null;
+    }
   }
 
   return (
@@ -77,6 +111,9 @@ export default function VerifySocialsCard({
               row={row}
               onChange={refresh}
               onVerified={handleVerified}
+              prefillHandle={
+                prefillForPlatform === p ? decodedHandle : null
+              }
             />
           );
         })}
@@ -90,6 +127,11 @@ type PlatformRowProps = {
   row: SocialRow | null;
   onChange: () => Promise<void>;
   onVerified: () => void;
+  // When non-null AND this row has no pending/verified state, the
+  // parent decided to prefill the handle input on mount + scroll
+  // this row into view. Computed in VerifySocialsCard from URL
+  // params; nullable here so per-row decoupling stays clean.
+  prefillHandle?: string | null;
 };
 
 function PlatformRow({
@@ -97,9 +139,28 @@ function PlatformRow({
   row,
   onChange,
   onVerified,
+  prefillHandle = null,
 }: PlatformRowProps) {
   const verified = !!row?.verified_at;
-  const [handleInput, setHandleInput] = useState("");
+  // Seed the input from the URL prefill on first render. Subsequent
+  // edits replace it normally — we don't keep "prefilled" as a
+  // separate state because there's no UX difference once the user
+  // sees the value.
+  const [handleInput, setHandleInput] = useState(prefillHandle ?? "");
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const didScrollRef = useRef(false);
+
+  // Smooth-scroll the prefilled row into view once on mount. Guarded
+  // by a ref so re-renders (e.g. visibility toggles, pending-state
+  // changes) don't keep yanking the page.
+  useEffect(() => {
+    if (!prefillHandle || didScrollRef.current) return;
+    didScrollRef.current = true;
+    rowRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+  }, [prefillHandle]);
   // Pending code state lives in-component (not persisted to DB-as-
   // user). On page refresh, pending state is lost; user re-starts.
   // Documented v1 tradeoff.
@@ -213,7 +274,10 @@ function PlatformRow({
   }
 
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.02] p-4">
+    <div
+      ref={rowRef}
+      className="rounded-lg border border-white/10 bg-white/[0.02] p-4"
+    >
       <div className="flex items-center gap-2">
         <PlatformIcon
           platform={platform}

@@ -323,7 +323,7 @@ export default async function MePage() {
                       </p>
                     </div>
                     <Link
-                      href="/me/edit?return_to=/me"
+                      href={`/me/edit?return_to=${encodeURIComponent("/me")}&platform=${stub.platform}&handle=${encodeURIComponent(stub.socialHandle)}`}
                       className="shrink-0 text-body-sm text-moonbeem-pink hover:opacity-90"
                     >
                       Verify to claim →

@@ -209,33 +209,51 @@ export async function getUnclaimedStubEditsForUser(
   const userHandle = (user?.handle as string | null) ?? null;
   if (!userHandle) return [];
 
-  // 2. User's owned creators + their verified socials.
+  // 2. User's owned creators + their verified socials. We carry the
+  // platform alongside the handle — see the comment on the match
+  // step below for why.
   const { data: ownedCreators } = await sb
     .from("creators")
     .select("id")
     .eq("user_id", userId)
     .is("deleted_at", null);
   const ownedIds = (ownedCreators ?? []).map((c) => c.id as string);
-  let verifiedHandles: string[] = [];
+  type VerifiedPair = { platform: string; handle: string };
+  let verifiedPairs: VerifiedPair[] = [];
   if (ownedIds.length > 0) {
     const { data: socials } = await sb
       .from("creator_socials")
-      .select("handle")
+      .select("platform, handle")
       .in("creator_id", ownedIds)
       .not("verified_at", "is", null);
-    verifiedHandles = (socials ?? [])
-      .map((s) => s.handle as string | null)
-      .filter((h): h is string => !!h);
+    verifiedPairs = (socials ?? [])
+      .filter((s) => !!s.handle)
+      .map((s) => ({
+        platform: s.platform as string,
+        handle: s.handle as string,
+      }));
   }
 
-  // 3. Normalized candidate handles (used for fuzzy match).
+  // 3. Normalized candidates per platform. user_handle is platform-
+  // agnostic (we know what handle the *human* uses on Moonbeem, not
+  // which platforms they live on); verified_social matching is
+  // platform-scoped — see match step.
   const normalize = (h: string) =>
     h.toLowerCase().replace(/[_.\s]/g, "");
   const normalizedUserHandle = normalize(userHandle);
-  const normalizedVerified = new Set(verifiedHandles.map(normalize));
-  const exactVerified = new Set(
-    verifiedHandles.map((h) => h.toLowerCase()),
-  );
+  // platform → { exact: Set<lowercase handle>, normalized: Set<normalized handle> }
+  const verifiedByPlatform = new Map<
+    string,
+    { exact: Set<string>; normalized: Set<string> }
+  >();
+  for (const v of verifiedPairs) {
+    const entry =
+      verifiedByPlatform.get(v.platform) ??
+      { exact: new Set<string>(), normalized: new Set<string>() };
+    entry.exact.add(v.handle.toLowerCase());
+    entry.normalized.add(normalize(v.handle));
+    verifiedByPlatform.set(v.platform, entry);
+  }
 
   // 4. Pull candidate stub socials. We over-fetch (any unverified
   // social on a stub) and filter in JS — the population is small
@@ -269,7 +287,15 @@ export async function getUnclaimedStubEditsForUser(
     }
     const normH = normalize(c.handle);
     let match: UnclaimedStub["matchType"] | null = null;
-    if (exactVerified.has(c.handle.toLowerCase()) || normalizedVerified.has(normH)) {
+    // verified_social matching is platform-scoped: @dansickles on
+    // Instagram and @dansickles on Twitter could be two different
+    // people. Do not loosen this without revisiting the claim flow.
+    const platformVerified = verifiedByPlatform.get(c.platform);
+    if (
+      platformVerified &&
+      (platformVerified.exact.has(c.handle.toLowerCase()) ||
+        platformVerified.normalized.has(normH))
+    ) {
       match = "verified_social";
     } else if (normH === normalizedUserHandle) {
       match = "user_handle";
