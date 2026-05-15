@@ -17,6 +17,7 @@ import { sendBrandedEmail } from "@/lib/email/send";
 import { buildWelcomeEmail } from "@/lib/email/welcome";
 import { buildFanEditEmail } from "@/lib/email/fan-edit";
 import { buildTitleRequestAlert } from "@/lib/email/title-request-alert";
+import { buildRequestFulfilledEmail } from "@/lib/email/request-fulfilled";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const VALID_TYPES = [
@@ -25,6 +26,7 @@ const VALID_TYPES = [
   "fan_edit_approved",
   "fan_edit_rejected",
   "title_request_alert",
+  "request_fulfilled",
 ] as const;
 type TestType = (typeof VALID_TYPES)[number];
 
@@ -100,6 +102,17 @@ export async function GET(request: NextRequest) {
         requesterHandle: sample.handle,
         requesterEmail: "requester@example.com",
         totalRequestersForTitle: 3,
+        origin,
+      });
+      break;
+    case "request_fulfilled":
+      rendered = buildRequestFulfilledEmail({
+        contentType: "clip",
+        contentCount: 3,
+        titleName: sample.titleName,
+        titleSlug: sample.titleSlug,
+        // Sample date so the "you requested these on…" line renders
+        requestedAtIso: new Date(Date.now() - 7 * 86_400_000).toISOString(),
         origin,
       });
       break;

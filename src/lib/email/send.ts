@@ -3,12 +3,7 @@
 // Calls Resend HTTP API directly (no SDK). Returns SendResult so
 // callers can route success/failure. Read RESEND_API_KEY +
 // RESEND_FROM_EMAIL at call time so config changes pick up without
-// redeploy churn on dev.
-//
-// Distinct from src/lib/notifications/send-title-update-email.ts —
-// that one is the title-update template body baked together with the
-// send. This module is the shared dispatch primitive new templates
-// call after they've rendered html + text.
+// redeploy churn on dev. Shared by every helper in src/lib/email/.
 
 export type SendResult =
   | { ok: true; resendMessageId: string }

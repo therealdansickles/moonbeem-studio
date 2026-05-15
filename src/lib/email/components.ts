@@ -5,8 +5,9 @@
 // element. Hex colors mirror src/app/globals.css brand tokens.
 //
 // Layout is a single 540px column, centered, white background, dark
-// text — the same dark-text-on-light-bg pattern as the existing
-// send-title-update-email.ts. Hot pink violet are reserved for CTAs.
+// text — Outlook-friendly nested-table structure. Violet is the
+// primary CTA color, magenta the accent for delivery/celebration
+// moments, navy reserved for secondary buttons.
 
 const COLORS = {
   bg: "#ffffff",
@@ -97,10 +98,15 @@ ${innerHtml}
 export function button(args: {
   href: string;
   label: string;
-  variant?: "primary" | "secondary";
+  variant?: "primary" | "secondary" | "accent";
 }): string {
   const { href, label } = args;
-  const bg = args.variant === "secondary" ? COLORS.navy : COLORS.violet;
+  const bg =
+    args.variant === "secondary"
+      ? COLORS.navy
+      : args.variant === "accent"
+        ? COLORS.magenta
+        : COLORS.violet;
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;"><tr><td style="border-radius:8px;background:${bg};">
     <a href="${href}" style="display:inline-block;padding:12px 22px;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;border-radius:8px;">${label}</a>
   </td></tr></table>`;

@@ -25,7 +25,8 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { sendTitleUpdateEmail } from "@/lib/notifications/send-title-update-email";
+import { sendRequestFulfilledEmail } from "@/lib/email/request-fulfilled";
+import { getOrigin } from "@/lib/email/origin";
 
 export type ContentType = "clip" | "still" | "fan_edit";
 
@@ -179,12 +180,21 @@ export async function drainQueue(
   const userIds = Array.from(new Set(claimed.map((r) => r.user_id)));
   const titleIds = Array.from(new Set(claimed.map((r) => r.title_id)));
 
-  const [usersRes, titlesRes, prefsRes] = await Promise.all([
+  // For requested_at — we want to show "you requested these on
+  // <date>" in the body. Pull title_requests for every (user, title)
+  // pairing in this batch. There's no composite filter helper in
+  // PostgREST so we over-fetch by title_id and key on the client side.
+  const [usersRes, titlesRes, prefsRes, requestsRes] = await Promise.all([
     sb.from("users").select("id, email").in("id", userIds),
     sb.from("titles").select("id, title, slug").in("id", titleIds),
     sb
       .from("notification_preferences")
       .select("user_id, email_on_title_updates, unsubscribe_token")
+      .in("user_id", userIds),
+    sb
+      .from("title_requests")
+      .select("user_id, title_id, request_type, requested_at")
+      .in("title_id", titleIds)
       .in("user_id", userIds),
   ]);
 
@@ -212,6 +222,14 @@ export async function drainQueue(
       },
     ]),
   );
+  // Key by (user_id, title_id, request_type) so we pick the right
+  // requested_at for each queue row's content_type.
+  const requestedAtMap = new Map<string, string>();
+  for (const r of requestsRes.data ?? []) {
+    const k = `${r.user_id}|${r.title_id}|${r.request_type}`;
+    requestedAtMap.set(k, r.requested_at as string);
+  }
+  const origin = getOrigin();
 
   for (const row of claimed) {
     if (Date.now() - startedAt > budgetMs) {
@@ -269,16 +287,32 @@ export async function drainQueue(
     // valid; user can hit /me/notifications to manage preferences.
     const unsubscribeToken = pref?.token ?? "";
 
+    // Look up requested_at for this (user, title, content_type) so
+    // the template can include the "you requested these on <date>"
+    // line. Missing row (unlikely but possible if the request was
+    // deleted between enqueue and drain) just omits the date.
+    const requestType =
+      row.content_type === "fan_edit" ? "fan_edits" : "clips_and_stills";
+    const requestedAtIso =
+      requestedAtMap.get(
+        `${row.user_id}|${row.title_id}|${requestType}`,
+      ) ?? null;
+
+    const unsubscribeUrl = unsubscribeToken
+      ? `${origin}/api/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`
+      : undefined;
+
     const sendStartedAt = Date.now();
     let sendResult;
     try {
-      sendResult = await sendTitleUpdateEmail({
+      sendResult = await sendRequestFulfilledEmail({
         to: email,
-        titleName: title.title,
-        titleSlug: title.slug,
         contentType: row.content_type,
         contentCount: row.content_ids.length,
-        unsubscribeToken,
+        titleName: title.title,
+        titleSlug: title.slug,
+        requestedAtIso,
+        unsubscribeUrl,
       });
     } catch (err) {
       sendResult = {

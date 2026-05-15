@@ -1,6 +1,7 @@
 import { NextResponse, after, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildPublicUrl } from "@/lib/r2/upload";
 import { notifyTitleRequesters } from "@/lib/notifications/notify-title-requesters";
 import { drainQueue } from "@/lib/email-queue";
@@ -89,6 +90,20 @@ export async function POST(request: NextRequest) {
   }
 
   const newIds = data.map((d) => d.id as string);
+
+  // Mark every clips_and_stills request for this title as fulfilled.
+  // Service-role because admin users don't own these rows.
+  try {
+    const admin = createServiceRoleClient();
+    await admin
+      .from("title_requests")
+      .update({ fulfilled_at: new Date().toISOString() })
+      .eq("title_id", body.title_id)
+      .eq("request_type", "clips_and_stills")
+      .is("fulfilled_at", null);
+  } catch (err) {
+    console.error("mark requests fulfilled failed (still batch)", err);
+  }
 
   let enqueuedIds: string[] = [];
   try {
