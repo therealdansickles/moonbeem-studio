@@ -98,7 +98,7 @@ export function buildFanEditEmail(args: BuildArgs): {
       ),
       button({ href: titleHref, label: "See your edit" }),
       paragraph(
-        "You'll start earning from views and clicks through your profile.",
+        "If there's an active campaign running for this title, you'll start earning from views and clicks through your profile.",
       ),
       signoff(),
     ].join("\n");
@@ -115,7 +115,7 @@ export function buildFanEditEmail(args: BuildArgs): {
       "",
       `See your edit: ${titleHref}`,
       "",
-      "You'll start earning from views and clicks through your profile.",
+      "If there's an active campaign running for this title, you'll start earning from views and clicks through your profile.",
       "",
       "More soon,",
       "Team Moonbeem",
