@@ -209,8 +209,19 @@ export function parseFanEditUrl(rawUrl: string): ParsedFanEditUrl | null {
   // Normalize to host + path (drop query + fragment + trailing slash)
   // so the same post submitted via shared link vs. browser-tab URL
   // dedupes correctly downstream.
+  //
+  // Instagram exception: a single shortcode is reachable via four
+  // path forms — /reel/, /reels/, /p/, /tv/. Without canonicalization,
+  // the same post submitted in different forms would create rows
+  // with different embed_url values (the post_id dedup still
+  // catches them, but downstream consumers would see inconsistent
+  // URLs). Force /reel/{shortcode} on www.instagram.com — IG
+  // redirects between forms in the browser regardless, so all four
+  // remain reachable from a single canonical stored URL.
   const normalizedUrl =
-    `https://${parsed.host}${parsed.pathname.replace(/\/$/, "")}`;
+    platform === "instagram"
+      ? `https://www.instagram.com/reel/${contentId}`
+      : `https://${parsed.host}${parsed.pathname.replace(/\/$/, "")}`;
 
   return { platform, contentId, handle, normalizedUrl };
 }
