@@ -3,17 +3,27 @@
 // Stills tab on /t/[slug]. The lightbox's Download toolbar button is
 // gated (Gating Phase 2): a custom download function routes through
 // /api/stills/[id]/download, which runs the tier/quota check and
-// proxies the bytes. A 403 opens the GateModal.
+// proxies the bytes.
 //
-// The quota affordance ("N left") rides in the lightbox toolbar
-// (Option 2 — custom toolbar node) since stills have no per-card
-// download button — download lives only in the lightbox.
+// On a 403 the feedback is INLINE in the lightbox toolbar — not the
+// GateModal. The GateModal renders at z-50 and the lightbox sits on
+// top of it, so a modal triggered from inside the lightbox is
+// invisible until the lightbox closes. Instead, the toolbar's
+// Download button is replaced with a navigation CTA keyed to the
+// gate reason. (Stills download has no entry point outside the
+// lightbox, so the GateModal isn't used here at all.)
+//
+// Gate-state lifetime: limit_reached / verification_required persist
+// across lightbox open/close (the quota fact doesn't change);
+// auth_required resets on close (the user may be mid-sign-in).
 //
 // SOFT GATE: still.file_url is still a public R2 URL (the photo grid
 // + lightbox need it), so this gates the Download UI flow, not the
 // bytes. Hard enforcement is the Phase 4 backlog.
 
 import { useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { RowsPhotoAlbum, type Photo } from "react-photo-album";
 import "react-photo-album/rows.css";
 import Lightbox from "yet-another-react-lightbox";
@@ -22,7 +32,6 @@ import "yet-another-react-lightbox/styles.css";
 import type { Still } from "@/lib/queries/titles";
 import type { Tier } from "@/lib/gating/types";
 import { gateMap } from "@/lib/gating/gate-map";
-import GateModal from "@/components/gating/GateModal";
 
 type GateReason =
   | "auth_required"
@@ -51,13 +60,10 @@ export default function StillsTab({
   tier,
   stillDownloadUsage,
 }: Props) {
+  const pathname = usePathname();
   const [index, setIndex] = useState(-1);
   const [usage, setUsage] = useState(stillDownloadUsage);
-  const [gate, setGate] = useState<{
-    reason: GateReason;
-    limit?: number;
-    used?: number;
-  } | null>(null);
+  const [gateReason, setGateReason] = useState<GateReason | null>(null);
 
   if (!stills || stills.length === 0) {
     return (
@@ -95,6 +101,27 @@ export default function StillsTab({
       ? `${SIGNED_IN_STILL_LIMIT - usage} left`
       : null;
 
+  // Inline CTA shown in place of the Download button once a 403 has
+  // come back — label + navigation target keyed to the gate reason.
+  const encodedPath = encodeURIComponent(pathname || "/");
+  const gateCta =
+    gateReason === "auth_required"
+      ? {
+          label: "Sign in to download",
+          href: `/login?redirect_to=${encodedPath}`,
+        }
+      : gateReason === "limit_reached"
+        ? {
+            label: "Verify to download",
+            href: `/me/edit?return_to=${encodedPath}`,
+          }
+        : gateReason === "verification_required"
+          ? {
+              label: "Verify a handle",
+              href: `/me/edit?return_to=${encodedPath}`,
+            }
+          : null;
+
   async function handleDownload({
     slide,
   }: {
@@ -108,14 +135,11 @@ export default function StillsTab({
       if (res.status === 403) {
         const json = (await res.json().catch(() => ({}))) as {
           error?: GateReason;
-          limit?: number;
           used?: number;
         };
-        setGate({
-          reason: json.error ?? "auth_required",
-          limit: json.limit,
-          used: json.used,
-        });
+        // Inline toolbar feedback — NOT a modal (the lightbox would
+        // hide it). The toolbar swaps Download for the CTA below.
+        setGateReason(json.error ?? "auth_required");
         if (typeof json.used === "number") setUsage(json.used);
         return;
       }
@@ -135,6 +159,15 @@ export default function StillsTab({
     }
   }
 
+  function handleClose() {
+    setIndex(-1);
+    // auth_required is ephemeral — the user may be about to sign in,
+    // and a fresh page load resets everything anyway. limit_reached /
+    // verification_required persist: that state doesn't change by
+    // closing the lightbox.
+    if (gateReason === "auth_required") setGateReason(null);
+  }
+
   return (
     <>
       <RowsPhotoAlbum
@@ -146,13 +179,24 @@ export default function StillsTab({
       <Lightbox
         open={index >= 0}
         index={index}
-        close={() => setIndex(-1)}
+        close={handleClose}
         slides={slides}
         plugins={[Download]}
         download={{ download: handleDownload }}
         toolbar={{
           buttons: [
-            quotaLabel ? (
+            // Once gated, the CTA replaces both the quota label and
+            // the Download button. Clicking it navigates away, which
+            // unmounts the lightbox naturally.
+            gateCta ? (
+              <Link
+                key="still-gate-cta"
+                href={gateCta.href}
+                className="yarl__button px-2 text-body-sm text-moonbeem-pink hover:opacity-80"
+              >
+                {gateCta.label}
+              </Link>
+            ) : quotaLabel ? (
               <span
                 key="still-quota"
                 className="yarl__button px-2 text-body-sm text-moonbeem-ink-muted"
@@ -160,22 +204,10 @@ export default function StillsTab({
                 {quotaLabel}
               </span>
             ) : null,
-            "download",
+            gateCta ? null : "download",
             "close",
           ],
         }}
-      />
-
-      <GateModal
-        open={!!gate}
-        onClose={() => setGate(null)}
-        reason={gate?.reason ?? "auth_required"}
-        limit={gate?.limit}
-        used={gate?.used}
-        capabilityType="stills"
-        returnTo={
-          typeof window !== "undefined" ? window.location.pathname : "/"
-        }
       />
     </>
   );
