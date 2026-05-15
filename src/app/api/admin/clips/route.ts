@@ -6,13 +6,23 @@ import { notifyTitleRequesters } from "@/lib/notifications/notify-title-requeste
 import { drainQueue } from "@/lib/email-queue";
 import { enforce } from "@/lib/ratelimit";
 
-type Body = {
-  title_id?: string;
-  key?: string;
+// Batched admin clip upload. One POST per batch = one notify call per
+// requester = one email per (requester, batch). Pre-2026-05-15 this
+// route took one clip per POST, so a 5-clip batch fan-fired 5 separate
+// emails to each requester — the fix is to accept items[] and bulk-
+// insert in a single request.
+
+type Item = {
+  key: string;
   label?: string | null;
   content_type?: string | null;
   file_size_bytes?: number | null;
   duration_seconds?: number | null;
+};
+
+type Body = {
+  title_id?: string;
+  items?: Item[];
 };
 
 export async function POST(request: NextRequest) {
@@ -27,15 +37,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid json" }, { status: 400 });
   }
 
-  if (!body.title_id || !body.key) {
+  if (!body.title_id) {
+    return NextResponse.json({ error: "title_id required" }, { status: 400 });
+  }
+  const items = Array.isArray(body.items) ? body.items : [];
+  if (items.length === 0) {
     return NextResponse.json(
-      { error: "title_id and key required" },
+      { error: "items[] required (at least one)" },
       { status: 400 },
     );
+  }
+  for (const item of items) {
+    if (!item.key) {
+      return NextResponse.json(
+        { error: "each item requires key" },
+        { status: 400 },
+      );
+    }
   }
 
   const supabase = await createClient();
 
+  // Single max-order read, then offset each item.
   const { data: maxRow } = await supabase
     .from("clips")
     .select("display_order")
@@ -43,52 +66,54 @@ export async function POST(request: NextRequest) {
     .order("display_order", { ascending: false })
     .limit(1)
     .maybeSingle();
-  const nextOrder = (maxRow?.display_order ?? -1) + 1;
+  const baseOrder = (maxRow?.display_order ?? -1) + 1;
 
-  const insert = {
+  const inserts = items.map((item, i) => ({
     title_id: body.title_id,
-    file_url: buildPublicUrl(body.key),
-    label: body.label?.trim() || null,
-    content_type: body.content_type ?? null,
-    file_size_bytes: body.file_size_bytes ?? null,
-    duration_seconds: body.duration_seconds ?? null,
-    display_order: nextOrder,
-  };
+    file_url: buildPublicUrl(item.key),
+    label: item.label?.trim() || null,
+    content_type: item.content_type ?? null,
+    file_size_bytes: item.file_size_bytes ?? null,
+    duration_seconds: item.duration_seconds ?? null,
+    display_order: baseOrder + i,
+  }));
 
   const { data, error } = await supabase
     .from("clips")
-    .insert(insert)
-    .select()
-    .single();
+    .insert(inserts)
+    .select();
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error || !data) {
+    return NextResponse.json(
+      { error: error?.message ?? "insert failed" },
+      { status: 500 },
+    );
   }
 
-  // Enqueue synchronously (fast: 1 INSERT). Drain on the after()
-  // hot path so the admin upload response returns immediately and
-  // delivery happens out-of-band. Cron is the safety net for any
-  // queue rows the hot-path drain doesn't reach.
+  const newIds = data.map((d) => d.id as string);
+
+  // One notify call for the whole batch — each requester gets one
+  // email row referencing all N clip ids via content_ids[].
   let enqueuedIds: string[] = [];
   try {
     const notify = await notifyTitleRequesters({
       titleId: body.title_id,
       contentType: "clip",
-      contentIds: [data.id as string],
+      contentIds: newIds,
     });
     enqueuedIds = notify.enqueuedIds;
   } catch (err) {
-    console.error("notifyTitleRequesters failed (clip)", err);
+    console.error("notifyTitleRequesters failed (clip batch)", err);
   }
   if (enqueuedIds.length > 0) {
     after(async () => {
       try {
         await drainQueue({ ids: enqueuedIds, budgetMs: 25_000 });
       } catch (err) {
-        console.error("after() drainQueue failed (clip)", err);
+        console.error("after() drainQueue failed (clip batch)", err);
       }
     });
   }
 
-  return NextResponse.json(data, { status: 201 });
+  return NextResponse.json({ clips: data }, { status: 201 });
 }

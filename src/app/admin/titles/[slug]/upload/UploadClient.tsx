@@ -4,7 +4,18 @@ import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 
 type Kind = "clip" | "still";
-type Status = "pending" | "uploading" | "done" | "error";
+type Status = "pending" | "uploading" | "staged" | "done" | "error";
+
+// Metadata captured after R2 upload, batched and committed in a single
+// POST per kind so notifyTitleRequesters fires once per batch (one
+// email per requester per upload session, not per file).
+type StagedMeta = {
+  key: string;
+  contentType: string;
+  width?: number | null;
+  height?: number | null;
+  duration?: number | null;
+};
 
 type Item = {
   id: string;
@@ -14,6 +25,7 @@ type Item = {
   status: Status;
   progress: number;
   error?: string;
+  staged?: StagedMeta;
 };
 
 type Props = {
@@ -133,11 +145,27 @@ export default function UploadClient({ titleId, titleName, titleSlug }: Props) {
     setItems((prev) => prev.filter((i) => i.id !== id));
   }
 
-  async function uploadOne(item: Item) {
+  // R2 stage only — no metadata POST. Returns the staged meta so the
+  // caller can batch-commit without re-reading React state (avoids
+  // StrictMode double-fire on setItems-as-getter).
+  async function stageOne(item: Item): Promise<{
+    itemId: string;
+    kind: Kind;
+    label: string;
+    fileSize: number;
+    staged?: StagedMeta;
+    error?: string;
+  }> {
     const ext = extOf(item.file);
     if (!ext) {
       setItem(item.id, { status: "error", error: "no extension" });
-      return;
+      return {
+        itemId: item.id,
+        kind: item.kind,
+        label: item.label,
+        fileSize: item.file.size,
+        error: "no extension",
+      };
     }
 
     const index = Date.now() + Math.floor(Math.random() * 1000);
@@ -190,42 +218,86 @@ export default function UploadClient({ titleId, titleName, titleSlug }: Props) {
         duration = await probeVideoDuration(item.file);
       }
 
-      const metaEndpoint =
-        item.kind === "clip" ? "/api/admin/clips" : "/api/admin/stills";
-      const metaBody =
-        item.kind === "clip"
-          ? {
-              title_id: titleId,
-              key,
-              label: item.label,
-              content_type: contentType,
-              file_size_bytes: item.file.size,
-              duration_seconds: duration,
-            }
-          : {
-              title_id: titleId,
-              key,
-              alt_text: item.label,
-              content_type: contentType,
-              file_size_bytes: item.file.size,
-              width: dims?.width ?? null,
-              height: dims?.height ?? null,
-            };
-
-      const metaRes = await fetch(metaEndpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(metaBody),
-      });
-      if (!metaRes.ok) {
-        const t = await metaRes.text();
-        throw new Error(`metadata ${metaRes.status}: ${t.slice(0, 200)}`);
-      }
-
-      setItem(item.id, { status: "done", progress: 100 });
+      const staged: StagedMeta = {
+        key,
+        contentType,
+        width: dims?.width ?? null,
+        height: dims?.height ?? null,
+        duration,
+      };
+      setItem(item.id, { status: "staged", progress: 100, staged });
+      return {
+        itemId: item.id,
+        kind: item.kind,
+        label: item.label,
+        fileSize: item.file.size,
+        staged,
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setItem(item.id, { status: "error", error: msg });
+      return {
+        itemId: item.id,
+        kind: item.kind,
+        label: item.label,
+        fileSize: item.file.size,
+        error: msg,
+      };
+    }
+  }
+
+  type StagedResult = Awaited<ReturnType<typeof stageOne>>;
+
+  // Commit a single batch (one kind, the staged subset). Returns the
+  // outcome by itemId so the caller can apply done/error transitions.
+  async function commitBatch(
+    kind: Kind,
+    staged: StagedResult[],
+  ): Promise<{ committed: string[]; failed: string[]; error?: string }> {
+    if (staged.length === 0) return { committed: [], failed: [] };
+    const endpoint =
+      kind === "clip" ? "/api/admin/clips" : "/api/admin/stills";
+    const items =
+      kind === "clip"
+        ? staged.map((s) => ({
+            key: s.staged!.key,
+            label: s.label,
+            content_type: s.staged!.contentType,
+            file_size_bytes: s.fileSize,
+            duration_seconds: s.staged!.duration,
+          }))
+        : staged.map((s) => ({
+            key: s.staged!.key,
+            alt_text: s.label,
+            content_type: s.staged!.contentType,
+            file_size_bytes: s.fileSize,
+            width: s.staged!.width ?? null,
+            height: s.staged!.height ?? null,
+          }));
+
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title_id: titleId, items }),
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        const msg = `metadata ${res.status}: ${t.slice(0, 200)}`;
+        return {
+          committed: [],
+          failed: staged.map((s) => s.itemId),
+          error: msg,
+        };
+      }
+      return { committed: staged.map((s) => s.itemId), failed: [] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        committed: [],
+        failed: staged.map((s) => s.itemId),
+        error: msg,
+      };
     }
   }
 
@@ -235,9 +307,44 @@ export default function UploadClient({ titleId, titleName, titleSlug }: Props) {
     const pending = items.filter(
       (i) => i.status === "pending" || i.status === "error",
     );
+    // R2 stage — sequential, per-file progress preserved. Collect
+    // staged metadata in a local array so we don't have to re-read
+    // React state (which is stale until the next render).
+    const stagedResults: StagedResult[] = [];
     for (const item of pending) {
-      await uploadOne(item);
+      const result = await stageOne(item);
+      stagedResults.push(result);
     }
+    const ok = stagedResults.filter((s) => s.staged);
+    const stagedClips = ok.filter((s) => s.kind === "clip");
+    const stagedStills = ok.filter((s) => s.kind === "still");
+
+    const [clipOut, stillOut] = await Promise.all([
+      commitBatch("clip", stagedClips),
+      commitBatch("still", stagedStills),
+    ]);
+
+    setItems((cur) =>
+      cur.map((it) => {
+        if (clipOut.committed.includes(it.id))
+          return { ...it, status: "done" as Status };
+        if (stillOut.committed.includes(it.id))
+          return { ...it, status: "done" as Status };
+        if (clipOut.failed.includes(it.id))
+          return {
+            ...it,
+            status: "error" as Status,
+            error: clipOut.error ?? "commit failed",
+          };
+        if (stillOut.failed.includes(it.id))
+          return {
+            ...it,
+            status: "error" as Status,
+            error: stillOut.error ?? "commit failed",
+          };
+        return it;
+      }),
+    );
     setBusy(false);
     setDone(true);
   }
@@ -334,6 +441,7 @@ export default function UploadClient({ titleId, titleName, titleSlug }: Props) {
                     <div className="flex items-center gap-3 shrink-0">
                       <span className="text-body-sm text-moonbeem-ink-muted">
                         {it.status === "uploading" && `${it.progress}%`}
+                        {it.status === "staged" && "committing..."}
                         {it.status === "done" && "done"}
                         {it.status === "error" && "error"}
                         {it.status === "pending" && "pending"}
@@ -355,7 +463,11 @@ export default function UploadClient({ titleId, titleName, titleSlug }: Props) {
                     onChange={(e) =>
                       setItem(it.id, { label: e.target.value })
                     }
-                    disabled={it.status === "uploading" || it.status === "done"}
+                    disabled={
+                      it.status === "uploading" ||
+                      it.status === "staged" ||
+                      it.status === "done"
+                    }
                     placeholder={
                       it.kind === "clip" ? "Label" : "Alt text / caption"
                     }
