@@ -8,7 +8,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { enforce } from "@/lib/ratelimit";
-import { parseFanEditUrl } from "@/lib/fan-edits/url-parser";
+import { parseFanEditUrl, resolveFanEditUrl } from "@/lib/fan-edits/url-parser";
 import { adminInsertFanEdit } from "@/lib/fan-edits/insert";
 import type { FetchEngagementResult } from "@/lib/ensembledata/client";
 
@@ -59,7 +59,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const parsed = parseFanEditUrl(body.url);
+  // Defensive resolve — the standard single-URL flow goes through
+  // /fetch-metadata first which already resolves short-links, but
+  // direct API callers (curl, manual replay) might pass a raw
+  // tiktok.com/t/... URL. No-op fast path for non-short-link URLs.
+  const resolved = await resolveFanEditUrl(body.url);
+  if (!resolved.ok) {
+    return NextResponse.json({ error: resolved.reason }, { status: 400 });
+  }
+  const parsed = parseFanEditUrl(resolved.url);
   if (!parsed) {
     return NextResponse.json(
       { error: "URL not recognized for any supported platform" },

@@ -13,7 +13,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { parseFanEditUrl } from "@/lib/fan-edits/url-parser";
+import { parseFanEditUrl, resolveFanEditUrl } from "@/lib/fan-edits/url-parser";
 import { fetchEngagementMetrics } from "@/lib/ensembledata/client";
 import { proxyThumbnailToR2 } from "@/lib/fan-edits/thumbnail-proxy";
 
@@ -48,7 +48,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "url required" }, { status: 400 });
   }
 
-  const parsed = parseFanEditUrl(rawUrl);
+  // TikTok mobile-share URLs (vm./vt./tiktok.com/t/) don't carry the
+  // canonical video id in the path — HEAD-follow to the final URL
+  // before parsing. No-op for everything else.
+  const resolved = await resolveFanEditUrl(rawUrl);
+  if (!resolved.ok) {
+    return NextResponse.json({ error: resolved.reason }, { status: 400 });
+  }
+
+  const parsed = parseFanEditUrl(resolved.url);
   if (!parsed) {
     return NextResponse.json(
       {

@@ -14,7 +14,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { parseFanEditUrl } from "@/lib/fan-edits/url-parser";
+import {
+  parseFanEditUrl,
+  resolveFanEditUrl,
+  type ResolveResult,
+} from "@/lib/fan-edits/url-parser";
 import { parseCsv, indexHeaders, getCol } from "@/lib/fan-edits/csv";
 
 const MAX_ROWS = 100;
@@ -105,6 +109,29 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Pre-resolve TikTok short-links in parallel before the row loop.
+  // resolveFanEditUrl is a no-op for non-short-link URLs (returns
+  // immediately with the raw URL), so pre-resolving everything is
+  // cheap — only short-links pay the redirect-follow cost. Chunk at
+  // 10 concurrent to avoid hammering TikTok. Cache results per-URL so
+  // a duplicate short-link in the CSV resolves once.
+  const rawUrlsForResolve = Array.from(
+    new Set(
+      dataRows
+        .map((row) => getCol(row, headerIdx, "url"))
+        .filter((u): u is string => !!u),
+    ),
+  );
+  const resolveCache = new Map<string, ResolveResult>();
+  const RESOLVE_CONCURRENCY = 10;
+  for (let i = 0; i < rawUrlsForResolve.length; i += RESOLVE_CONCURRENCY) {
+    const batch = rawUrlsForResolve.slice(i, i + RESOLVE_CONCURRENCY);
+    const results = await Promise.all(batch.map((u) => resolveFanEditUrl(u)));
+    for (let j = 0; j < batch.length; j++) {
+      resolveCache.set(batch[j], results[j]);
+    }
+  }
+
   const sb = createServiceRoleClient();
   const out: PreviewRowOut[] = [];
 
@@ -148,7 +175,37 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    const parsed = parseFanEditUrl(rawUrl);
+    // Use the pre-resolved URL if resolve succeeded; surface resolve
+    // failures (timeout, login wall, etc) as skip rows with the
+    // reason from resolveFanEditUrl. Both errors land in the same
+    // "skip + error" UI affordance.
+    const resolved = resolveCache.get(rawUrl);
+    if (resolved && !resolved.ok) {
+      out.push({
+        idx,
+        rawUrl,
+        platform: null,
+        contentId: null,
+        normalizedUrl: null,
+        handle: handleRaw,
+        suggestedTitleQuery: suggestedTitleQ,
+        suggestedYear: yearParsed,
+        notes,
+        suggestion: {
+          titleId: null,
+          titleName: null,
+          titleSlug: null,
+          year: null,
+          distributor: null,
+          confidence: "none",
+        },
+        status: "skip",
+        error: resolved.reason,
+      });
+      continue;
+    }
+    const urlForParse = resolved?.ok ? resolved.url : rawUrl;
+    const parsed = parseFanEditUrl(urlForParse);
     if (!parsed) {
       out.push({
         idx,
