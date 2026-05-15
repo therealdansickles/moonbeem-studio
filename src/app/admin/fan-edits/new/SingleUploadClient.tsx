@@ -1,12 +1,24 @@
 "use client";
 
-// Single-URL admin fan-edit upload. Three phases:
-//   1. URL entry — platform detected from host as you type
-//   2. Metadata fetch — POSTs to /fetch-metadata, populates preview
-//   3. Attribution + submit — debounced title search, POST to /single
+// Single-URL admin fan-edit upload.
 //
-// The metrics returned by /fetch-metadata are kept in client state
-// and passed back to /single so the insert path doesn't re-fetch.
+// Phases:
+//   1. URL entry — platform detected from host as you type
+//   2. Metadata fetch — POSTs to /fetch-metadata, populates preview +
+//      auto-resolves the social handle to a Moonbeem creator via
+//      creator_socials
+//   3. Attribution
+//      a. Social attribution (read-only): "Posted by @<handle> on
+//         <Platform>" — what the post says
+//      b. Network attribution: auto-resolved creator with avatar, or
+//         "no registered creator" + override picker against the
+//         creators table
+//      c. Title attribution (debounced search_titles_admin)
+//   4. Submit → /single with attributed_creator_id when set
+//
+// The metrics returned by /fetch-metadata are cached and passed back
+// to /single so the insert path doesn't re-fetch. Thumbnail is
+// proxied to R2 at preview time so the <img> renders reliably.
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
@@ -21,14 +33,27 @@ type TitleResult = {
   distributor: string | null;
 };
 
+type CreatorResult = {
+  id: string;
+  moonbeem_handle: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  user_id?: string | null;
+  verified_at?: string | null;
+};
+
 type MetadataResponse = {
   ok: true;
   parsed: ParsedFanEditUrl;
   metrics: FetchEngagementResult;
+  resolvedCreator: CreatorResult | null;
+  sourceHandle: string | null;
+  postTypeLabel: string | null;
 };
 
 const SEARCH_DEBOUNCE_MS = 300;
 const MIN_QUERY_LEN = 2;
+const CREATOR_MIN_QUERY_LEN = 1;
 
 function formatNumber(n: number | null | undefined): string {
   if (n == null) return "—";
@@ -53,7 +78,18 @@ export default function SingleUploadClient() {
   const [metadata, setMetadata] = useState<MetadataResponse | null>(null);
   const [metadataError, setMetadataError] = useState<string | null>(null);
 
-  const [handleOverride, setHandleOverride] = useState("");
+  // Network attribution. When null, save uses the auto-resolved
+  // creator from metadata.resolvedCreator (if any). When set, it
+  // overrides — and if metadata.resolvedCreator is also null this is
+  // what flips us from Path 2 (stub) to Path 1 (direct).
+  const [creatorOverride, setCreatorOverride] = useState<CreatorResult | null>(
+    null,
+  );
+  const [creatorPickerOpen, setCreatorPickerOpen] = useState(false);
+  const [creatorQuery, setCreatorQuery] = useState("");
+  const [creatorResults, setCreatorResults] = useState<CreatorResult[]>([]);
+  const [creatorSearching, setCreatorSearching] = useState(false);
+
   const [notes, setNotes] = useState("");
 
   const [titleQuery, setTitleQuery] = useState("");
@@ -65,7 +101,8 @@ export default function SingleUploadClient() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const searchAbort = useRef<AbortController | null>(null);
+  const titleSearchAbort = useRef<AbortController | null>(null);
+  const creatorSearchAbort = useRef<AbortController | null>(null);
 
   // Detect platform as user types (cheap, no API call).
   useEffect(() => {
@@ -74,7 +111,6 @@ export default function SingleUploadClient() {
       setParseError(null);
       return;
     }
-    // Lazy-parse without hitting the server.
     let detected: ParsedFanEditUrl | null = null;
     try {
       const u = new URL(url.trim());
@@ -98,7 +134,7 @@ export default function SingleUploadClient() {
         };
       }
     } catch {
-      // ignore — parse error shown below if user keeps typing
+      // ignore
     }
     setParsed(detected);
     setParseError(detected ? null : "URL not recognized");
@@ -113,9 +149,9 @@ export default function SingleUploadClient() {
       return;
     }
     const timer = window.setTimeout(async () => {
-      searchAbort.current?.abort();
+      titleSearchAbort.current?.abort();
       const ctrl = new AbortController();
-      searchAbort.current = ctrl;
+      titleSearchAbort.current = ctrl;
       setTitleSearching(true);
       try {
         const res = await fetch(
@@ -129,9 +165,7 @@ export default function SingleUploadClient() {
         const json = (await res.json()) as { results?: TitleResult[] };
         setTitleResults(json.results ?? []);
       } catch (err) {
-        if ((err as Error).name !== "AbortError") {
-          setTitleResults([]);
-        }
+        if ((err as Error).name !== "AbortError") setTitleResults([]);
       } finally {
         setTitleSearching(false);
       }
@@ -139,11 +173,45 @@ export default function SingleUploadClient() {
     return () => window.clearTimeout(timer);
   }, [titleQuery]);
 
+  // Debounced creator search.
+  useEffect(() => {
+    if (!creatorPickerOpen) return;
+    const q = creatorQuery.trim();
+    if (q.length < CREATOR_MIN_QUERY_LEN) {
+      setCreatorResults([]);
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      creatorSearchAbort.current?.abort();
+      const ctrl = new AbortController();
+      creatorSearchAbort.current = ctrl;
+      setCreatorSearching(true);
+      try {
+        const res = await fetch(
+          `/api/admin/creators/search?q=${encodeURIComponent(q)}&limit=10`,
+          { signal: ctrl.signal },
+        );
+        if (!res.ok) {
+          setCreatorResults([]);
+          return;
+        }
+        const json = (await res.json()) as { results?: CreatorResult[] };
+        setCreatorResults(json.results ?? []);
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") setCreatorResults([]);
+      } finally {
+        setCreatorSearching(false);
+      }
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [creatorQuery, creatorPickerOpen]);
+
   async function fetchMetadata() {
     if (!url.trim() || !parsed) return;
     setFetching(true);
     setMetadataError(null);
     setMetadata(null);
+    setCreatorOverride(null);
     try {
       const res = await fetch("/api/admin/fan-edits/fetch-metadata", {
         method: "POST",
@@ -165,6 +233,10 @@ export default function SingleUploadClient() {
     }
   }
 
+  // Effective network attribution = override > auto-resolved > null.
+  const effectiveCreator: CreatorResult | null =
+    creatorOverride ?? metadata?.resolvedCreator ?? null;
+
   async function submit() {
     if (!metadata || !selectedTitle) return;
     setSubmitting(true);
@@ -177,7 +249,8 @@ export default function SingleUploadClient() {
         body: JSON.stringify({
           url: metadata.parsed.normalizedUrl,
           title_id: selectedTitle.id,
-          handle: handleOverride.trim() || undefined,
+          handle: metadata.sourceHandle ?? undefined,
+          attributed_creator_id: effectiveCreator?.id ?? null,
           notes: notes.trim() || undefined,
           metrics: metadata.metrics,
         }),
@@ -192,7 +265,10 @@ export default function SingleUploadClient() {
       setUrl("");
       setParsed(null);
       setMetadata(null);
-      setHandleOverride("");
+      setCreatorOverride(null);
+      setCreatorPickerOpen(false);
+      setCreatorQuery("");
+      setCreatorResults([]);
       setNotes("");
       setTitleQuery("");
       setSelectedTitle(null);
@@ -207,7 +283,7 @@ export default function SingleUploadClient() {
   const canSubmit =
     !!metadata && !!selectedTitle && !submitting && !fetching;
 
-  const showResults =
+  const showTitleResults =
     titleResults.length > 0 && titleQuery.trim().length >= MIN_QUERY_LEN;
 
   return (
@@ -249,6 +325,7 @@ export default function SingleUploadClient() {
                 setUrl(e.target.value);
                 setMetadata(null);
                 setMetadataError(null);
+                setCreatorOverride(null);
               }}
               placeholder="https://www.tiktok.com/@handle/video/..."
               className={`w-full bg-transparent border ${
@@ -273,9 +350,7 @@ export default function SingleUploadClient() {
 
           {metadataError && (
             <p className="text-body-sm text-moonbeem-magenta">
-              We couldn&apos;t fetch metadata for this URL ({metadataError}). You
-              can still proceed; counts will populate on the next view-tracking
-              sweep.
+              We couldn&apos;t fetch metadata for this URL ({metadataError}).
             </p>
           )}
 
@@ -300,17 +375,16 @@ export default function SingleUploadClient() {
                   {platformLabel(metadata.parsed.platform)} ·{" "}
                   {metadata.parsed.contentId}
                 </p>
-                <p className="text-body text-moonbeem-ink">
-                  @
-                  {metadata.parsed.handle ??
-                    metadata.metrics.creator_handle_displayed ??
-                    "unknown"}
-                </p>
                 <p className="text-body-sm text-moonbeem-ink-muted">
                   {formatNumber(metadata.metrics.view_count)} views ·{" "}
                   {formatNumber(metadata.metrics.like_count)} likes ·{" "}
                   {formatNumber(metadata.metrics.comment_count)} comments
                 </p>
+                {metadata.postTypeLabel && (
+                  <p className="text-body-sm text-moonbeem-ink-subtle">
+                    {metadata.postTypeLabel}
+                  </p>
+                )}
                 {metadata.metrics.posted_at && (
                   <p className="text-body-sm text-moonbeem-ink-subtle">
                     Posted{" "}
@@ -328,24 +402,147 @@ export default function SingleUploadClient() {
         </div>
 
         {metadata && (
-          <div className="flex flex-col gap-4">
-            <label className="flex flex-col gap-1">
-              <span className="text-body-sm text-moonbeem-ink-muted">
-                Handle override (optional)
+          <div className="flex flex-col gap-5">
+            {/* Social attribution (read-only) */}
+            <div className="flex flex-col gap-1 rounded-md border border-white/10 bg-white/[0.02] p-3">
+              <span className="text-body-sm text-moonbeem-ink-subtle uppercase tracking-wider">
+                Posted by
               </span>
-              <input
-                type="text"
-                value={handleOverride}
-                onChange={(e) => setHandleOverride(e.target.value)}
-                placeholder={
-                  metadata.parsed.handle ??
-                  metadata.metrics.creator_handle_displayed ??
-                  ""
-                }
-                className="w-full bg-transparent border border-white/15 rounded-md px-3 py-2 text-body text-moonbeem-ink placeholder:text-moonbeem-ink-subtle focus:outline-none focus:border-moonbeem-pink"
-              />
-            </label>
+              <p className="text-body text-moonbeem-ink">
+                {metadata.sourceHandle
+                  ? `@${metadata.sourceHandle}`
+                  : "(handle not detected)"}{" "}
+                <span className="text-moonbeem-ink-subtle">
+                  on {platformLabel(metadata.parsed.platform)}
+                </span>
+              </p>
+            </div>
 
+            {/* Network attribution */}
+            <div className="flex flex-col gap-2 rounded-md border border-white/10 bg-white/[0.02] p-3">
+              <span className="text-body-sm text-moonbeem-ink-subtle uppercase tracking-wider">
+                Attributed to
+              </span>
+
+              {effectiveCreator ? (
+                <div className="flex items-center gap-3">
+                  {effectiveCreator.avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={effectiveCreator.avatar_url}
+                      alt=""
+                      width={40}
+                      height={40}
+                      className="rounded-full bg-black/40 object-cover"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full bg-black/40 flex items-center justify-center text-body-sm text-moonbeem-ink-subtle">
+                      {effectiveCreator.moonbeem_handle.slice(0, 1).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="flex flex-col min-w-0">
+                    <p className="text-body text-moonbeem-ink">
+                      {effectiveCreator.display_name ??
+                        `@${effectiveCreator.moonbeem_handle}`}
+                    </p>
+                    <p className="text-body-sm text-moonbeem-ink-subtle">
+                      @{effectiveCreator.moonbeem_handle}
+                      {creatorOverride
+                        ? " · admin override"
+                        : metadata.resolvedCreator
+                          ? " · auto-resolved from social handle"
+                          : ""}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreatorOverride(null);
+                      setCreatorPickerOpen(true);
+                      setCreatorQuery("");
+                    }}
+                    className="ml-auto text-body-sm text-moonbeem-ink-muted hover:text-moonbeem-pink"
+                  >
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <p className="text-body-sm text-moonbeem-ink-muted">
+                    No registered Moonbeem creator for{" "}
+                    {metadata.sourceHandle
+                      ? `@${metadata.sourceHandle} on ${platformLabel(metadata.parsed.platform)}`
+                      : `this ${platformLabel(metadata.parsed.platform)} post`}
+                    . A stub creator will be created on save.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreatorPickerOpen(true);
+                      setCreatorQuery("");
+                    }}
+                    className="self-start text-body-sm text-moonbeem-ink-muted hover:text-moonbeem-pink"
+                  >
+                    Attribute to existing creator →
+                  </button>
+                </div>
+              )}
+
+              {creatorPickerOpen && (
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={creatorQuery}
+                    onChange={(e) => setCreatorQuery(e.target.value)}
+                    placeholder="Type a Moonbeem handle or name…"
+                    autoFocus
+                    className="w-full bg-transparent border border-white/15 rounded-md px-3 py-2 text-body text-moonbeem-ink placeholder:text-moonbeem-ink-subtle focus:outline-none focus:border-moonbeem-pink"
+                  />
+                  {creatorResults.length > 0 && (
+                    <div className="absolute z-10 mt-1 w-full rounded-md border border-white/15 bg-black shadow-lg max-h-72 overflow-y-auto">
+                      {creatorResults.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => {
+                            setCreatorOverride(c);
+                            setCreatorPickerOpen(false);
+                            setCreatorQuery("");
+                            setCreatorResults([]);
+                          }}
+                          className="block w-full text-left px-3 py-2 hover:bg-white/[0.05] border-b border-white/5 last:border-b-0"
+                        >
+                          <p className="text-body text-moonbeem-ink">
+                            {c.display_name ?? `@${c.moonbeem_handle}`}
+                          </p>
+                          <p className="text-body-sm text-moonbeem-ink-subtle">
+                            @{c.moonbeem_handle}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {creatorSearching && (
+                    <p className="text-body-sm text-moonbeem-ink-subtle mt-1">
+                      Searching…
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreatorPickerOpen(false);
+                      setCreatorQuery("");
+                      setCreatorResults([]);
+                    }}
+                    className="mt-1 text-body-sm text-moonbeem-ink-subtle hover:text-moonbeem-pink"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Title attribution */}
             <div className="flex flex-col gap-1">
               <span className="text-body-sm text-moonbeem-ink-muted">
                 Attribute to title
@@ -377,7 +574,7 @@ export default function SingleUploadClient() {
                     placeholder="Search the catalog…"
                     className="w-full bg-transparent border border-white/15 rounded-md px-3 py-2 text-body text-moonbeem-ink placeholder:text-moonbeem-ink-subtle focus:outline-none focus:border-moonbeem-pink"
                   />
-                  {showResults && (
+                  {showTitleResults && (
                     <div className="absolute z-10 mt-1 w-full rounded-md border border-white/15 bg-black shadow-lg max-h-72 overflow-y-auto">
                       {titleResults.map((t) => (
                         <button
@@ -394,7 +591,8 @@ export default function SingleUploadClient() {
                             {t.title}
                           </p>
                           <p className="text-body-sm text-moonbeem-ink-subtle">
-                            {t.year ?? "—"} · {t.distributor ?? "no distributor"}
+                            {t.year ?? "—"} ·{" "}
+                            {t.distributor ?? "no distributor"}
                           </p>
                         </button>
                       ))}
