@@ -6,7 +6,11 @@ import {
   getTopTitlesForUser,
   getUnclaimedStubEditsForUser,
 } from "@/lib/queries/profiles";
-import { getFanEditsForCreator } from "@/lib/queries/titles";
+import {
+  getFanEditsForCreator,
+  getPendingFanEditsForUser,
+  getRejectedFanEditsForUser,
+} from "@/lib/queries/titles";
 import { SignOutButton } from "@/components/SignOutButton";
 import PlatformIcon from "@/components/PlatformIcon";
 import PayoutsControls from "@/components/me/PayoutsControls";
@@ -172,6 +176,12 @@ export default async function MePage() {
   // "Edits to claim" prompt; only renders when non-empty.
   const unclaimedStubs = await getUnclaimedStubEditsForUser(session.userId);
 
+  // Block 3: user-submitted edits awaiting / rejected by admin review.
+  const [pendingSubmissions, rejectedSubmissions] = await Promise.all([
+    getPendingFanEditsForUser(session.userId),
+    getRejectedFanEditsForUser(session.userId),
+  ]);
+
   // Welcome banner shows only for a genuine first-time user: no
   // verified socials, no Top 12 picks, and no prior dismissal.
   const bannerDismissedAt =
@@ -235,6 +245,54 @@ export default async function MePage() {
 
         {showWelcomeBanner && <WelcomeBanner handle={handle} />}
 
+        {/* Block 3: pending submissions — only renders when the user
+            has submitted at least one URL still awaiting admin review.
+            No interactive controls (admin handles via queue). */}
+        {pendingSubmissions.length > 0 && (
+          <section>
+            <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
+              Under review ({pendingSubmissions.length})
+            </h2>
+            <div className="mt-3 border-t border-white/10 pt-3">
+              <p className="text-body-sm text-moonbeem-ink-muted m-0">
+                {pendingSubmissions.length === 1
+                  ? "1 fan edit"
+                  : `${pendingSubmissions.length} fan edits`}{" "}
+                under review. We aim to respond within 24 hours.
+              </p>
+              <ul className="mt-3 flex flex-col gap-2">
+                {pendingSubmissions.map((s) => (
+                  <li
+                    key={s.id}
+                    className="flex items-center gap-3 rounded-md border border-white/10 bg-white/[0.02] p-2"
+                  >
+                    {s.thumbnail_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={s.thumbnail_url}
+                        alt=""
+                        width={48}
+                        height={48}
+                        className="h-12 w-12 rounded-md object-cover bg-black/40"
+                      />
+                    ) : (
+                      <div className="h-12 w-12 rounded-md bg-black/40" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="m-0 text-body-sm text-moonbeem-ink truncate">
+                        {s.title_name}
+                      </p>
+                      <p className="m-0 text-body-sm text-moonbeem-ink-subtle">
+                        {platformLabel[s.platform as SocialPlatform]}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
+        )}
+
         {/* 1. Your fan edits — grid when this user's creator has any
             attributed edits; editorial empty state otherwise. */}
         <section>
@@ -268,16 +326,88 @@ export default async function MePage() {
                   once they&apos;re attributed to your verified accounts. Each edit
                   shows view counts, partner attribution, and earnings.
                 </p>
-                <Link
-                  href="/"
-                  className="mt-3 inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
-                >
-                  Browse fan edits other creators have made →
-                </Link>
+                <div className="mt-3 flex flex-col gap-2">
+                  <Link
+                    href={`/c/${handle}/upload`}
+                    className="inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
+                  >
+                    Or add one directly →
+                  </Link>
+                  <Link
+                    href="/"
+                    className="inline-block text-body-sm text-moonbeem-ink-muted hover:text-moonbeem-pink"
+                  >
+                    Browse fan edits other creators have made →
+                  </Link>
+                </div>
               </>
             )}
           </div>
         </section>
+
+        {/* Block 3: rejected submissions — collapsible. Default
+            collapsed so the rejection state doesn't dominate /me for
+            users with one-off rejections. Uses <details> for native
+            zero-JS toggle. */}
+        {rejectedSubmissions.length > 0 && (
+          <section>
+            <details className="group">
+              <summary className="cursor-pointer text-body font-medium text-moonbeem-ink-muted hover:text-moonbeem-ink list-none">
+                Rejected submissions ({rejectedSubmissions.length})
+                <span className="ml-2 text-moonbeem-ink-subtle group-open:hidden">
+                  ↓
+                </span>
+                <span className="ml-2 text-moonbeem-ink-subtle hidden group-open:inline">
+                  ↑
+                </span>
+              </summary>
+              <div className="mt-3 border-t border-white/10 pt-3">
+                <ul className="flex flex-col gap-3">
+                  {rejectedSubmissions.map((s) => (
+                    <li
+                      key={s.id}
+                      className="flex flex-col gap-2 rounded-md border border-white/10 bg-white/[0.02] p-3"
+                    >
+                      <div className="flex items-start gap-3">
+                        {s.thumbnail_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={s.thumbnail_url}
+                            alt=""
+                            width={56}
+                            height={56}
+                            className="h-14 w-14 rounded-md object-cover bg-black/40 shrink-0"
+                          />
+                        ) : (
+                          <div className="h-14 w-14 rounded-md bg-black/40 shrink-0" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="m-0 text-body-sm text-moonbeem-ink">
+                            {s.title_name}
+                          </p>
+                          <p className="m-0 text-body-sm text-moonbeem-ink-subtle">
+                            {platformLabel[s.platform as SocialPlatform]}
+                          </p>
+                          {s.rejection_reason && (
+                            <p className="mt-1 text-body-sm text-moonbeem-ink-muted">
+                              {s.rejection_reason}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <a
+                        href={`mailto:hello@moonbeem.studio?subject=${encodeURIComponent(`Appeal: ${s.post_id ?? s.id}`)}`}
+                        className="self-start text-body-sm text-moonbeem-pink hover:opacity-90"
+                      >
+                        Appeal via email →
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </details>
+          </section>
+        )}
 
         {/* 1.5. Edits to claim — only renders when stubs plausibly
             belong to this user are surfaced by
