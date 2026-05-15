@@ -426,6 +426,34 @@ export default async function AdminLanding() {
           />
         </div>
 
+        {/* Fan edits */}
+        <div className="mt-10">
+          <SectionHeader
+            pill="Fan edits"
+            title="add to catalog"
+          />
+          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 flex flex-wrap gap-3">
+            <Link
+              href="/admin/fan-edits/new"
+              className="rounded-md border border-white/10 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
+            >
+              Add single →
+            </Link>
+            <Link
+              href="/admin/fan-edits/upload"
+              className="rounded-md border border-white/10 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
+            >
+              Bulk CSV upload →
+            </Link>
+            <Link
+              href="/admin/requests"
+              className="rounded-md border border-white/10 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
+            >
+              Open requests →
+            </Link>
+          </div>
+        </div>
+
         {/* Partners */}
         <div className="mt-10">
           <div className="mb-4 flex items-center justify-between gap-3">
