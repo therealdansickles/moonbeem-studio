@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import {
@@ -239,12 +240,30 @@ export default async function TitlePage({ params }: PageProps) {
           <TitleTabs
             aboutContent={aboutContent}
             fanEditsContent={
-              <FanEditsTab
-                fanEdits={fanEdits}
-                titleSlug={title.slug}
-                titleName={title.title}
-                titlePosterUrl={title.poster_url}
-              />
+              <>
+                {/* Block 3 entry point: signed-in viewers see a link
+                    to /c/<their-handle>/upload?title_id=<this title>.
+                    The upload page itself redirects to /me/edit?
+                    return_to= if the viewer isn't verified yet, so
+                    we don't need a client-side GateModal here. */}
+                {gateProfile?.handle ? (
+                  <p className="mb-6 text-body-sm text-moonbeem-ink-muted">
+                    Made a fan edit for this?{" "}
+                    <Link
+                      href={`/c/${gateProfile.handle}/upload?title_id=${title.id}`}
+                      className="text-moonbeem-pink hover:opacity-90"
+                    >
+                      Add yours →
+                    </Link>
+                  </p>
+                ) : null}
+                <FanEditsTab
+                  fanEdits={fanEdits}
+                  titleSlug={title.slug}
+                  titleName={title.title}
+                  titlePosterUrl={title.poster_url}
+                />
+              </>
             }
             videosContent={
               <VideosTab
