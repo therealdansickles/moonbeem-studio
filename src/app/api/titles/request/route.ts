@@ -1,6 +1,7 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, after, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { enforce, getIp } from "@/lib/ratelimit";
+import { sendTitleRequestAlert } from "@/lib/email/title-request-alert";
 
 type RequestType = "fan_edits" | "clips_and_stills";
 
@@ -147,6 +148,25 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  // New request landed — fire admin alert out-of-band. Fail-soft.
+  const titleId = body.title_id;
+  const userId = user.id;
+  const alertRequestType = requestType;
+  after(async () => {
+    try {
+      const res = await sendTitleRequestAlert({
+        titleId,
+        requesterUserId: userId,
+        requestType: alertRequestType,
+      });
+      if (!res.ok) {
+        console.warn("[title-request-alert] send failed", res.error);
+      }
+    } catch (err) {
+      console.warn("[title-request-alert] send threw", err);
+    }
+  });
 
   return NextResponse.json({ success: true });
 }
