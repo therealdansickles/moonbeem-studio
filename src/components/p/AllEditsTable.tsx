@@ -111,17 +111,19 @@ export default function AllEditsTable({ rows, titleSlug, titleName }: Props) {
 
   return (
     <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
-      {/* Mobile: scroll-x. Desktop: full width. */}
-      <div className="overflow-x-auto">
+      {/* Mobile: scroll-x. Desktop: full width. Vertical scroll
+          containment with sticky thead keeps the 81-row table from
+          dominating the page. */}
+      <div className="overflow-auto max-h-[480px] md:max-h-[640px]">
         <table className="w-full min-w-[640px] border-collapse text-body-sm">
           <thead>
             <tr className="border-b border-white/10 text-left text-caption uppercase tracking-wide text-moonbeem-ink-subtle">
-              <th className="px-4 py-3 font-medium">#</th>
-              <th className="px-2 py-3 font-medium">Edit</th>
+              <th className="sticky top-0 z-10 bg-moonbeem-black px-4 py-3 font-medium">#</th>
+              <th className="sticky top-0 z-10 bg-moonbeem-black px-2 py-3 font-medium">Edit</th>
               {HEADERS.map((h) => (
                 <th
                   key={h.key}
-                  className={`px-4 py-3 font-medium ${
+                  className={`sticky top-0 z-10 bg-moonbeem-black px-4 py-3 font-medium ${
                     h.align === "right" ? "text-right" : "text-left"
                   }`}
                 >
