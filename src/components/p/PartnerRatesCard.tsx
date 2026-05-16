@@ -41,7 +41,7 @@ export default function PartnerRatesCard({
         </span>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3">
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div>
           <div className="text-display-sm text-moonbeem-ink leading-none">
             {formatDollars(paid_this_month_cents)}
