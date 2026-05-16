@@ -54,6 +54,10 @@ const STROKE = "rgba(255, 255, 255, 0.10)";
 type Props = {
   /** Map of USPS state code (e.g. "CA") → event count. */
   data: Map<string, number>;
+  /**
+   * Fixed pixel height. When omitted, the component fills its parent
+   * (h-full) so the caller can size it with responsive classes.
+   */
   height?: number;
 };
 
@@ -129,9 +133,14 @@ function InnerMap({
   );
 }
 
-export default function UsStateChoropleth({ data, height = 320 }: Props) {
+export default function UsStateChoropleth({ data, height }: Props) {
+  // When height is provided, render a fixed-pixel container (legacy
+  // behavior for existing callers). When omitted, fill the parent so
+  // the caller can apply responsive height classes.
+  const containerClass = height === undefined ? "w-full h-full" : "w-full";
+  const containerStyle = height === undefined ? undefined : { height };
   return (
-    <div className="w-full" style={{ height }}>
+    <div className={containerClass} style={containerStyle}>
       <ParentSize>
         {({ width, height: h }) => (
           <InnerMap data={data} width={width} height={h} />

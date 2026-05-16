@@ -26,6 +26,12 @@ type Props<T> = {
   rows: T[];
   rowKey: (row: T) => string;
   emptyMessage?: string;
+  /**
+   * Opt-in scroll container. When set (e.g. "max-h-80"), the card
+   * becomes vertically scrollable inside the given max height and the
+   * thead sticks to the top. Default render is unchanged.
+   */
+  maxHeightClass?: string;
 };
 
 export default function DataTable<T>({
@@ -33,6 +39,7 @@ export default function DataTable<T>({
   rows,
   rowKey,
   emptyMessage = "No data in this window.",
+  maxHeightClass,
 }: Props<T>) {
   if (rows.length === 0) {
     return (
@@ -44,10 +51,16 @@ export default function DataTable<T>({
     );
   }
 
+  const scrollable = !!maxHeightClass;
+  const wrapperClass = scrollable
+    ? `rounded-2xl border border-white/10 bg-white/[0.02] overflow-y-auto ${maxHeightClass}`
+    : "rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden";
+  const theadClass = scrollable ? "sticky top-0 bg-moonbeem-black z-10" : "";
+
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
+    <div className={wrapperClass}>
       <table className="w-full">
-        <thead>
+        <thead className={theadClass}>
           <tr className="border-b border-white/5">
             {columns.map((col) => (
               <th

@@ -15,6 +15,13 @@ type Props = {
   trend?: Trend;
   /** xl: text-display-xl (96px). lg: text-display-lg (72px, default). */
   size?: "lg" | "xl";
+  /**
+   * Opt-in mobile-first responsive value sizing. When true, the value
+   * renders one step DOWN on mobile and steps back up at md: to its
+   * normal size (lg → display-sm/display-lg, xl → display-md/display-xl).
+   * Default false to preserve existing admin-dashboard appearance.
+   */
+  responsive?: boolean;
 };
 
 export default function HeroNumber({
@@ -23,9 +30,15 @@ export default function HeroNumber({
   delta,
   trend = "neutral",
   size = "lg",
+  responsive = false,
 }: Props) {
-  const sizeClass =
-    size === "xl" ? "text-display-xl" : "text-display-lg";
+  const sizeClass = responsive
+    ? size === "xl"
+      ? "text-display-md md:text-display-xl"
+      : "text-display-sm md:text-display-lg"
+    : size === "xl"
+      ? "text-display-xl"
+      : "text-display-lg";
   const trendClass =
     trend === "up"
       ? "text-moonbeem-lime"

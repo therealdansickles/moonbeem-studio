@@ -747,7 +747,7 @@ function HeroTile({
 }) {
   return (
     <div
-      className="rounded-2xl border border-white/10 p-5"
+      className="rounded-2xl border border-white/10 p-4 md:p-5"
       // Diagonal deep-purple → soft-pink gradient at ~70-85% over a
       // near-black base so the saturation reads premium without
       // overwhelming the white number text on top. Subtle inner-top
@@ -760,7 +760,7 @@ function HeroTile({
         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
       }}
     >
-      <div className="font-wordmark text-display-md text-white leading-none tabular-nums">
+      <div className="font-wordmark text-display-sm md:text-display-md text-white leading-none tabular-nums">
         {value}
       </div>
       <div className="mt-2 text-body font-medium text-moonbeem-ink">
@@ -1264,7 +1264,7 @@ export default async function PartnerDashboardPage({
   const primaryName = (titleRows[0]?.title as string | undefined) ?? "";
 
   return (
-    <div className="min-h-screen px-6 py-12 bg-[radial-gradient(ellipse_at_top,_#1a0f3a_0%,_#0a0a14_60%)]">
+    <div className="min-h-screen px-4 py-6 md:px-6 md:py-12 bg-[radial-gradient(ellipse_at_top,_#1a0f3a_0%,_#0a0a14_60%)]">
       <div className="mx-auto max-w-6xl">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -1309,7 +1309,7 @@ export default async function PartnerDashboardPage({
           </p>
         </div>
 
-        <div className="mt-10 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="mt-6 md:mt-10 grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
           <HeroTile
             value={formatMetric(metrics.total_views)}
             label="Total platform views"
@@ -1369,23 +1369,27 @@ export default async function PartnerDashboardPage({
           <HeroNumber
             value={analytics.events.toLocaleString()}
             label="Engagement events"
+            responsive
           />
           <HeroNumber
             value={analytics.uniqueSignedInUsers.toLocaleString()}
             label="Signed-in users"
+            responsive
           />
           <HeroNumber
             value={analytics.goClicks.toLocaleString()}
             label="/go/ clicks (humans)"
+            responsive
           />
           <HeroNumber
             value={analytics.openRequests.toLocaleString()}
             label="Open title requests"
+            responsive
           />
         </section>
 
         <section className="mt-10 flex flex-col gap-3">
-          <h2 className="text-display-sm m-0">Engagement over time</h2>
+          <h2 className="text-heading-lg md:text-display-sm m-0">Engagement over time</h2>
           <p className="text-body-sm text-moonbeem-ink-muted m-0">
             Fan-edit modal events across this partner&apos;s catalog ·{" "}
             {win === "24h" ? "hourly" : "daily"} buckets
@@ -1403,7 +1407,7 @@ export default async function PartnerDashboardPage({
         </section>
 
         <section className="mt-10 flex flex-col gap-3">
-          <h2 className="text-display-sm m-0">Geography</h2>
+          <h2 className="text-heading-lg md:text-display-sm m-0">Geography</h2>
           <p className="text-body-sm text-moonbeem-ink-muted m-0">
             /go/ click + consent-gated event origins ·{" "}
             {analytics.totalGeoEvents.toLocaleString()} geo-tagged event
@@ -1411,7 +1415,9 @@ export default async function PartnerDashboardPage({
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="md:col-span-2 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-              <UsStateChoropleth data={analytics.stateData} height={360} />
+              <div className="h-[260px] md:h-[360px]">
+                <UsStateChoropleth data={analytics.stateData} />
+              </div>
             </div>
             <div className="flex flex-col">
               <DataTable<(typeof analytics.cityBreakdown)[number]>
@@ -1430,11 +1436,12 @@ export default async function PartnerDashboardPage({
                     render: (r) => r.count.toLocaleString(),
                   },
                 ]}
-                rows={analytics.cityBreakdown.slice(0, 10)}
+                rows={analytics.cityBreakdown.slice(0, 25)}
                 rowKey={(r) =>
                   `${r.country_code ?? ""}|${r.region_code ?? ""}|${r.city}`
                 }
                 emptyMessage="No location data available for this window."
+                maxHeightClass="max-h-80"
               />
             </div>
           </div>
@@ -1451,7 +1458,7 @@ export default async function PartnerDashboardPage({
 
         {titleRows.filter((t) => t.is_active).length > 1 && (
           <section className="mt-10 flex flex-col gap-3">
-            <h2 className="text-display-sm m-0">Titles</h2>
+            <h2 className="text-heading-lg md:text-display-sm m-0">Titles</h2>
             <p className="text-body-sm text-moonbeem-ink-muted m-0">
               Every active title in this catalog. View counts are
               lifetime; modal opens, platform clicks, and /go/ clicks
