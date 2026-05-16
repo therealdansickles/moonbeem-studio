@@ -57,7 +57,9 @@ export async function calculateEarningsForRate(
     .from("fan_edits")
     .select("id, creator_id, view_count")
     .eq("title_id", rate.title_id)
-    .eq("view_tracking_status", "active")
+    .eq("is_active", true)
+    // publicly readable edits only (see audit 2026-05-16)
+    .in("verification_status", ["auto_verified", "approved"])
     .is("deleted_at", null)
     .not("creator_id", "is", null);
   if (editsErr) {

@@ -95,7 +95,9 @@ async function loadHeroMetrics(
     .from("fan_edits")
     .select("id, view_count, creator_id")
     .in("title_id", titleIds)
-    .eq("view_tracking_status", "active")
+    .eq("is_active", true)
+    // publicly readable edits only (see audit 2026-05-16)
+    .in("verification_status", ["auto_verified", "approved"])
     .is("deleted_at", null);
 
   const fanEditRows = fanEdits ?? [];
@@ -210,7 +212,9 @@ async function loadTopPerformers(
       "id, platform, view_count, thumbnail_url, creator_id, embed_url, creator_handle_displayed",
     )
     .in("title_id", titleIds)
-    .eq("view_tracking_status", "active")
+    .eq("is_active", true)
+    // publicly readable edits only (see audit 2026-05-16)
+    .in("verification_status", ["auto_verified", "approved"])
     .is("deleted_at", null)
     .order("view_count", { ascending: false })
     .limit(limit);
@@ -267,7 +271,9 @@ async function loadTopCreators(
     .from("fan_edits")
     .select("creator_id, view_count")
     .in("title_id", titleIds)
-    .eq("view_tracking_status", "active")
+    .eq("is_active", true)
+    // publicly readable edits only (see audit 2026-05-16)
+    .in("verification_status", ["auto_verified", "approved"])
     .is("deleted_at", null)
     .not("creator_id", "is", null);
 
@@ -411,6 +417,9 @@ async function loadDailyGrowth(
       .from("fan_edits")
       .select("created_at")
       .in("title_id", titleIds)
+      .eq("is_active", true)
+      // publicly readable edits only (see audit 2026-05-16)
+      .in("verification_status", ["auto_verified", "approved"])
       .is("deleted_at", null),
   ]);
 
@@ -506,7 +515,9 @@ async function loadAllEdits(
       "id, platform, view_count, thumbnail_url, creator_id, embed_url, creator_handle_displayed",
     )
     .in("title_id", titleIds)
-    .eq("view_tracking_status", "active")
+    .eq("is_active", true)
+    // publicly readable edits only (see audit 2026-05-16)
+    .in("verification_status", ["auto_verified", "approved"])
     .is("deleted_at", null)
     .order("view_count", { ascending: false });
 
@@ -948,7 +959,8 @@ async function loadPartnerAnalytics(
     .select("id, title_id, view_count")
     .in("title_id", activeTitleIds)
     .eq("is_active", true)
-    .eq("verification_status", "auto_verified")
+    // publicly readable edits only (see audit 2026-05-16)
+    .in("verification_status", ["auto_verified", "approved"])
     .is("deleted_at", null);
 
   const clicksQ = (() => {
@@ -1301,7 +1313,7 @@ export default async function PartnerDashboardPage({
           <HeroTile
             value={formatMetric(metrics.total_views)}
             label="Total platform views"
-            sub={`across ${titleRows.length === 1 ? "the title's" : "all"} fan edits`}
+            sub={`lifetime views across ${titleRows.length === 1 ? "the title's" : "all"} fan edits`}
           />
           <HeroTile
             value={metrics.unique_creators.toLocaleString()}
@@ -1473,7 +1485,7 @@ export default async function PartnerDashboardPage({
               Growth
             </span>
             <span className="text-caption text-moonbeem-ink-subtle">
-              total views over time
+              views tracked since May 5 · daily
             </span>
           </div>
           <div className="mt-4">
@@ -1486,8 +1498,8 @@ export default async function PartnerDashboardPage({
                 undefined,
                 { year: "numeric", month: "long", day: "numeric" },
               )}
-              ; chart reflects views accumulated since then, not the
-              full lifetime of each fan edit.
+              ; the chart counts views measured since tracking began,
+              so its total runs lower than the lifetime figure above.
             </p>
           )}
         </div>
