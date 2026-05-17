@@ -24,6 +24,7 @@ import TopPerformersCardClient from "@/components/p/TopPerformersCardClient";
 import InitialAvatar from "@/components/p/InitialAvatar";
 import { rankTierClass } from "@/components/p/rankTier";
 import { formatMetric } from "@/lib/format";
+import { PUBLICLY_READABLE_FAN_EDIT_STATUSES } from "@/lib/fan-edits/status";
 import HeroNumber from "@/components/dashboard/HeroNumber";
 import TimeSeriesChart from "@/components/dashboard/TimeSeriesChart";
 import UsStateChoropleth from "@/components/dashboard/UsStateChoropleth";
@@ -97,7 +98,7 @@ async function loadHeroMetrics(
     .in("title_id", titleIds)
     .eq("is_active", true)
     // publicly readable edits only (see audit 2026-05-16)
-    .in("verification_status", ["auto_verified", "approved"])
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .is("deleted_at", null);
 
   const fanEditRows = fanEdits ?? [];
@@ -214,7 +215,7 @@ async function loadTopPerformers(
     .in("title_id", titleIds)
     .eq("is_active", true)
     // publicly readable edits only (see audit 2026-05-16)
-    .in("verification_status", ["auto_verified", "approved"])
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .is("deleted_at", null)
     .order("view_count", { ascending: false })
     .limit(limit);
@@ -273,7 +274,7 @@ async function loadTopCreators(
     .in("title_id", titleIds)
     .eq("is_active", true)
     // publicly readable edits only (see audit 2026-05-16)
-    .in("verification_status", ["auto_verified", "approved"])
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .is("deleted_at", null)
     .not("creator_id", "is", null);
 
@@ -419,7 +420,7 @@ async function loadDailyGrowth(
       .in("title_id", titleIds)
       .eq("is_active", true)
       // publicly readable edits only (see audit 2026-05-16)
-      .in("verification_status", ["auto_verified", "approved"])
+      .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
       .is("deleted_at", null),
   ]);
 
@@ -517,7 +518,7 @@ async function loadAllEdits(
     .in("title_id", titleIds)
     .eq("is_active", true)
     // publicly readable edits only (see audit 2026-05-16)
-    .in("verification_status", ["auto_verified", "approved"])
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .is("deleted_at", null)
     .order("view_count", { ascending: false });
 
@@ -960,7 +961,7 @@ async function loadPartnerAnalytics(
     .in("title_id", activeTitleIds)
     .eq("is_active", true)
     // publicly readable edits only (see audit 2026-05-16)
-    .in("verification_status", ["auto_verified", "approved"])
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .is("deleted_at", null);
 
   const clicksQ = (() => {

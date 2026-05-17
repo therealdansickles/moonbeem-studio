@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { PUBLICLY_READABLE_FAN_EDIT_STATUSES } from "@/lib/fan-edits/status";
 
 export type CastMember = {
   name: string;
@@ -459,7 +460,7 @@ export async function getRecentFanEdits(
       "id, title_id, platform, embed_url, thumbnail_url, creator_handle_displayed, creator_id, created_at, titles!inner(slug, title, poster_url, is_active)",
     )
     .eq("is_active", true)
-    .eq("verification_status", "auto_verified")
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .eq("titles.is_active", true)
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -684,7 +685,7 @@ export async function getFanEditsForCreator(
     // readable. 'pending' and 'rejected' user-submitted rows stay
     // off /c/[handle] and /me's "Your fan edits" — they're surfaced
     // via dedicated query helpers below.
-    .in("verification_status", ["auto_verified", "approved"])
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .is("deleted_at", null)
     .eq("titles.is_active", true)
     .order("created_at", { ascending: false })
@@ -755,7 +756,7 @@ export async function getTrendingFanEdits(
     .from("fan_edits")
     .select("id")
     .eq("is_active", true)
-    .eq("verification_status", "auto_verified")
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .eq("view_tracking_status", "active")
     .is("deleted_at", null);
   const activeIds = (feActive ?? []).map((r) => r.id as string);

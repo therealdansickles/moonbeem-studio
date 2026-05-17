@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { PUBLICLY_READABLE_FAN_EDIT_STATUSES } from "@/lib/fan-edits/status";
 import {
   ALLOWED_SOCIAL_PLATFORMS,
   type SocialPlatform,
@@ -317,7 +318,7 @@ export async function getUnclaimedStubEditsForUser(
     .select("id, creator_id, thumbnail_url, created_at")
     .in("creator_id", stubIds)
     .eq("is_active", true)
-    .eq("verification_status", "auto_verified")
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .is("deleted_at", null)
     .order("created_at", { ascending: false });
   const byCreator = new Map<

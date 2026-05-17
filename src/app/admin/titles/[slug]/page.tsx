@@ -13,6 +13,7 @@ import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { requireSuperAdminOr404 } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { PUBLICLY_READABLE_FAN_EDIT_STATUSES } from "@/lib/fan-edits/status";
 import {
   parseWindow,
   windowCutoffIso,
@@ -271,7 +272,7 @@ async function buildAnalyticsData(
     )
     .eq("title_id", titleId)
     .eq("is_active", true)
-    .eq("verification_status", "auto_verified")
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .is("deleted_at", null)
     .order("view_count", { ascending: false, nullsFirst: false });
 

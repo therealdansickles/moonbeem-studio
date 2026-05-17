@@ -2,6 +2,7 @@ import { NextResponse, after, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { enforce, getIp } from "@/lib/ratelimit";
 import { sendTitleRequestAlert } from "@/lib/email/title-request-alert";
+import { PUBLICLY_READABLE_FAN_EDIT_STATUSES } from "@/lib/fan-edits/status";
 
 type RequestType = "fan_edits" | "clips_and_stills";
 
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest) {
     .select("id")
     .eq("title_id", body.title_id)
     .eq("is_active", true)
-    .eq("verification_status", "auto_verified")
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .is("deleted_at", null)
     .limit(1)
     .maybeSingle();

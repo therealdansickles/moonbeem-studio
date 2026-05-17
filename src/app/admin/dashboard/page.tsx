@@ -22,6 +22,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { requireSuperAdminOr404 } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { PUBLICLY_READABLE_FAN_EDIT_STATUSES } from "@/lib/fan-edits/status";
 import HeroNumber from "@/components/dashboard/HeroNumber";
 import TimeSeriesChart from "@/components/dashboard/TimeSeriesChart";
 import UsStateChoropleth from "@/components/dashboard/UsStateChoropleth";
@@ -119,7 +120,7 @@ export default async function AdminDashboardPage(props: PageProps) {
       "id, title_id, view_count, creator_id, creator_handle_displayed, embed_url, thumbnail_url, titles(slug, title)",
     )
     .eq("is_active", true)
-    .eq("verification_status", "auto_verified")
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .is("deleted_at", null)
     .order("view_count", { ascending: false, nullsFirst: false })
     .limit(10);
@@ -134,7 +135,7 @@ export default async function AdminDashboardPage(props: PageProps) {
     .from("fan_edits")
     .select("id", { count: "exact", head: true })
     .eq("is_active", true)
-    .eq("verification_status", "auto_verified")
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .is("deleted_at", null);
   const openRequestsCountQ = supabase
     .from("title_requests")
@@ -149,7 +150,7 @@ export default async function AdminDashboardPage(props: PageProps) {
     .from("fan_edits")
     .select("creator_id, creator_handle_displayed, view_count")
     .eq("is_active", true)
-    .eq("verification_status", "auto_verified")
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .is("deleted_at", null)
     .not("creator_id", "is", null);
 

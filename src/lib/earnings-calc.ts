@@ -11,6 +11,7 @@
 // same UTC day overwrites today's row with the latest view counts.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { PUBLICLY_READABLE_FAN_EDIT_STATUSES } from "@/lib/fan-edits/status";
 
 export type Rate = {
   partner_id: string;
@@ -59,7 +60,7 @@ export async function calculateEarningsForRate(
     .eq("title_id", rate.title_id)
     .eq("is_active", true)
     // publicly readable edits only (see audit 2026-05-16)
-    .in("verification_status", ["auto_verified", "approved"])
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .is("deleted_at", null)
     .not("creator_id", "is", null);
   if (editsErr) {
