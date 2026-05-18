@@ -1297,7 +1297,7 @@ export default async function PartnerDashboardPage({
         </div>
 
         <div className="mt-10 flex flex-col gap-2">
-          <h1 className="font-wordmark text-display-lg text-moonbeem-ink m-0">
+          <h1 className="font-wordmark text-display-md md:text-display-lg text-moonbeem-ink m-0">
             {partner.name}
           </h1>
           <p className="text-body text-moonbeem-ink-muted m-0">

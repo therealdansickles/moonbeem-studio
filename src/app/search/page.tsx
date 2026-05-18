@@ -29,7 +29,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
     return (
       <div className="flex-1 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)] py-12">
         <div className="mx-auto max-w-7xl px-6">
-          <h1 className="font-wordmark text-display-md text-moonbeem-pink m-0">
+          <h1 className="font-wordmark text-display-sm md:text-display-md text-moonbeem-pink m-0">
             Films with {personName}
           </h1>
           <p className="mt-2 text-body-sm text-moonbeem-ink-muted">
@@ -77,7 +77,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
           </div>
         ) : (
           <>
-            <h1 className="font-wordmark text-display-md text-moonbeem-pink m-0">
+            <h1 className="font-wordmark text-display-sm md:text-display-md text-moonbeem-pink m-0">
               Results for &lsquo;{query}&rsquo;
             </h1>
             <p className="mt-2 text-body-sm text-moonbeem-ink-muted">

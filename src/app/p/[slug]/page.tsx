@@ -85,7 +85,7 @@ export default async function PartnerCatalogPage({ params }: PageProps) {
             />
           ) : null}
           <div className="flex flex-col gap-2">
-            <h1 className="m-0 font-wordmark text-display-lg text-moonbeem-pink">
+            <h1 className="m-0 font-wordmark text-display-md md:text-display-lg text-moonbeem-pink">
               {partner.name as string}
             </h1>
             <p className="m-0 text-body text-moonbeem-ink-muted">

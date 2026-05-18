@@ -282,7 +282,7 @@ export default async function AdminDashboardPage(props: PageProps) {
             <span className="font-wordmark text-heading-md text-moonbeem-pink">
               moonbeem.
             </span>
-            <h1 className="font-wordmark text-display-lg text-moonbeem-ink m-0">
+            <h1 className="font-wordmark text-display-md md:text-display-lg text-moonbeem-ink m-0">
               Dashboard
             </h1>
             <p className="text-body text-moonbeem-ink-muted m-0">

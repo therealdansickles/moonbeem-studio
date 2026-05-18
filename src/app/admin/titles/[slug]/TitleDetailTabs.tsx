@@ -213,7 +213,7 @@ export default function TitleDetailTabs(props: Props) {
         </div>
 
         <div className="mt-8 flex flex-col gap-3">
-          <h1 className="font-wordmark text-display-lg text-moonbeem-ink m-0">
+          <h1 className="font-wordmark text-display-md md:text-display-lg text-moonbeem-ink m-0">
             {props.titleName}
           </h1>
           <div className="flex flex-wrap items-center gap-3 text-body-sm text-moonbeem-ink-muted">

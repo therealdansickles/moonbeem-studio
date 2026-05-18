@@ -222,7 +222,7 @@ export default async function TitlePage({ params }: PageProps) {
 
         <div className="w-full md:flex-1 md:min-w-0 flex flex-col items-center gap-8 md:items-stretch">
           <div className="flex flex-col items-center gap-3 max-w-prose text-center md:items-start md:text-left md:max-w-none">
-            <h1 className="font-wordmark font-bold text-display-lg text-moonbeem-pink m-0">
+            <h1 className="font-wordmark font-bold text-display-md md:text-display-lg text-moonbeem-pink m-0">
               {title.title}
             </h1>
             {metaParts.length > 0 && (

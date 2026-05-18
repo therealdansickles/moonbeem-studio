@@ -69,7 +69,7 @@ export default function UploadClient({
             <p className="text-body-sm text-moonbeem-ink-subtle uppercase tracking-wider">
               Add fan edit
             </p>
-            <h1 className="font-wordmark font-bold text-display-md text-moonbeem-pink m-0">
+            <h1 className="font-wordmark font-bold text-display-sm md:text-display-md text-moonbeem-pink m-0">
               @{handle}
             </h1>
             <p className="text-body-sm text-moonbeem-ink-muted">
