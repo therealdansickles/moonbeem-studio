@@ -84,7 +84,7 @@ function LoginForm() {
       : null;
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-12 px-6 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]">
+    <div className="min-h-screen flex flex-col items-center justify-center gap-12 px-6">
       <h1 className="font-wordmark font-bold text-[clamp(2.5rem,12vw,6rem)] leading-[0.95] text-moonbeem-pink m-0">
         moonbeem.
       </h1>

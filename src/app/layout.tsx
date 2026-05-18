@@ -55,7 +55,7 @@ export default async function RootLayout({
   return (
     <html lang="en" className="h-full">
       <body
-        className={`${inter.variable} ${jost.variable} min-h-full flex flex-col font-sans antialiased`}
+        className={`${inter.variable} ${jost.variable} min-h-full flex flex-col font-sans antialiased bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]`}
       >
         {/*
           GoogleAnalytics + MicrosoftClarity MUST render inside

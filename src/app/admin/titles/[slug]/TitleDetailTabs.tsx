@@ -198,7 +198,7 @@ export default function TitleDetailTabs(props: Props) {
   }
 
   return (
-    <div className="min-h-screen px-6 py-12 bg-[radial-gradient(ellipse_at_top,_#1a0f3a_0%,_#0a0a14_60%)]">
+    <div className="min-h-screen px-6 py-12">
       <div className="mx-auto max-w-6xl">
         <div className="flex items-center justify-between">
           <Link

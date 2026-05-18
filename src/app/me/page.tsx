@@ -132,7 +132,7 @@ export default async function MePage() {
   const handle = (userRow?.handle as string | null) ?? null;
   if (!handle) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-6 px-6 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]">
+      <div className="min-h-screen flex flex-col items-center justify-center gap-6 px-6">
         <h1 className="font-wordmark text-display-md text-moonbeem-pink m-0">
           moonbeem.
         </h1>
@@ -200,7 +200,7 @@ export default async function MePage() {
     top12Count >= 1 && verifiedSocials.length === 0;
 
   return (
-    <div className="min-h-screen px-6 py-12 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]">
+    <div className="min-h-screen px-6 py-12">
       <div className="mx-auto flex max-w-2xl flex-col gap-10">
         {/* Profile header */}
         <header className="flex flex-col items-center gap-4 text-center">

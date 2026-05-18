@@ -210,7 +210,7 @@ export default async function TitlePage({ params }: PageProps) {
   );
 
   return (
-    <div className="min-h-screen py-12 px-6 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]">
+    <div className="min-h-screen py-12 px-6">
       <Suspense fallback={null}>
         <RequestSubmittedToast />
       </Suspense>

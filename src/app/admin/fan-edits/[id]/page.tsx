@@ -238,7 +238,7 @@ export default async function AdminFanEditDetailPage(props: PageProps) {
   const cities = topCities(events);
 
   return (
-    <div className="min-h-screen bg-moonbeem-black px-6 py-12 text-moonbeem-ink">
+    <div className="min-h-screen px-6 py-12 text-moonbeem-ink">
       <div className="mx-auto flex max-w-4xl flex-col gap-10">
         {/* Top breadcrumb back to admin */}
         <div className="flex items-baseline justify-between gap-4">

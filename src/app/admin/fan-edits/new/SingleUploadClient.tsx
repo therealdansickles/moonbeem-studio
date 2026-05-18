@@ -287,7 +287,7 @@ export default function SingleUploadClient() {
     titleResults.length > 0 && titleQuery.trim().length >= MIN_QUERY_LEN;
 
   return (
-    <div className="min-h-screen px-6 py-12 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)] text-moonbeem-ink">
+    <div className="min-h-screen px-6 py-12 text-moonbeem-ink">
       <div className="max-w-3xl mx-auto flex flex-col gap-8">
         <div className="flex items-center justify-between gap-4">
           <div className="flex flex-col gap-2">

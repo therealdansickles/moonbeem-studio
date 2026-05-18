@@ -36,7 +36,7 @@ export default async function AdminFeaturedPage() {
     : ((data ?? []) as FeaturedTitle[]);
 
   return (
-    <div className="min-h-screen bg-moonbeem-black px-6 py-12 text-moonbeem-ink">
+    <div className="min-h-screen px-6 py-12 text-moonbeem-ink">
       <div className="mx-auto flex max-w-3xl flex-col gap-8">
         <div className="flex items-baseline justify-between gap-4">
           <h1 className="font-wordmark text-display-md text-moonbeem-pink m-0">

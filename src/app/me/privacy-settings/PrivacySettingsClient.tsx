@@ -20,7 +20,7 @@ export default function PrivacySettingsClient() {
   const { state, isLoaded, setConsent, rejectAll } = useConsent();
 
   return (
-    <div className="min-h-screen bg-moonbeem-black px-6 py-12 text-moonbeem-ink">
+    <div className="min-h-screen px-6 py-12 text-moonbeem-ink">
       <div className="mx-auto flex max-w-2xl flex-col gap-6">
         <header className="flex flex-col gap-2">
           <h1 className="font-wordmark text-display-md text-moonbeem-pink m-0">

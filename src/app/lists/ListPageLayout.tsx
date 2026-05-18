@@ -37,7 +37,7 @@ export default async function ListPageLayout({
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)] px-6 py-12">
+    <div className="min-h-screen px-6 py-12">
       <div className="mx-auto flex max-w-6xl flex-col gap-8">
         <Link
           href={isAuthed ? "/me/top-12" : "/"}

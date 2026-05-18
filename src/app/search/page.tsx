@@ -27,7 +27,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
   if (personName) {
     const results = await searchTitlesByPerson(personName, 60);
     return (
-      <div className="flex-1 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)] py-12">
+      <div className="flex-1 py-12">
         <div className="mx-auto max-w-7xl px-6">
           <h1 className="font-wordmark text-display-sm md:text-display-md text-moonbeem-pink m-0">
             Films with {personName}
@@ -64,7 +64,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
   const results = query.length >= 2 ? await searchTitles(query, 60) : [];
 
   return (
-    <div className="flex-1 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)] py-12">
+    <div className="flex-1 py-12">
       <div className="mx-auto max-w-7xl px-6">
         {!query ? (
           <div className="flex flex-col gap-3">

@@ -1265,7 +1265,7 @@ export default async function PartnerDashboardPage({
   const primaryName = (titleRows[0]?.title as string | undefined) ?? "";
 
   return (
-    <div className="min-h-screen px-4 py-6 md:px-6 md:py-12 bg-[radial-gradient(ellipse_at_top,_#1a0f3a_0%,_#0a0a14_60%)]">
+    <div className="min-h-screen px-4 py-6 md:px-6 md:py-12">
       <div className="mx-auto max-w-6xl">
         <div className="flex flex-col items-start gap-3 md:flex-row md:items-center md:justify-between">
           {isSuperAdmin && (

@@ -111,7 +111,7 @@ export default function HandlePicker({
         : "text-moonbeem-ink-subtle";
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]">
+    <div className="flex flex-1 flex-col items-center justify-center px-6 py-16">
       <form
         onSubmit={onSubmit}
         className="w-full max-w-sm flex flex-col gap-4"

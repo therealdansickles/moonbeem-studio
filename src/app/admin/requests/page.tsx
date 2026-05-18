@@ -154,7 +154,7 @@ export default async function AdminRequestsPage() {
   ).slice(0, RECENTLY_FULFILLED_MAX_CARDS);
 
   return (
-    <div className="min-h-screen px-6 py-12 bg-moonbeem-black text-moonbeem-ink">
+    <div className="min-h-screen px-6 py-12 text-moonbeem-ink">
       <div className="max-w-4xl mx-auto flex flex-col gap-10">
         <h1 className="font-wordmark text-display-md text-moonbeem-pink m-0">
           Title requests

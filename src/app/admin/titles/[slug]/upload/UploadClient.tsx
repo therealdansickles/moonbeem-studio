@@ -350,7 +350,7 @@ export default function UploadClient({ titleId, titleName, titleSlug }: Props) {
   }
 
   return (
-    <div className="min-h-screen px-6 py-12 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]">
+    <div className="min-h-screen px-6 py-12">
       <div className="max-w-4xl mx-auto flex flex-col gap-8">
         <div className="flex flex-col gap-2">
           <p className="text-body-sm text-moonbeem-ink-subtle uppercase tracking-wider">

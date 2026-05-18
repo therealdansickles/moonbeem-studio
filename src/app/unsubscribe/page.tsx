@@ -8,7 +8,7 @@ export default async function UnsubscribePage({ searchParams }: Props) {
   const invalid = params.invalid === "1";
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-6 px-6 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)]">
+    <div className="min-h-screen flex flex-col items-center justify-center gap-6 px-6">
       <h1 className="font-wordmark text-display-md text-moonbeem-pink m-0">
         moonbeem.
       </h1>

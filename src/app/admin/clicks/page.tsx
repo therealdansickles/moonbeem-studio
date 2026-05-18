@@ -163,7 +163,7 @@ export default async function AdminClicksPage() {
     .slice(0, TOP_N);
 
   return (
-    <div className="min-h-screen px-6 py-12 bg-moonbeem-black text-moonbeem-ink">
+    <div className="min-h-screen px-6 py-12 text-moonbeem-ink">
       <div className="max-w-4xl mx-auto flex flex-col gap-10">
         <div className="flex flex-col gap-1">
           <h1 className="font-wordmark text-display-md text-moonbeem-pink m-0">

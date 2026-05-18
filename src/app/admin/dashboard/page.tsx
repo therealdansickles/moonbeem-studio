@@ -274,7 +274,7 @@ export default async function AdminDashboardPage(props: PageProps) {
     .slice(0, 10);
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,_#1a0f3a_0%,_#0a0a14_60%)] px-6 py-12 text-moonbeem-ink">
+    <div className="min-h-screen px-6 py-12 text-moonbeem-ink">
       <div className="mx-auto max-w-6xl flex flex-col gap-10">
         {/* Header strip */}
         <div className="flex items-baseline justify-between gap-4 flex-wrap">

@@ -58,7 +58,7 @@ export default async function PartnerCatalogPage({ params }: PageProps) {
   const titleList = titles ?? [];
 
   return (
-    <div className="flex-1 bg-[radial-gradient(ellipse_at_center,_#011754_0%,_#121212_100%)] py-12">
+    <div className="flex-1 py-12">
       <div className="mx-auto max-w-7xl">
         <div className="mb-10 px-6">
           <Link
