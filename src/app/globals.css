@@ -95,12 +95,27 @@ body {
   display: none;
 }
 
+/* View Transitions brand timing. The browser default is short
+   and uses its own easing; this aligns the cross-route poster
+   morph to the Moonbeem feel — 0.4s on easeOutQuart, matching
+   the `fadeIn` variant's duration so app-wide motion reads as
+   one rhythm. Group-level only: the group pseudo animates the
+   container's position+size during the morph, which is the
+   standard first lever; old/new image-pair tuning is reserved
+   for if/when we want to shape the crossfade specifically. */
+::view-transition-group(*) {
+  animation-duration: 0.4s;
+  animation-timing-function: var(--ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1));
+}
+
 /* View Transitions reduced-motion escape hatch. React's
    <ViewTransition> does NOT auto-respect prefers-reduced-motion;
    the CSS rule below collapses every view-transition animation to
    zero duration when the OS requests reduced motion — users get
    the browser's default instant content swap instead of the morph.
-   Selectors match the Next 16 view-transitions guide verbatim. */
+   The 0s !important wins over the brand-timing rule above
+   regardless of source order. Selectors match the Next 16
+   view-transitions guide verbatim. */
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*),
   ::view-transition-old(*),
