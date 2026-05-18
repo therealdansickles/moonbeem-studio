@@ -94,3 +94,18 @@ body {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* View Transitions reduced-motion escape hatch. React's
+   <ViewTransition> does NOT auto-respect prefers-reduced-motion;
+   the CSS rule below collapses every view-transition animation to
+   zero duration when the OS requests reduced motion — users get
+   the browser's default instant content swap instead of the morph.
+   Selectors match the Next 16 view-transitions guide verbatim. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
+}

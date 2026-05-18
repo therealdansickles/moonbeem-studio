@@ -24,6 +24,15 @@ import type { NextConfig } from "next";
 const ALLOWED_ORIGIN = "https://www.moonbeem.studio";
 
 const nextConfig: NextConfig = {
+  // React 19 / Next 16 View Transitions API integration. Enables the
+  // <ViewTransition> component (imported from "react") to animate
+  // route navigations. Marked experimental in the Next 16 docs but
+  // is the documented path for cross-route shared-element morphs.
+  // Browsers without View Transitions support fall back to instant
+  // swap (progressive enhancement).
+  experimental: {
+    viewTransition: true,
+  },
   images: {
     remotePatterns: [
       {

@@ -1,3 +1,6 @@
+"use client";
+
+import { ViewTransition } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { Title } from "@/lib/queries/titles";
@@ -16,14 +19,16 @@ export default function TitleCard({ title }: Props) {
     >
       {title.poster_url ? (
         <>
-          <Image
-            src={title.poster_url}
-            alt={`${title.title} poster`}
-            fill
-            sizes="(max-width: 768px) 50vw, 240px"
-            draggable={false}
-            className="select-none object-cover"
-          />
+          <ViewTransition name={`title-poster-${title.slug}`}>
+            <Image
+              src={title.poster_url}
+              alt={`${title.title} poster`}
+              fill
+              sizes="(max-width: 768px) 50vw, 240px"
+              draggable={false}
+              className="select-none object-cover"
+            />
+          </ViewTransition>
           <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent p-3 pt-10">
             <p className="text-body-sm font-semibold text-moonbeem-ink leading-tight line-clamp-2">
               {title.title}

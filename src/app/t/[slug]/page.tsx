@@ -18,6 +18,7 @@ import RequestFanEditsCTA from "@/components/RequestFanEditsCTA";
 import RequestSubmittedToast from "@/components/RequestSubmittedToast";
 import AboutCredits from "@/components/AboutCredits";
 import OfferButtonClient from "@/components/OfferButtonClient";
+import TitlePosterShared from "@/components/TitlePosterShared";
 import { createClient } from "@/lib/supabase/server";
 import { canViewTitle } from "@/lib/title-access";
 import { getCurrentProfile } from "@/lib/dal";
@@ -192,13 +193,10 @@ export default async function TitlePage({ params }: PageProps) {
 
   const posterEl = title.poster_url ? (
     <div className="w-full max-w-[440px] md:max-w-none rounded-lg overflow-hidden shadow-2xl">
-      <Image
+      <TitlePosterShared
+        slug={title.slug}
         src={title.poster_url}
         alt={`${title.title} poster`}
-        width={600}
-        height={900}
-        className="w-full h-auto"
-        priority
       />
     </div>
   ) : (
