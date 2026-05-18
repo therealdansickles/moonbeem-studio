@@ -70,7 +70,7 @@ export default async function PartnerCatalogPage({ params }: PageProps) {
           </Link>
         </div>
 
-        <div className="mb-12 flex flex-col items-start gap-6 px-6">
+        <div className="mb-12 flex flex-col items-center gap-6 px-6 sm:items-start">
           {partner.logo_url ? (
             // Plain <img>: avoids the next/image domain whitelist
             // requirement for arbitrary R2 public URLs. 144px display
@@ -85,7 +85,7 @@ export default async function PartnerCatalogPage({ params }: PageProps) {
               alt={partner.name as string}
             />
           ) : null}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 text-center sm:text-left">
             <h1 className="m-0 font-wordmark text-display-md md:text-display-lg text-moonbeem-pink">
               {partner.name as string}
             </h1>
