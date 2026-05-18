@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import type { Title } from "@/lib/queries/titles";
 import TitleCard from "./TitleCard";
 import { useDragScroll } from "@/hooks/useDragScroll";
+import { fadeIn, noMotion, stagger } from "@/lib/motion";
 
 type Props = {
   // Section header above the carousel. Omit / empty string to render
@@ -15,6 +17,13 @@ type Props = {
 
 export default function TitleCarousel({ title, titles }: Props) {
   const scrollRef = useDragScroll();
+  const reduce = useReducedMotion();
+  // Opacity-only entrance — does NOT animate translateY. The
+  // poster <ViewTransition> inside TitleCard captures the
+  // element's painted RECT on click; a translate on an ancestor
+  // would shift that rect mid-entrance and start the cross-route
+  // morph from the wrong position. Fading only is geometry-safe.
+  const cardVariant = reduce ? noMotion : fadeIn;
   const [showLeftFade, setShowLeftFade] = useState(false);
   const [showRightFade, setShowRightFade] = useState(true);
 
@@ -46,22 +55,26 @@ export default function TitleCarousel({ title, titles }: Props) {
       )}
 
       <div className="relative">
-        <div
+        <motion.div
           ref={scrollRef}
           className="flex select-none snap-x snap-mandatory gap-4 overflow-x-auto px-6 pb-2 [scrollbar-width:none] [-webkit-user-drag:none] [&::-webkit-scrollbar]:hidden"
           role="list"
           onDragStart={(e) => e.preventDefault()}
+          variants={stagger}
+          initial="hidden"
+          animate="visible"
         >
           {titles.map((t) => (
-            <div
+            <motion.div
               key={t.id}
               role="listitem"
               className="w-[160px] shrink-0 snap-start md:w-[220px] lg:w-[240px]"
+              variants={cardVariant}
             >
               <TitleCard title={t} />
-            </div>
+            </motion.div>
           ))}
-        </div>
+        </motion.div>
 
         <div
           aria-hidden
