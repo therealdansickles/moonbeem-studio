@@ -5,7 +5,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import Link from "next/link";
 import type { MarqueePartner } from "@/lib/queries/partners";
 import { useDragScroll } from "@/hooks/useDragScroll";
-import { fadeIn, noMotion, staggerReverse } from "@/lib/motion";
+import { fadeIn, noMotion, stagger } from "@/lib/motion";
 
 // Logo render height. All partner logos are spec'd as 16:9 (Phase A
 // admin upload enforcement, 2026-05-12), so width = height × 16/9 ≈
@@ -70,7 +70,7 @@ export default function PartnerLogoStrip({ partners }: Props) {
         className="flex select-none items-center gap-4 overflow-x-auto px-6 py-4 [scrollbar-width:none] [-webkit-user-drag:none] [&::-webkit-scrollbar]:hidden cursor-grab"
         role="list"
         onDragStart={(e) => e.preventDefault()}
-        variants={staggerReverse}
+        variants={stagger}
         initial="hidden"
         animate="visible"
       >
