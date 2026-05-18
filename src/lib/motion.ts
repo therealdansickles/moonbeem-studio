@@ -41,3 +41,14 @@ export const noMotion: Variants = {
   hidden: { opacity: 1 },
   visible: { opacity: 1, transition: { duration: 0 } },
 };
+
+// Reverse-stagger container — children animate in reverse DOM
+// order (rightmost flex child first). Same cadence as `stagger`
+// so paired carousels (e.g. partner logos counter-sweeping the
+// title carousels) read as one consistent rhythm.
+export const staggerReverse: Variants = {
+  hidden: {},
+  visible: {
+    transition: { staggerChildren: 0.08, staggerDirection: -1 },
+  },
+};
