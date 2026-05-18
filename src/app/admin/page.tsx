@@ -485,7 +485,7 @@ export default async function AdminLanding() {
 
         {/* Partners */}
         <div className="mt-10">
-          <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <SectionHeader
               pill="Partners"
               title={`${partners.length} ${partners.length === 1 ? "partner" : "partners"}`}
@@ -514,7 +514,7 @@ export default async function AdminLanding() {
 
         {/* Titles */}
         <div className="mt-10">
-          <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <SectionHeader
               pill="Titles"
               title={`${titles.length} partnered`}
