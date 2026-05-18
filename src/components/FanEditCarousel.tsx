@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import type { FanEditWithTitle } from "@/lib/queries/titles";
 import FanEditCard from "./FanEditCard";
 import { useDragScroll } from "@/hooks/useDragScroll";
+import { fadeInUp, noMotion, stagger } from "@/lib/motion";
 
 type Props = {
   title: string;
@@ -12,6 +14,12 @@ type Props = {
 
 export default function FanEditCarousel({ title, fanEdits }: Props) {
   const scrollRef = useDragScroll();
+  const reduce = useReducedMotion();
+  // Reduced-motion users get an instant render via noMotion; the
+  // stagger parent variant is harmless either way (it only
+  // sequences children — with noMotion children there is nothing
+  // to visually sequence).
+  const cardVariant = reduce ? noMotion : fadeInUp;
   const [showLeftFade, setShowLeftFade] = useState(false);
   const [showRightFade, setShowRightFade] = useState(true);
 
@@ -41,26 +49,30 @@ export default function FanEditCarousel({ title, fanEdits }: Props) {
       </h2>
 
       <div className="relative">
-        <div
+        <motion.div
           ref={scrollRef}
           className="flex select-none snap-x snap-mandatory gap-4 overflow-x-auto px-6 pb-2 [scrollbar-width:none] [-webkit-user-drag:none] [&::-webkit-scrollbar]:hidden"
           role="list"
           onDragStart={(e) => e.preventDefault()}
+          variants={stagger}
+          initial="hidden"
+          animate="visible"
         >
           {fanEdits.map((fe, idx) => (
-            <div
+            <motion.div
               key={fe.id}
               role="listitem"
               className="w-[200px] shrink-0 snap-start md:w-[260px] lg:w-[280px]"
+              variants={cardVariant}
             >
               <FanEditCard
                 fanEdit={fe}
                 siblings={fanEdits}
                 siblingIndex={idx}
               />
-            </div>
+            </motion.div>
           ))}
-        </div>
+        </motion.div>
 
         <div
           aria-hidden

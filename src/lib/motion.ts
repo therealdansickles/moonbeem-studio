@@ -33,3 +33,11 @@ export const scaleOnHover: Variants = {
     transition: { duration: 0.2, ease: easeOutQuart },
   },
 };
+
+// Reduced-motion sibling for any fade/move variant. Children are
+// rendered visible immediately with zero duration — used at call
+// sites that read useReducedMotion() and want a no-op fallback.
+export const noMotion: Variants = {
+  hidden: { opacity: 1 },
+  visible: { opacity: 1, transition: { duration: 0 } },
+};
