@@ -101,7 +101,7 @@ export default function FanEditCard({
         <p className="text-body-sm font-medium text-moonbeem-ink leading-tight line-clamp-2">
           {fanEdit.title_name}
         </p>
-        <p className="mt-0.5 text-caption text-moonbeem-ink-subtle">
+        <p className="mt-0.5 text-caption text-moonbeem-ink-subtle truncate">
           by{" "}
           {moonbeemHandle ? (
             // Byline link still goes to /c/[handle]; click-stop
