@@ -14,6 +14,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import TitleCarousel from "@/components/TitleCarousel";
+import PartnerLogoShared from "@/components/PartnerLogoShared";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -74,14 +75,14 @@ export default async function PartnerCatalogPage({ params }: PageProps) {
             // Plain <img>: avoids the next/image domain whitelist
             // requirement for arbitrary R2 public URLs. 144px display
             // height; source is 16:9 so width = 256px.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            // The <PartnerLogoShared> wrapper carries the
+            // <ViewTransition name=`partner-logo-${slug}`> that pairs
+            // with the homepage strip — clicking a logo morphs into
+            // this hero element.
+            <PartnerLogoShared
+              slug={partner.slug as string}
               src={partner.logo_url as string}
               alt={partner.name as string}
-              height={144}
-              style={{ height: "144px", width: "auto" }}
-              className="overflow-hidden rounded-lg"
-              draggable={false}
             />
           ) : null}
           <div className="flex flex-col gap-2">

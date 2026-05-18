@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, ViewTransition } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import Link from "next/link";
 import type { MarqueePartner } from "@/lib/queries/partners";
@@ -100,14 +100,20 @@ export default function PartnerLogoStrip({ partners }: Props) {
                   next.config remotePatterns for every uploaded
                   logo. Browser downscaling from the source PNG is
                   fine at 72px display height. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={p.logo_url}
-                alt={p.name}
-                height={LOGO_HEIGHT_PX}
-                style={{ height: `${LOGO_HEIGHT_PX}px`, width: "auto" }}
-                draggable={false}
-              />
+              {/* The <ViewTransition> pairs this logo with the
+                  /p/[slug] hero logo by the shared name
+                  `partner-logo-${slug}` so a click morphs the logo
+                  across the route. */}
+              <ViewTransition name={`partner-logo-${p.slug}`}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={p.logo_url}
+                  alt={p.name}
+                  height={LOGO_HEIGHT_PX}
+                  style={{ height: `${LOGO_HEIGHT_PX}px`, width: "auto" }}
+                  draggable={false}
+                />
+              </ViewTransition>
             </Link>
           </motion.div>
         ))}
