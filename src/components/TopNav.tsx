@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { getCurrentProfile } from "@/lib/dal";
 import AccountMenu from "./AccountMenu";
+import MobileNavMenu from "./MobileNavMenu";
 import SearchBar from "./SearchBar";
 
 export default async function TopNav() {
@@ -25,6 +26,13 @@ export default async function TopNav() {
             className="h-10 w-auto"
           />
         </Link>
+
+        {/* Hamburger trigger + slide-down panel. Renders the
+            corresponding nav links on mobile (md:hidden on the
+            trigger; the panel is only opened on mobile). Auth
+            booleans are computed once above and passed in — no
+            second admin check. */}
+        <MobileNavMenu showForYou={!!profile} showAdmin={isSuperAdmin} />
 
         <nav className="hidden items-center gap-4 md:flex">
           <Link

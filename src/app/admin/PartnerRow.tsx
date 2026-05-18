@@ -19,12 +19,12 @@ export default function PartnerRow(props: Props) {
   const [membersOpen, setMembersOpen] = useState(false);
   return (
     <>
-      <li className="flex items-center gap-4 py-3">
+      <li className="flex flex-col gap-2 py-3 md:flex-row md:items-center md:gap-4">
         {/* Admin partner-row links to the dashboard (admin intent
             is analytics access, not the public catalog at /p/<slug>). */}
         <Link
           href={`/p/${props.slug}/dashboard`}
-          className="min-w-0 flex-1 text-body font-medium text-moonbeem-ink hover:text-moonbeem-pink"
+          className="min-w-0 flex-1 truncate text-body font-medium text-moonbeem-ink hover:text-moonbeem-pink"
         >
           {props.name}
         </Link>
