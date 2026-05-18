@@ -132,15 +132,15 @@ export default function TitleRowControls({
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
-      <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
-        <div className="min-w-0 flex-1">
+      <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-start md:gap-x-6 md:gap-y-3">
+        <div className="min-w-0 md:flex-1">
           <Link
             href={`/admin/titles/${slug}`}
             className="text-body font-medium text-moonbeem-ink hover:text-moonbeem-pink"
           >
             {title}
           </Link>
-          <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-caption text-moonbeem-ink-subtle">
+          <div className="mt-1 flex flex-col gap-1 md:flex-row md:flex-wrap md:items-center md:gap-x-4 md:gap-y-1 text-caption text-moonbeem-ink-subtle">
             {partnerSlug ? (
               <Link
                 href={`/p/${partnerSlug}/dashboard`}
@@ -151,11 +151,11 @@ export default function TitleRowControls({
             ) : (
               <span>No partner</span>
             )}
-            <span>·</span>
+            <span className="hidden md:inline">·</span>
             <span className="tabular-nums">
               {fanEditCount} {fanEditCount === 1 ? "edit" : "edits"}
             </span>
-            <span>·</span>
+            <span className="hidden md:inline">·</span>
             <span className="tabular-nums">
               {totalViewsFormatted} views
               <span className="sr-only"> ({totalViews})</span>
