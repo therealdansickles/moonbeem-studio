@@ -3,6 +3,7 @@
 // Verifies Stripe webhook signature and handles the events we
 // subscribed to in the dashboard:
 //
+//   Creator-OUT rail (existing):
 //   account.updated                    — connected-account state
 //                                        changed; flip
 //                                        onboarding_completed +
@@ -16,6 +17,26 @@
 //   payout.failed                      — bank-leg payout failed.
 //                                        Informational; logged so
 //                                        we can surface in UI later.
+//
+//   Partner-IN rail (campaigns v1 3b):
+//   checkout.session.completed         — partner paid the funding
+//                                        Checkout session. Call
+//                                        confirm_campaign_funding
+//                                        RPC with the funding row
+//                                        id from session metadata.
+//                                        Atomically credits the
+//                                        ledger and flips campaign
+//                                        to 'funded'.
+//   checkout.session.expired           — Checkout session expired
+//                                        (~24h default) without a
+//                                        successful payment. Flip
+//                                        the campaign_funding row
+//                                        to 'failed'; campaign
+//                                        stays 'draft'.
+//   payment_intent.payment_failed      — card declined or otherwise
+//                                        rejected. Same handling
+//                                        as expired: flip the cf
+//                                        row to 'failed'.
 //
 // We do NOT subscribe to transfer.* events — the withdrawal route
 // handles transfer success/failure synchronously from the Stripe
@@ -113,6 +134,128 @@ export async function POST(request: NextRequest) {
       console.log(
         `[stripe-webhook] ${event.type} payout=${payout.id} amount=${payout.amount} ${payout.currency} account=${acct ?? "n/a"}`,
       );
+      break;
+    }
+
+    case "checkout.session.completed": {
+      // Partner-IN: a campaign-funding Checkout session was paid.
+      // Read the funding row id from session metadata (round-tripped
+      // at session-create time by /api/p/[slug]/campaigns/[id]/fund),
+      // then call confirm_campaign_funding which atomically:
+      //   - flips campaign_funding pending -> succeeded (or, in the
+      //     double-fund case, -> superseded)
+      //   - inserts a campaign_ledger 'funding' row for the pool
+      //   - flips campaigns draft -> funded + funded_at
+      // The RPC is idempotent on replay; a redelivered event lands
+      // on a 'succeeded' or 'superseded' row and short-circuits.
+      const session = event.data.object as Stripe.Checkout.Session;
+      const fundingId = session.metadata?.moonbeem_campaign_funding_id;
+      if (!fundingId) {
+        // Not a campaigns-funding session (or metadata didn't round-
+        // trip). Stripe sends checkout.session.completed for any
+        // Checkout in the account; ignoring sessions we don't own
+        // is the right move. Ack 200 so Stripe doesn't retry.
+        console.log(
+          `[stripe-webhook] checkout.session.completed missing moonbeem_campaign_funding_id; session=${session.id}`,
+        );
+        break;
+      }
+      const { data: campaignId, error: rpcErr } = await supabase.rpc(
+        "confirm_campaign_funding",
+        { p_campaign_funding_id: fundingId },
+      );
+      if (rpcErr) {
+        const msg = rpcErr.message ?? "";
+        // 'unknown_funding' = the metadata id doesn't match any row.
+        // Corrupt event or hand-crafted webhook. Log loudly and ack
+        // 200 so Stripe stops retrying. Any other raised exception
+        // (already_failed / invalid_funding_state /
+        // invalid_campaign_state) likewise indicates an event that
+        // won't succeed on retry — ack 200 with a loud log.
+        // Unexpected errors (e.g. DB connectivity) return 500 so
+        // Stripe retries.
+        const handledErrors = [
+          "unknown_funding",
+          "already_failed",
+          "invalid_funding_state",
+          "invalid_campaign_state",
+        ];
+        const isHandled = handledErrors.some((code) => msg.includes(code));
+        if (isHandled) {
+          console.error(
+            `[stripe-webhook] confirm_campaign_funding raised handled exception for funding=${fundingId}: ${msg}`,
+          );
+          break;
+        }
+        console.error(
+          `[stripe-webhook] confirm_campaign_funding unexpected error for funding=${fundingId}: ${msg}`,
+        );
+        return NextResponse.json({ error: "rpc_failed" }, { status: 500 });
+      }
+      console.log(
+        `[stripe-webhook] confirm_campaign_funding ok funding=${fundingId} campaign=${campaignId ?? "n/a"}`,
+      );
+      break;
+    }
+
+    case "checkout.session.expired": {
+      // Partner-IN: the Checkout session expired (default ~24h)
+      // without a payment. Flip the campaign_funding row to 'failed'
+      // so subsequent fund attempts on the same campaign can proceed
+      // (Stage 2's concurrent-pending guard blocks new attempts
+      // while a row stays 'pending'). Do NOT touch the ledger or
+      // campaigns.status — the campaign stays 'draft'.
+      const session = event.data.object as Stripe.Checkout.Session;
+      const fundingId = session.metadata?.moonbeem_campaign_funding_id;
+      if (!fundingId) {
+        console.log(
+          `[stripe-webhook] checkout.session.expired missing moonbeem_campaign_funding_id; session=${session.id}`,
+        );
+        break;
+      }
+      const { error } = await supabase
+        .from("campaign_funding")
+        .update({
+          status: "failed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", fundingId)
+        .eq("status", "pending"); // only pending rows transition here
+      if (error) {
+        console.error(
+          `[stripe-webhook] checkout.session.expired failed to mark funding=${fundingId} as failed: ${error.message}`,
+        );
+      }
+      break;
+    }
+
+    case "payment_intent.payment_failed": {
+      // Partner-IN: the underlying PaymentIntent was rejected (card
+      // declined, etc). Same pending -> failed transition as
+      // checkout.session.expired. PaymentIntent metadata was set in
+      // the fund endpoint via payment_intent_data.metadata, so it
+      // round-trips on the event.
+      const pi = event.data.object as Stripe.PaymentIntent;
+      const fundingId = pi.metadata?.moonbeem_campaign_funding_id;
+      if (!fundingId) {
+        console.log(
+          `[stripe-webhook] payment_intent.payment_failed missing moonbeem_campaign_funding_id; pi=${pi.id}`,
+        );
+        break;
+      }
+      const { error } = await supabase
+        .from("campaign_funding")
+        .update({
+          status: "failed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", fundingId)
+        .eq("status", "pending");
+      if (error) {
+        console.error(
+          `[stripe-webhook] payment_intent.payment_failed failed to mark funding=${fundingId} as failed: ${error.message}`,
+        );
+      }
       break;
     }
 

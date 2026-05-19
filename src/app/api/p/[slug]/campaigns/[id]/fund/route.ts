@@ -120,6 +120,42 @@ export async function POST(
     );
   }
 
+  // Concurrent-funding guard. If a pending campaign_funding row
+  // already exists for this campaign, block creating a second one —
+  // two live Checkout sessions for the same campaign is the
+  // double-fund scenario (two paid sessions → two credit attempts).
+  // The Part C RPC backstop catches this at the database level, but
+  // this application-layer check is the friendlier user-facing
+  // signal: a partner who clicks Fund twice (multi-tab or accidental
+  // refresh) gets a clear 409 instead of a second session URL.
+  //
+  // No staleness window. Rationale: Stage 3 Part A's
+  // checkout.session.expired handler flips abandoned-pending rows to
+  // 'failed' at Stripe's natural session expiration (~24h default),
+  // which unblocks the campaign. Stripe's webhook delivery is
+  // exhaustive (long-tail retries), so a row that's stuck pending
+  // past 24h indicates a real operational anomaly worth surfacing —
+  // not something to paper over with a time window that could allow
+  // a genuine in-flight payment to be bypassed. Worst case partner-
+  // side: a 24h block after abandoning a Checkout session, which is
+  // acceptable for v1 and can be tightened later (e.g. by shortening
+  // checkout session expires_at, or by manual ops cleanup).
+  const { data: existingPending } = await supabase
+    .from("campaign_funding")
+    .select("id, created_at")
+    .eq("campaign_id", campaign.id)
+    .eq("status", "pending")
+    .maybeSingle();
+  if (existingPending) {
+    return NextResponse.json(
+      {
+        error: "funding_already_in_progress",
+        existing_funding_id: existingPending.id,
+      },
+      { status: 409 },
+    );
+  }
+
   // Fee math. moonbeem_fee_pct is a Postgres numeric and may come
   // back from supabase-js as a string; Number() handles either.
   // Math.round is explicit so a half-cent doesn't silently truncate
