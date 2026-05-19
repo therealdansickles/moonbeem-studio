@@ -20,6 +20,7 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import GrowthChart from "@/components/p/GrowthChart";
 import AllEditsTable from "@/components/p/AllEditsTable";
 import PartnerRatesCard from "@/components/p/PartnerRatesCard";
+import CampaignsCard from "@/components/p/CampaignsCard";
 import TopPerformersCardClient from "@/components/p/TopPerformersCardClient";
 import InitialAvatar from "@/components/p/InitialAvatar";
 import { rankTierClass } from "@/components/p/rankTier";
@@ -1258,6 +1259,52 @@ export default async function PartnerDashboardPage({
     if (e.creator_id) creatorsThisMonth.add(e.creator_id as string);
   }
 
+  // Campaigns for this partner — newest first. A draft campaign is
+  // inert (no metering, no payouts) until 3b funds it; the dashboard
+  // surfaces them so a partner-admin can see what they've just
+  // created and so partner-viewers can see the partner's plans.
+  const { data: campaignRows } = await supabase
+    .from("campaigns")
+    .select(
+      "id, name, status, cpm_rate_cents, budget_pool_cents, settling_days, starts_at, ends_at, created_at",
+    )
+    .eq("partner_id", partner.id)
+    .order("created_at", { ascending: false });
+  const campaignIds = (campaignRows ?? []).map((c) => c.id as string);
+  const titleCountByCampaign = new Map<string, number>();
+  if (campaignIds.length > 0) {
+    const { data: ctRows } = await supabase
+      .from("campaign_titles")
+      .select("campaign_id")
+      .in("campaign_id", campaignIds);
+    for (const r of ctRows ?? []) {
+      const cid = r.campaign_id as string;
+      titleCountByCampaign.set(cid, (titleCountByCampaign.get(cid) ?? 0) + 1);
+    }
+  }
+  const campaigns = (campaignRows ?? []).map((c) => ({
+    id: c.id as string,
+    name: c.name as string,
+    status: c.status as string,
+    cpm_rate_cents: c.cpm_rate_cents as number,
+    budget_pool_cents: c.budget_pool_cents as number,
+    settling_days: c.settling_days as number,
+    starts_at: (c.starts_at as string | null) ?? null,
+    ends_at: (c.ends_at as string | null) ?? null,
+    created_at: c.created_at as string,
+    title_count: titleCountByCampaign.get(c.id as string) ?? 0,
+  }));
+
+  // Title picker for the campaign wizard. Pass the partner's full
+  // title set as a prop so the client component doesn't refetch.
+  const wizardTitles = titleRows.map((t) => ({
+    id: t.id,
+    slug: t.slug,
+    title: t.title,
+    poster_url: t.poster_url,
+    is_active: t.is_active,
+  }));
+
   const titleSummary = titleRows.length === 1
     ? titleRows[0].title
     : `${titleRows.length} titles`;
@@ -1470,6 +1517,15 @@ export default async function PartnerDashboardPage({
 
         <div className="mt-10">
           <RequestedTitlesCard requestedTitles={requestedTitles} />
+        </div>
+
+        <div className="mt-10">
+          <CampaignsCard
+            partnerSlug={partner.slug as string}
+            isAdmin={isPartnerAdmin}
+            campaigns={campaigns}
+            titles={wizardTitles}
+          />
         </div>
 
         <div className="mt-10">
