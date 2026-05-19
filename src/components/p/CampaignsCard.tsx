@@ -1,12 +1,26 @@
 "use client";
 
 // Partner dashboard card that lists existing campaigns and (for
-// admins) opens the CampaignWizard. Mirrors PartnerRatesCard's shape:
-// data passed in as props from the server component, optional
-// interactive editing gated on isAdmin, viewer fallback line for
-// non-admins.
+// admins) opens the CampaignWizard or kicks off funding via Stripe
+// Checkout. Mirrors PartnerRatesCard's shape: data passed in as
+// props from the server component, optional interactive editing
+// gated on isAdmin, viewer fallback line for non-admins.
+//
+// 3b additions:
+// - Per-row "Fund" button on draft campaigns (admin only). Posts to
+//   /api/p/[slug]/campaigns/[id]/fund and redirects to the returned
+//   Stripe Checkout URL. 409 funding_already_in_progress is shown
+//   as a readable message rather than a raw error.
+// - Return-flag handling. Stripe Checkout's success_url / cancel_url
+//   land back on the dashboard with ?campaign_funded=<id> or
+//   ?campaign_funding_cancelled=<id>. On detection, the card briefly
+//   shows a banner and calls router.refresh() so the now-funded
+//   campaign re-renders with its updated status. The URL flag is
+//   then cleared via router.replace() so a manual reload doesn't
+//   re-trigger.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import CampaignWizard from "./CampaignWizard";
 
 type CampaignSummary = {
@@ -66,13 +80,75 @@ function statusPillClass(status: string): string {
   }
 }
 
+function friendlyFundError(code: string): string {
+  switch (code) {
+    case "funding_already_in_progress":
+      return "A funding payment is already in progress for this campaign. Finish or cancel it before starting a new one.";
+    case "invalid_state":
+      return "This campaign is no longer a draft. Refresh the dashboard.";
+    case "not_authorized":
+      return "You don't have admin access on this partner.";
+    case "not_authenticated":
+      return "Please sign in again.";
+    case "campaign_not_found":
+      return "Campaign not found.";
+    case "stripe_error":
+      return "Stripe couldn't open a checkout session. Please try again.";
+    case "customer_persist_failed":
+      return "Couldn't save the Stripe customer. Please try again.";
+    default:
+      return code;
+  }
+}
+
 export default function CampaignsCard({
   partnerSlug,
   isAdmin,
   campaigns,
   titles,
 }: Props) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [banner, setBanner] = useState<
+    { kind: "success" | "info"; text: string } | null
+  >(null);
+  const returnHandled = useRef(false);
+
+  const fundedFlag = searchParams.get("campaign_funded");
+  const cancelledFlag = searchParams.get("campaign_funding_cancelled");
+
+  // Handle return from Stripe Checkout. Only runs once per mount —
+  // after detection, we clean the query params with router.replace()
+  // (which leaves the rest of the URL intact) and call router.refresh()
+  // so the server component re-fetches campaign rows. The ref guards
+  // against an Effect re-run loop in case router.refresh() doesn't
+  // immediately stabilize the searchParams reference.
+  useEffect(() => {
+    if (returnHandled.current) return;
+    if (!fundedFlag && !cancelledFlag) return;
+    returnHandled.current = true;
+    if (fundedFlag) {
+      setBanner({
+        kind: "success",
+        text: "Payment received. Your campaign is funded.",
+      });
+    } else if (cancelledFlag) {
+      setBanner({
+        kind: "info",
+        text: "Funding cancelled. You can try again any time.",
+      });
+    }
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("campaign_funded");
+    params.delete("campaign_funding_cancelled");
+    const newSearch = params.toString();
+    router.replace(
+      `${window.location.pathname}${newSearch ? `?${newSearch}` : ""}`,
+      { scroll: false },
+    );
+    router.refresh();
+  }, [fundedFlag, cancelledFlag, searchParams, router]);
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
@@ -96,6 +172,18 @@ export default function CampaignsCard({
         )}
       </div>
 
+      {banner && (
+        <div
+          className={`mt-4 rounded-lg border px-3 py-2 text-caption ${
+            banner.kind === "success"
+              ? "border-emerald-700/40 bg-emerald-700/10 text-emerald-300"
+              : "border-white/10 bg-white/5 text-moonbeem-ink-subtle"
+          }`}
+        >
+          {banner.text}
+        </div>
+      )}
+
       <div className="mt-4">
         {campaigns.length === 0 ? (
           <p className="text-body-sm text-moonbeem-ink-subtle">
@@ -116,6 +204,7 @@ export default function CampaignsCard({
                   <th className="px-3 py-2">Titles</th>
                   <th className="px-3 py-2">Window</th>
                   <th className="px-3 py-2">Created</th>
+                  {isAdmin && <th className="px-3 py-2">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -151,6 +240,20 @@ export default function CampaignsCard({
                     <td className="px-3 py-2 text-moonbeem-ink-subtle">
                       {formatDate(c.created_at)}
                     </td>
+                    {isAdmin && (
+                      <td className="px-3 py-2">
+                        {c.status === "draft" ? (
+                          <FundCampaignButton
+                            partnerSlug={partnerSlug}
+                            campaignId={c.id}
+                          />
+                        ) : (
+                          <span className="text-caption text-moonbeem-ink-subtle">
+                            —
+                          </span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -172,6 +275,59 @@ export default function CampaignsCard({
           titles={titles}
           onClose={() => setWizardOpen(false)}
         />
+      )}
+    </div>
+  );
+}
+
+function FundCampaignButton({
+  partnerSlug,
+  campaignId,
+}: {
+  partnerSlug: string;
+  campaignId: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function fund() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/p/${partnerSlug}/campaigns/${campaignId}/fund`,
+        { method: "POST", headers: { "Content-Type": "application/json" } },
+      );
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        checkout_url?: string;
+      };
+      if (!res.ok || !json.ok || !json.checkout_url) {
+        setError(friendlyFundError(json.error ?? `request_failed_${res.status}`));
+        setBusy(false);
+        return;
+      }
+      window.location.href = json.checkout_url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "network_error");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        onClick={fund}
+        disabled={busy}
+        className="rounded-md bg-moonbeem-pink px-3 py-1.5 text-caption font-semibold text-moonbeem-navy hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {busy ? "Opening Stripe…" : "Fund campaign"}
+      </button>
+      {error && (
+        <p className="text-caption text-moonbeem-magenta max-w-xs">{error}</p>
       )}
     </div>
   );
