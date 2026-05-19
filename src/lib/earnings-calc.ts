@@ -34,6 +34,7 @@ type EarningsInsert = {
   earnings_cents: number;
   calculation_date: string;
   claimed: boolean;
+  campaign_id: string | null;
 };
 
 export type RateCalcResult = {
@@ -123,6 +124,7 @@ export async function calculateEarningsForRate(
       earnings_cents: earnings,
       calculation_date: today,
       claimed,
+      campaign_id: null,
     });
     totalEarningsCents += earnings;
   }
@@ -133,7 +135,7 @@ export async function calculateEarningsForRate(
   const { error: upsertErr } = await supabase
     .from("creator_earnings")
     .upsert(inserts, {
-      onConflict: "creator_id,fan_edit_id,calculation_date",
+      onConflict: "creator_id,fan_edit_id,calculation_date,campaign_id",
     });
   if (upsertErr) {
     return { rows_upserted: 0, total_earnings_cents: 0, error: upsertErr.message };
