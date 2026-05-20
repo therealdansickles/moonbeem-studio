@@ -311,27 +311,15 @@ export async function POST(
     );
   }
 
-  // session.payment_intent can be a string id or an expanded object;
-  // by default it's a string. Defensive on the shape.
-  const piId = typeof session.payment_intent === "string"
-    ? session.payment_intent
-    : session.payment_intent?.id ?? null;
-  if (piId) {
-    const { error: piUpdErr } = await supabase
-      .from("campaign_funding")
-      .update({
-        stripe_payment_intent_id: piId,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", fundingId);
-    if (piUpdErr) {
-      // Non-fatal — the metadata round-trip is the primary id link
-      // the webhook handler uses; the column is a secondary index.
-      console.error(
-        `[campaigns-fund] failed to stamp payment_intent_id on funding=${fundingId}: ${piUpdErr.message}`,
-      );
-    }
-  }
+  // campaign_funding.stripe_payment_intent_id is stamped by the
+  // checkout.session.completed webhook handler, not here:
+  // checkout.sessions.create does not reliably populate
+  // session.payment_intent synchronously in payment mode (verified
+  // in 3b testing — the post-create read landed null every time).
+  // The webhook event always carries the payment-intent id, so the
+  // stamp lives there. The metadata round-trip
+  // (moonbeem_campaign_funding_id) is what links this row to the
+  // webhook regardless.
 
   return NextResponse.json({
     ok: true,

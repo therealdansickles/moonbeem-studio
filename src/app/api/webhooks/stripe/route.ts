@@ -160,6 +160,35 @@ export async function POST(request: NextRequest) {
         );
         break;
       }
+
+      // Stamp the payment-intent id on the funding row. checkout
+      // .sessions.create does NOT reliably populate
+      // session.payment_intent synchronously in payment mode, so the
+      // fund endpoint can't stamp it at create time — but this
+      // completed event always carries it. Stamp only when the
+      // column is still null so we never clobber an existing value.
+      // Best-effort: a failure here is logged but does not block
+      // funding confirmation (the metadata round-trip, not this
+      // column, is the id link the RPC relies on).
+      const piId = typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : session.payment_intent?.id ?? null;
+      if (piId) {
+        const { error: stampErr } = await supabase
+          .from("campaign_funding")
+          .update({
+            stripe_payment_intent_id: piId,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", fundingId)
+          .is("stripe_payment_intent_id", null);
+        if (stampErr) {
+          console.error(
+            `[stripe-webhook] failed to stamp payment_intent_id on funding=${fundingId}: ${stampErr.message}`,
+          );
+        }
+      }
+
       const { data: campaignId, error: rpcErr } = await supabase.rpc(
         "confirm_campaign_funding",
         { p_campaign_funding_id: fundingId },
