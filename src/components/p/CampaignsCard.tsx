@@ -290,6 +290,21 @@ function FundCampaignButton({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // A successful fund() leaves busy=true and navigates away to Stripe
+  // via window.location.href. If the partner returns with the browser
+  // Back button, the page is restored from the back/forward cache
+  // (bfcache) with busy still frozen true — React does not remount,
+  // so every later click silently no-ops on the `if (busy) return;`
+  // guard. pageshow with persisted=true is the bfcache-restore
+  // signal; reset busy so the button is live again without a reload.
+  useEffect(() => {
+    function onPageShow(e: PageTransitionEvent) {
+      if (e.persisted) setBusy(false);
+    }
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
+
   async function fund() {
     if (busy) return;
     setBusy(true);
