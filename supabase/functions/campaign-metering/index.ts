@@ -61,17 +61,50 @@
 // stop and void?" defense). A thrown exception mid-run flips the
 // run to status='failed' with error_message before re-raising.
 //
+// LIFECYCLE TRANSITIONS — this function also flips the picked
+// campaign's status on its own write paths, AFTER Pass 2 and AFTER
+// any voiding, BEFORE the run row is finalized:
+//   funded -> live      when rowsBilled > 0 AND status='funded'
+//                       (the campaign just paid its first creator
+//                       earnings this run; launched_at stamped).
+//   live  -> completed  when pool_remaining_after == 0 (strict
+//                       zero — the metering run drained the pool).
+//                       completed_at stamped.
+// The two transitions are mutually exclusive — pool == 0 wins if
+// both conditions could apply (a one-shot funded->completed jump
+// is possible if a campaign's first ever bill exhausts its pool
+// in the same run). Both UPDATEs carry status guards in their
+// WHERE clauses so a campaign that concurrently transitioned via
+// another path (e.g. a future admin-UI rollover) cannot be re-
+// flipped here.
+//
+// LIFECYCLE — partner_credits is NOT written here, even on
+// completion. The metering job's completion path triggers at
+// strict pool == 0, which has nothing to roll over by definition.
+// write_partner_credit_for_campaign is reserved for the manual-
+// completion path — an admin ending a campaign early with a
+// positive remaining pool. Two different completion paths, one
+// table flip each.
+//
+// LIFECYCLE — unexpected statuses ('paused', 'completed',
+// 'draft') log loudly and no-op. They shouldn't reach this code
+// (pickTargetCampaign filters to 'funded'/'live'), but if they
+// do — a concurrent admin override between pickTargetCampaign
+// and the lifecycle step — the run continues gracefully.
+//
 // AUTH — relies on Supabase Edge platform's default JWT verification.
 // pg_cron (Part C) calls with the service_role key; the platform
 // authenticates the request, and this function runs with full
-// service-role access via the supabase-js client. The RPC
-// (bill_settled_delta) is granted to service_role only, also
+// service-role access via the supabase-js client. The RPCs
+// (bill_settled_delta, write_partner_credit_for_campaign in the
+// future admin path) are granted to service_role only, also
 // verified separately.
 //
-// SCOPE — this function only METERS. It does NOT:
-//   - flip campaign status (funded -> live, live -> completed) —
-//     that's 3c.3.
-//   - write partner_credits — that's 3c.3.
+// SCOPE — this function meters and flips lifecycle status on its
+// own write paths. It does NOT:
+//   - write partner_credits — rollover is a separate manual-
+//     completion path. The strict-zero completion path here has
+//     nothing to roll over.
 //   - touch the creator withdraw rail — never.
 
 import {
@@ -108,6 +141,7 @@ type Campaign = {
   funded_at: string;
   cpm_rate_cents: number;
   settling_days: number;
+  status: string;
 };
 
 type Snapshot = {
@@ -139,7 +173,9 @@ async function pickTargetCampaign(
 ): Promise<{ campaign: Campaign; poolRemaining: number } | null> {
   const { data: campaigns, error: cErr } = await supabase
     .from("campaigns")
-    .select("id, partner_id, funded_at, cpm_rate_cents, settling_days")
+    .select(
+      "id, partner_id, funded_at, cpm_rate_cents, settling_days, status",
+    )
     .in("status", ["funded", "live"])
     .not("funded_at", "is", null)
     .order("funded_at", { ascending: true });
@@ -674,6 +710,117 @@ async function voidRemainingSettled(
 }
 
 // ---------------------------------------------------------------
+// Lifecycle transitions (3c.3).
+// ---------------------------------------------------------------
+// Fires AFTER Pass 2 and AFTER any voidRemainingSettled, BEFORE
+// the run row is finalized. Mutually exclusive transitions:
+//   funded -> live      when rowsBilled > 0 AND status='funded'.
+//   live  -> completed  when poolRemainingAfter == 0 (strict zero).
+// Both UPDATEs guard the prior status in their WHERE clauses, so
+// a campaign that concurrently transitioned (e.g. a manual
+// rollover) can never be flipped backward by this code.
+//
+// Two UPDATEs (not a single CASE) — chosen because:
+//   - Each transition's SET clause differs (live stamps
+//     launched_at, completed stamps completed_at). A single
+//     UPDATE with CASE would need three parallel CASE
+//     expressions, which is denser and easier to break.
+//   - The no-transition path short-circuits with zero
+//     round-trips; only the firing transition pays a round trip.
+//   - Each UPDATE has a single clear intent — easier to read,
+//     easier to log, easier to verify.
+//
+// Both UPDATEs use `.select('id')` and only return the transition
+// string if `data.length > 0`. If the UPDATE matched zero rows,
+// the campaign's status changed under us between pickTarget
+// Campaign and here (e.g. a concurrent admin rollover via
+// write_partner_credit_for_campaign). Log a concurrent_status_
+// change warning and return null. The JSON response's
+// `lifecycle_transition` field and the lifecycle log line then
+// reflect ONLY transitions that actually committed.
+//
+// partner_credits is NOT written here. The metering job's
+// strict-zero completion path has nothing to roll over by
+// definition — write_partner_credit_for_campaign is reserved
+// for the manual-completion path (admin ends a campaign early
+// with a positive remaining pool).
+//
+// Returns the transition that fired (or null) so the handler
+// can log it and surface it in the JSON response.
+
+async function applyLifecycleTransitions(
+  supabase: SupabaseClient,
+  campaign: Campaign,
+  rowsBilled: number,
+  poolRemainingAfter: number,
+): Promise<"live" | "completed" | null> {
+  // Defensive: refuse to touch unexpected statuses. pickTarget
+  // Campaign filtered to 'funded'/'live', so anything else here
+  // implies a concurrent state change. Log loudly and no-op —
+  // never crash the run on a status anomaly.
+  if (campaign.status !== "funded" && campaign.status !== "live") {
+    console.error(
+      `[campaign-metering] DATA ANOMALY: unexpected campaign status='${campaign.status}' at lifecycle step for campaign=${campaign.id}; skipping transition`,
+    );
+    return null;
+  }
+
+  // Pool exhausted — complete the campaign. Wins over the
+  // funded->live case when both could apply (a one-shot
+  // funded->completed jump on the first ever billing).
+  if (poolRemainingAfter === 0) {
+    const { data, error } = await supabase
+      .from("campaigns")
+      .update({
+        status: "completed",
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", campaign.id)
+      .in("status", ["funded", "live"])
+      .select("id");
+    if (error) {
+      throw new Error(
+        `applyLifecycleTransitions completed: ${error.message}`,
+      );
+    }
+    if ((data ?? []).length === 0) {
+      console.warn(
+        `[campaign-metering] concurrent_status_change: campaign=${campaign.id} expected status in ('funded','live') but UPDATE matched 0 rows; not returning transition`,
+      );
+      return null;
+    }
+    return "completed";
+  }
+
+  // First billing on a funded campaign — mark it 'live'.
+  if (rowsBilled > 0 && campaign.status === "funded") {
+    const { data, error } = await supabase
+      .from("campaigns")
+      .update({
+        status: "live",
+        launched_at: new Date().toISOString(),
+      })
+      .eq("id", campaign.id)
+      .eq("status", "funded")
+      .select("id");
+    if (error) {
+      throw new Error(
+        `applyLifecycleTransitions live: ${error.message}`,
+      );
+    }
+    if ((data ?? []).length === 0) {
+      console.warn(
+        `[campaign-metering] concurrent_status_change: campaign=${campaign.id} expected status='funded' but UPDATE matched 0 rows; not returning transition`,
+      );
+      return null;
+    }
+    return "live";
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------
 // Handler.
 // ---------------------------------------------------------------
 
@@ -759,6 +906,23 @@ Deno.serve(async (_req: Request) => {
       target.campaign.id,
     );
 
+    // Lifecycle transitions (3c.3) — funded -> live on first
+    // billing, live -> completed on pool == 0. Runs AFTER the
+    // pool re-read so it sees the ledger truth, BEFORE the run
+    // row is finalized so a failure here flips the run to
+    // 'failed' via the fatal-catch path.
+    const lifecycleTransition = await applyLifecycleTransitions(
+      supabase,
+      target.campaign,
+      result.rowsBilled,
+      poolAfter,
+    );
+    if (lifecycleTransition) {
+      console.log(
+        `[campaign-metering] lifecycle: campaign=${target.campaign.id} ${target.campaign.status} -> ${lifecycleTransition}`,
+      );
+    }
+
     await completeRun(supabase, runId, {
       rows_billed: result.rowsBilled,
       total_billed_cents: result.totalBilledCents,
@@ -780,6 +944,7 @@ Deno.serve(async (_req: Request) => {
       rows_skipped_rounding: result.rowsSkippedRounding,
       rows_skipped_orphan: result.rowsSkippedOrphan,
       rpc_errors: result.rpcErrors,
+      lifecycle_transition: lifecycleTransition,
       duration_ms: Date.now() - startTime,
     });
   } catch (err) {
