@@ -3,19 +3,18 @@ import Link from "next/link";
 import { getCurrentProfile } from "@/lib/dal";
 import AccountMenu from "./AccountMenu";
 import MobileNavMenu from "./MobileNavMenu";
-import PartnersNavDropdown from "./PartnersNavDropdown";
+import AdminNavDropdown from "./AdminNavDropdown";
 import SearchBar from "./SearchBar";
 
 export default async function TopNav() {
   const profile = await getCurrentProfile();
   const isSuperAdmin = profile?.role === "super_admin";
   const memberships = profile?.partnerMemberships ?? [];
-  // UX rules per spec:
-  //   0 memberships → render nothing extra (existing state).
-  //   1 membership  → a single inline link "<Partner> dashboard".
-  //   2+            → "Your partners ▾" dropdown.
-  const singleMembership = memberships.length === 1 ? memberships[0] : null;
-  const showPartnersDropdown = memberships.length >= 2;
+  // Unified "Admin" dropdown — visible when the user is super_admin
+  // OR has at least one partner membership. One nav slot for every
+  // role combination; the dropdown's contents differ but the trigger
+  // is always the same.
+  const showAdminDropdown = isSuperAdmin || memberships.length > 0;
 
   return (
     <header className="sticky top-0 z-20 h-16 border-b border-white/5 bg-moonbeem-black/80 backdrop-blur-md">
@@ -40,7 +39,11 @@ export default async function TopNav() {
             trigger; the panel is only opened on mobile). Auth
             booleans are computed once above and passed in — no
             second admin check. */}
-        <MobileNavMenu showForYou={!!profile} showAdmin={isSuperAdmin} />
+        <MobileNavMenu
+          showForYou={!!profile}
+          isSuperAdmin={isSuperAdmin}
+          memberships={memberships}
+        />
 
         <nav className="hidden items-center gap-4 md:flex">
           <Link
@@ -57,24 +60,11 @@ export default async function TopNav() {
               For You
             </Link>
           )}
-          {singleMembership && (
-            <Link
-              href={`/p/${singleMembership.partner_slug}/dashboard`}
-              className="text-body-sm text-moonbeem-ink-muted hover:text-moonbeem-ink transition-colors"
-            >
-              {singleMembership.partner_name} dashboard
-            </Link>
-          )}
-          {showPartnersDropdown && (
-            <PartnersNavDropdown memberships={memberships} />
-          )}
-          {isSuperAdmin && (
-            <Link
-              href="/admin"
-              className="text-body-sm text-moonbeem-pink hover:opacity-80 transition-opacity"
-            >
-              Admin
-            </Link>
+          {showAdminDropdown && (
+            <AdminNavDropdown
+              isSuperAdmin={isSuperAdmin}
+              memberships={memberships}
+            />
           )}
         </nav>
 
@@ -89,7 +79,6 @@ export default async function TopNav() {
               handle={profile.handle}
               displayName={profile.displayName}
               avatarUrl={profile.avatarUrl}
-              partnerMemberships={memberships}
             />
           ) : (
             <Link
