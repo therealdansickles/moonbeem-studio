@@ -209,6 +209,12 @@ export async function getAllFilms(): Promise<Title[]> {
     .eq("is_public", true)
     .eq("is_active", true)
     .eq("media_type", "movie")
+    .eq("is_hidden_from_all_films", false)
+    // Pinned rows (allfilms_pin_order NOT NULL, ASC NULLS LAST) take
+    // the top slots; the rest fill from created_at DESC. No LIMIT —
+    // All Films is the comprehensive "everything" carousel; pinning
+    // promotes a small set to the top, never excludes anything.
+    .order("allfilms_pin_order", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: false });
   if (error || !data) return [];
   return data as Title[];
