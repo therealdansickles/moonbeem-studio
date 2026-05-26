@@ -462,7 +462,13 @@ export async function getRecentFanEdits(
     .eq("is_active", true)
     .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .is("deleted_at", null)
+    .eq("is_hidden_from_recent", false)
     .eq("titles.is_active", true)
+    // Pinned rows (recent_pin_order NOT NULL, ASC NULLS LAST) take
+    // the top slots; the rest fill from created_at DESC. The 12-row
+    // LIMIT applies after the combined sort, so a pinned set of N
+    // displaces the N oldest items that would otherwise have shown.
+    .order("recent_pin_order", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error || !data) return [];
