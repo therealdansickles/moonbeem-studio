@@ -46,11 +46,11 @@ const ENTRIES: CuratorEntry[] = [
     status: "live",
   },
   {
-    href: null,
+    href: "/admin/trending-edits",
     label: "Trending Edits",
     description:
-      "Per-fan_edit pin + hide overrides layered onto the 24h-delta algorithm.",
-    status: "coming-soon",
+      "Per-fan_edit pin + hide overrides layered onto the 24h-delta algorithm. Pin bypasses snapshot-coverage.",
+    status: "live",
   },
 ];
 
