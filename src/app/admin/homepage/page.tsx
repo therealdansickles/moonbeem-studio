@@ -40,10 +40,10 @@ const ENTRIES: CuratorEntry[] = [
     status: "live",
   },
   {
-    href: null,
+    href: "/admin/all-films",
     label: "All Films",
     description: "Per-title pin + hide overrides on the comprehensive catalog carousel.",
-    status: "coming-soon",
+    status: "live",
   },
   {
     href: null,
