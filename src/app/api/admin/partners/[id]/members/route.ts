@@ -23,6 +23,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { enforce } from "@/lib/ratelimit";
+import {
+  sendPartnerInviteEmail,
+  type PartnerInviteRole,
+} from "@/lib/email/partner-invite";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -86,9 +90,10 @@ export async function POST(
   }
 
   const supabase = createServiceRoleClient();
+  // name + slug are needed for the invite-notification email below.
   const { data: partner } = await supabase
     .from("partners")
-    .select("id")
+    .select("id, name, slug")
     .eq("id", id)
     .maybeSingle();
   if (!partner) {
@@ -151,6 +156,34 @@ export async function POST(
       );
     }
     memberId = inserted.id as string;
+  }
+
+  // Fire-and-forget invite notification on BOTH new-insert and
+  // resurrect (clear-deleted) paths — a resurrected user is a
+  // deliberate re-add and should hear about it the same way a
+  // first-time add does. Synchronous direct-send via
+  // sendBrandedEmail; matches welcome / title-request-alert. A
+  // failure must NOT fail the API response — the partner_users
+  // row is already committed and is the source of truth. Log
+  // loudly so the super-admin can resend by re-adding if needed.
+  try {
+    const sendResult = await sendPartnerInviteEmail({
+      to: email,
+      partnerName: partner.name as string,
+      partnerSlug: partner.slug as string,
+      role: role as PartnerInviteRole,
+    });
+    if (!sendResult.ok) {
+      console.error(
+        `[partner-invite] send failed for ${email} on partner=${id} role=${role}: ${sendResult.error}`,
+      );
+    }
+  } catch (err) {
+    console.error(
+      `[partner-invite] send threw for ${email} on partner=${id} role=${role}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
   }
 
   // Re-read via the RPC to return the member row in the same shape
