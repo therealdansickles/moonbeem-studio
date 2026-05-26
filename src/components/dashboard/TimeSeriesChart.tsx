@@ -7,7 +7,9 @@
 // ink-subtle. tabular-nums on tick labels for the editorial-precise
 // feel.
 //
-// Tooltip: nearest-data-point hover via @visx/tooltip's helpers.
+// No hover tooltip today — the chart is decorative trend at this
+// surface and detailed numbers live in the tables below. Adding a
+// nearest-point tooltip via @visx/tooltip is tracked separately.
 
 "use client";
 
