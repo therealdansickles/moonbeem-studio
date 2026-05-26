@@ -1,12 +1,20 @@
-// /admin/homepage — hub linking the five curators that shape the
-// homepage. Two already exist (Marquee, Featured); one ships in this
-// commit (Recent Edits); two are scoped for follow-ups (All Films,
-// Trending Edits). Disabled placeholder rows show the eventual full
-// shape so an admin scanning the page understands what's coming.
+// /admin/homepage — hub for every homepage curation surface. Two
+// distinct functions on one page:
+//
+//   1. SECTION ORDER (slice D, top of the page) — drag-to-reorder
+//      the vertical layout of the five carousels. Saves immediately
+//      via POST /api/admin/homepage/sections/reorder.
+//
+//   2. PER-SECTION CURATION (slices A/B/C/featured/marquee, below)
+//      — entry-point cards that link to each section's own curator
+//      (/admin/marquee, /admin/featured, /admin/recent-edits,
+//      /admin/all-films, /admin/trending-edits).
 
 import type { Metadata } from "next";
 import Link from "next/link";
 import { requireSuperAdminOr404 } from "@/lib/dal";
+import { getHomepageSectionOrder } from "@/lib/homepage-sections";
+import HomepageSectionsReorder from "./HomepageSectionsReorder";
 
 export const metadata: Metadata = {
   title: "Homepage curation · Moonbeem admin",
@@ -56,6 +64,7 @@ const ENTRIES: CuratorEntry[] = [
 
 export default async function AdminHomepagePage() {
   await requireSuperAdminOr404();
+  const initialOrder = await getHomepageSectionOrder();
   return (
     <div className="min-h-screen px-6 py-12 text-moonbeem-ink">
       <div className="mx-auto flex max-w-3xl flex-col gap-8">
@@ -71,11 +80,20 @@ export default async function AdminHomepagePage() {
           </Link>
         </div>
         <p className="text-body text-moonbeem-ink-muted m-0">
-          Curate every section of the homepage from one place. Each
-          carousel has its own pin / hide controls — pins float to the
-          top of the section, hidden items drop out of the section only
-          (other carousels still surface them).
+          Curate every section of the homepage from one place. Reorder
+          the section layout above; click into a section card below to
+          curate its contents (pins float to the top of that section;
+          hidden items drop out of that section only).
         </p>
+        <HomepageSectionsReorder initialOrder={initialOrder} />
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-display-sm m-0">Section contents</h2>
+            <p className="m-0 text-body-sm text-moonbeem-ink-muted">
+              Per-section pin and hide controls.
+            </p>
+          </div>
+        </div>
         <ul className="flex flex-col gap-3">
           {ENTRIES.map((e) =>
             e.href ? (
