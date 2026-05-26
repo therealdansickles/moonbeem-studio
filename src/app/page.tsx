@@ -5,18 +5,65 @@ import {
   getTrendingFanEdits,
 } from "@/lib/queries/titles";
 import { getMarqueePartners } from "@/lib/queries/partners";
+import {
+  getHomepageSectionOrder,
+  type HomepageSectionSlug,
+} from "@/lib/homepage-sections";
 import TitleCarousel from "@/components/TitleCarousel";
 import FanEditCarousel from "@/components/FanEditCarousel";
 import PartnerLogoStrip from "@/components/PartnerLogoStrip";
 
 export default async function Home() {
-  const [featured, recentFanEdits, partners, allFilms, trending] = await Promise.all([
-    getFeaturedTitles(),
-    getRecentFanEdits(12),
-    getMarqueePartners(),
-    getAllFilms(),
-    getTrendingFanEdits(12),
-  ]);
+  // Fetch every section's data + the configured section order in
+  // parallel. Each carousel is a separate query (already the case
+  // pre-slice-D); we just add one more for the order config.
+  const [order, featured, recentFanEdits, partners, allFilms, trending] =
+    await Promise.all([
+      getHomepageSectionOrder(),
+      getFeaturedTitles(),
+      getRecentFanEdits(12),
+      getMarqueePartners(),
+      getAllFilms(),
+      getTrendingFanEdits(12),
+    ]);
+
+  // Renderer-per-slug — keeps the conditional length>0 guard
+  // co-located with each section. Returning null means "the section
+  // is configured but has no data" — it drops out of the rendered
+  // layout entirely (and out of the last-section bottom-padding
+  // calculation below).
+  const renderers: Record<HomepageSectionSlug, () => React.ReactNode> = {
+    marquee: () => <PartnerLogoStrip partners={partners} />,
+    featured: () => (
+      <TitleCarousel title="Featured Films" titles={featured} />
+    ),
+    trending: () =>
+      trending.length > 0 ? (
+        <FanEditCarousel title="Trending Edits" fanEdits={trending} />
+      ) : null,
+    recent: () =>
+      recentFanEdits.length > 0 ? (
+        <FanEditCarousel title="Recent Edits" fanEdits={recentFanEdits} />
+      ) : null,
+    "all-films": () =>
+      allFilms.length > 0 ? (
+        <TitleCarousel title="All Films" titles={allFilms} />
+      ) : null,
+  };
+
+  // Compute each section's rendered node ONCE, then determine the
+  // index of the last visibly-rendered section so we can apply the
+  // larger bottom padding (pb-20) there instead of pb-10. This used
+  // to be hardcoded to "All Films" pre-slice-D; under arbitrary
+  // reorder it's whichever section ends up rendered last.
+  const rendered: Array<{ slug: HomepageSectionSlug; node: React.ReactNode }> =
+    order.map((slug) => ({ slug, node: renderers[slug]() }));
+  const visibleIndexes = rendered
+    .map((r, i) => (r.node ? i : -1))
+    .filter((i) => i >= 0);
+  const lastVisibleIndex = visibleIndexes.length > 0
+    ? visibleIndexes[visibleIndexes.length - 1]
+    : -1;
 
   return (
     <div className="relative flex flex-col items-stretch flex-1">
@@ -31,31 +78,24 @@ export default async function Home() {
         </h1>
       </div>
 
-      <div className="w-full pb-6">
-        <PartnerLogoStrip partners={partners} />
-      </div>
-
-      <div className="w-full pb-10">
-        <TitleCarousel title="Featured Films" titles={featured} />
-      </div>
-
-      {trending.length > 0 && (
-        <div className="w-full pb-10">
-          <FanEditCarousel title="Trending Edits" fanEdits={trending} />
-        </div>
-      )}
-
-      {recentFanEdits.length > 0 && (
-        <div className="w-full pb-10">
-          <FanEditCarousel title="Recent Edits" fanEdits={recentFanEdits} />
-        </div>
-      )}
-
-      {allFilms.length > 0 && (
-        <div className="w-full pb-20">
-          <TitleCarousel title="All Films" titles={allFilms} />
-        </div>
-      )}
+      {rendered.map((r, i) => {
+        if (!r.node) return null;
+        const isLast = i === lastVisibleIndex;
+        // Marquee has its own visual rhythm — pre-slice-D it used
+        // pb-6 (logo strip is lighter visually than a poster carousel
+        // and doesn't need the same gap below). Preserve that here.
+        const className =
+          r.slug === "marquee" && !isLast
+            ? "w-full pb-6"
+            : isLast
+              ? "w-full pb-20"
+              : "w-full pb-10";
+        return (
+          <div key={r.slug} className={className}>
+            {r.node}
+          </div>
+        );
+      })}
     </div>
   );
 }
