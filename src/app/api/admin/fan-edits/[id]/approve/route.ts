@@ -44,7 +44,14 @@ export async function POST(
 
   const { error: updateErr } = await sb
     .from("fan_edits")
-    .update({ verification_status: "approved" })
+    .update({
+      verification_status: "approved",
+      // Audit columns added by 20260526000005. Same columns are
+      // populated by the partner-decide path so all three routes
+      // produce a consistent audit trail going forward.
+      decided_by_user_id: session.userId,
+      decided_at: new Date().toISOString(),
+    })
     .eq("id", id);
   if (updateErr) {
     return NextResponse.json({ error: updateErr.message }, { status: 500 });

@@ -21,6 +21,9 @@ import GrowthChart from "@/components/p/GrowthChart";
 import AllEditsTable from "@/components/p/AllEditsTable";
 import PartnerRatesCard from "@/components/p/PartnerRatesCard";
 import CampaignsCard from "@/components/p/CampaignsCard";
+import PartnerSubmissionsSection, {
+  type PartnerSubmission,
+} from "@/components/p/PartnerSubmissionsSection";
 import TopPerformersCardClient from "@/components/p/TopPerformersCardClient";
 import InitialAvatar from "@/components/p/InitialAvatar";
 import { rankTierClass } from "@/components/p/rankTier";
@@ -1305,6 +1308,82 @@ export default async function PartnerDashboardPage({
     is_active: t.is_active,
   }));
 
+  // Pending fan_edit submissions on the partner's titles — feeds the
+  // new Submissions section below. We do NOT apply the canonical
+  // publicly-readable gate here (this queue's whole point is rows
+  // that aren't publicly readable yet, awaiting an approve/reject
+  // decision). Active + undeleted filters still apply — soft-paused
+  // / soft-deleted rows shouldn't appear in the queue.
+  const pendingByTitle = new Map<
+    string,
+    { name: string; slug: string }
+  >();
+  for (const t of titleRows) {
+    pendingByTitle.set(t.id, { name: t.title, slug: t.slug });
+  }
+  const { data: pendingRows } = titleIds.length > 0
+    ? await supabase
+        .from("fan_edits")
+        .select(
+          "id, title_id, platform, embed_url, thumbnail_url, creator_handle_displayed, creator_id, created_at",
+        )
+        .in("title_id", titleIds)
+        .eq("verification_status", "pending")
+        .eq("is_active", true)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+    : { data: [] };
+  const pendingCreatorIds = Array.from(
+    new Set(
+      (pendingRows ?? [])
+        .map((r) => r.creator_id as string | null)
+        .filter((id): id is string => !!id),
+    ),
+  );
+  const pendingCreatorHandles = new Map<string, string>();
+  if (pendingCreatorIds.length > 0) {
+    const { data: creators } = await supabase
+      .from("public_creators")
+      .select("id, moonbeem_handle")
+      .in("id", pendingCreatorIds);
+    for (const c of (creators ?? []) as Array<{
+      id: string;
+      moonbeem_handle: string;
+    }>) {
+      pendingCreatorHandles.set(c.id, c.moonbeem_handle);
+    }
+  }
+  const pendingSubmissions: PartnerSubmission[] = (pendingRows ?? [])
+    .map((r) => {
+      const titleMeta = pendingByTitle.get(r.title_id as string);
+      if (!titleMeta) return null;
+      const moonbeemHandle = r.creator_id
+        ? (pendingCreatorHandles.get(r.creator_id as string) ?? null)
+        : null;
+      return {
+        id: r.id as string,
+        title_id: r.title_id as string,
+        title_name: titleMeta.name,
+        title_slug: titleMeta.slug,
+        platform: r.platform as
+          | "tiktok"
+          | "instagram"
+          | "youtube"
+          | "twitter",
+        embed_url: r.embed_url as string,
+        thumbnail_url: (r.thumbnail_url as string | null) ?? null,
+        creator_handle:
+          moonbeemHandle ??
+          (r.creator_handle_displayed as string | null) ??
+          "anon",
+        created_at: r.created_at as string,
+      };
+    })
+    .filter((x): x is PartnerSubmission => x !== null);
+  const submissionTitleOptions = titleRows
+    .filter((t) => t.is_active)
+    .map((t) => ({ id: t.id, slug: t.slug, title: t.title }));
+
   const titleSummary = titleRows.length === 1
     ? titleRows[0].title
     : `${titleRows.length} titles`;
@@ -1525,6 +1604,15 @@ export default async function PartnerDashboardPage({
             isAdmin={isPartnerAdmin}
             campaigns={campaigns}
             titles={wizardTitles}
+          />
+        </div>
+
+        <div className="mt-10">
+          <PartnerSubmissionsSection
+            partnerSlug={partner.slug as string}
+            isAdmin={isPartnerAdmin}
+            initialSubmissions={pendingSubmissions}
+            titles={submissionTitleOptions}
           />
         </div>
 
