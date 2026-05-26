@@ -4,12 +4,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import type { PartnerMembership } from "@/lib/dal";
 
 type Props = {
   email: string;
   handle: string | null;
   displayName: string | null;
   avatarUrl: string | null;
+  // Optional so existing callers don't break. Empty/undefined → no
+  // partner section is rendered.
+  partnerMemberships?: PartnerMembership[];
 };
 
 function initial(text: string): string {
@@ -21,7 +25,9 @@ export default function AccountMenu({
   handle,
   displayName,
   avatarUrl,
+  partnerMemberships,
 }: Props) {
+  const memberships = partnerMemberships ?? [];
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -99,6 +105,28 @@ export default function AccountMenu({
           >
             Account
           </Link>
+          {memberships.length > 0 && (
+            <>
+              <div className="my-1 border-t border-white/5" />
+              <p className="px-4 pt-2 pb-1 text-caption text-moonbeem-ink-subtle">
+                Your partners
+              </p>
+              {memberships.map((m) => (
+                <Link
+                  key={m.partner_id}
+                  href={`/p/${m.partner_slug}/dashboard`}
+                  onClick={() => setOpen(false)}
+                  className="flex items-center justify-between gap-3 px-4 py-2 text-body-sm text-moonbeem-ink hover:bg-white/5 transition-colors"
+                >
+                  <span className="truncate">{m.partner_name}</span>
+                  <span className="shrink-0 text-caption text-moonbeem-ink-subtle">
+                    {m.role}
+                  </span>
+                </Link>
+              ))}
+              <div className="my-1 border-t border-white/5" />
+            </>
+          )}
           <button
             type="button"
             disabled={pending}

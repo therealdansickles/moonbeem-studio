@@ -3,11 +3,19 @@ import Link from "next/link";
 import { getCurrentProfile } from "@/lib/dal";
 import AccountMenu from "./AccountMenu";
 import MobileNavMenu from "./MobileNavMenu";
+import PartnersNavDropdown from "./PartnersNavDropdown";
 import SearchBar from "./SearchBar";
 
 export default async function TopNav() {
   const profile = await getCurrentProfile();
   const isSuperAdmin = profile?.role === "super_admin";
+  const memberships = profile?.partnerMemberships ?? [];
+  // UX rules per spec:
+  //   0 memberships → render nothing extra (existing state).
+  //   1 membership  → a single inline link "<Partner> dashboard".
+  //   2+            → "Your partners ▾" dropdown.
+  const singleMembership = memberships.length === 1 ? memberships[0] : null;
+  const showPartnersDropdown = memberships.length >= 2;
 
   return (
     <header className="sticky top-0 z-20 h-16 border-b border-white/5 bg-moonbeem-black/80 backdrop-blur-md">
@@ -49,6 +57,17 @@ export default async function TopNav() {
               For You
             </Link>
           )}
+          {singleMembership && (
+            <Link
+              href={`/p/${singleMembership.partner_slug}/dashboard`}
+              className="text-body-sm text-moonbeem-ink-muted hover:text-moonbeem-ink transition-colors"
+            >
+              {singleMembership.partner_name} dashboard
+            </Link>
+          )}
+          {showPartnersDropdown && (
+            <PartnersNavDropdown memberships={memberships} />
+          )}
           {isSuperAdmin && (
             <Link
               href="/admin"
@@ -70,6 +89,7 @@ export default async function TopNav() {
               handle={profile.handle}
               displayName={profile.displayName}
               avatarUrl={profile.avatarUrl}
+              partnerMemberships={memberships}
             />
           ) : (
             <Link
