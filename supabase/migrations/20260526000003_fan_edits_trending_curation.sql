@@ -1,0 +1,51 @@
+-- Add per-fan_edit columns for super-admin curation of the homepage
+-- Trending Edits carousel. Today the carousel uses a 24h view-count
+-- delta algorithm with inner-join semantics — a fan_edit must have
+-- BOTH a "latest" snapshot AND a "≥24h ago" snapshot to be ranked,
+-- so rows lacking history are excluded. This migration leaves all
+-- rows with no curation overrides on rollout (trending_pin_order
+-- NULL on every row, is_hidden_from_trending FALSE). The
+-- /admin/trending-edits page (shipping in the same commit) is the
+-- first surface that mutates these columns.
+--
+-- Defaults & invariants:
+--   - trending_pin_order INTEGER NULL — pinned position; NULL = not
+--     pinned; smaller numbers = higher pin position. The homepage
+--     query renders pinned rows first (ORDER BY trending_pin_order
+--     ASC), then the remaining slots fill from the algorithmic
+--     delta ranking. The 12-row LIMIT applies after the merge.
+--   - PIN BYPASSES SNAPSHOT-COVERAGE — this is the
+--     algorithmically-tricky bit for Slice C. Pinned rows are
+--     fetched via a separate query that does NOT impose the
+--     latest+≥24h-ago snapshot requirement, so an admin can pin a
+--     freshly-imported fan_edit (no view-tracking history yet) and
+--     it will surface on Trending. The pinned query still honors
+--     the canonical three-clause gate AND view_tracking_status =
+--     'active' (so deleted_from_platform / private rows do not
+--     render as broken embeds), but it ignores the two-endpoint
+--     snapshot window the delta algorithm requires.
+--   - is_hidden_from_trending BOOLEAN NOT NULL DEFAULT FALSE —
+--     excludes a fan_edit from the Trending Edits carousel ONLY.
+--     Per-carousel hide, not a global hide: a fan_edit can stay on
+--     Recent / Featured surfaces while being hidden from Trending.
+--   - The hidden filter feeds the algorithm's input set. Adding
+--     `AND is_hidden_from_trending = false` to the algorithmic
+--     query's feActive read excludes hidden rows from BOTH the
+--     snapshot read AND the delta ranking — one filter, two
+--     effects.
+--   - No index. The Trending homepage query selects a top-12 set;
+--     the pinned subset stays tiny in practice (1-5 rows).
+--   - Per-carousel naming completes the "recent_/allfilms_/trending_"
+--     prefix family — see 20260526000001 (recent) and
+--     20260526000002 (allfilms). The three carousels with
+--     algorithmic / recency / catalog ordering each carry their own
+--     pin + hide columns with parallel naming.
+--
+-- Mirrors 20260526000001 (fan_edits_recent_curation) — same column
+-- shape on the same table; semantically distinct (Recent is a pure
+-- recency carousel, Trending is algorithmic with a snapshot-coverage
+-- inner-join that the pin path must sidestep).
+
+alter table public.fan_edits
+  add column if not exists trending_pin_order integer,
+  add column if not exists is_hidden_from_trending boolean not null default false;

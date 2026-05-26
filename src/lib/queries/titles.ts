@@ -734,25 +734,43 @@ export async function getFanEditsForCreator(
   }));
 }
 
-// Trending fan edits — top N by view-count delta over the past 24h.
-// Uses existing view_tracking_snapshots data (no new schema, no new
-// cron, no first-run NULL trap). Snapshots are written by the
-// view-tracking Edge Function every ~20h per fan_edit; 39% of
-// active fan_edits have at least one snapshot from ≥24h ago as of
-// the initial deploy, growing as the cron continues to populate
-// history.
+// Trending fan edits — pinned rows first, then the top N-pinned by
+// view-count delta over the past 24h.
 //
-// Algorithm:
-//   1. Fetch all snapshots for active fan_edits in a single round
-//      trip. 847 rows total today — well under any limit.
-//   2. Group by fan_edit_id: pick the LATEST snapshot and the
-//      most-recent snapshot ≤24h ago.
-//   3. Rows with BOTH a latest and a 24h-prior snapshot get a
-//      delta. Rows with only a latest (recently ingested, no
-//      history) are excluded — they're noise for a "trending"
-//      ranking.
-//   4. Order by delta DESC, limit N, then hydrate with title +
-//      creator handle joins to match FanEditWithTitle shape.
+// Slice C (homepage curation) restructured this from a single
+// algorithmic query into two-queries-then-merge:
+//
+//   Query 1 — fetchPinnedTrending: rows with trending_pin_order
+//     NOT NULL, ordered by trending_pin_order ASC. Bypasses the
+//     snapshot-coverage filter the algorithm imposes — a pinned
+//     fan_edit shows on Trending even if it lacks the two-endpoint
+//     (latest + ≥24h ago) snapshot window. Still honors the
+//     canonical three-clause gate AND view_tracking_status =
+//     'active' so dead/private rows can't render as broken embeds.
+//
+//   Query 2 — fetchAlgorithmicTrending: the original delta
+//     algorithm, modified to exclude pinned IDs and hidden rows
+//     from its input set. Pinned IDs are excluded so they don't
+//     double-count; hidden rows (is_hidden_from_trending = true)
+//     are filtered out at the feActive read so they're omitted from
+//     BOTH the snapshot fetch AND the delta ranking (one filter,
+//     two effects).
+//
+// Merge semantics: pinned first, then algorithm-ranked, total
+// LIMIT N. If pinned.length >= N, return only the first N pinned
+// (the algorithmic query doesn't run). If pinned.length +
+// algorithm.length > N, the lowest-ranked algorithmic rows drop.
+//
+// Algorithm details (unchanged from the pre-slice-C single-query
+// shape, just relocated into fetchAlgorithmicTrending):
+//   1. Fetch active fan_edit IDs (canonical gate + view-tracking-
+//      active + NOT hidden, minus pinned).
+//   2. Fetch all snapshots for those IDs in one round trip.
+//   3. Group by fan_edit_id: pick the LATEST snapshot and the
+//      most-recent snapshot ≤24h ago. INNER JOIN semantics — rows
+//      with only a latest (recently ingested, no history) are
+//      skipped.
+//   4. Order by delta DESC, limit, hydrate.
 //
 // Service-role client matches the partner-catalog convention; also
 // view_tracking_snapshots has no public SELECT policy.
@@ -760,23 +778,76 @@ export async function getTrendingFanEdits(
   limit = 12,
 ): Promise<FanEditWithTitle[]> {
   const supabase = createServiceRoleClient();
+  const pinned = await fetchPinnedTrending(supabase);
+  if (pinned.length >= limit) {
+    return pinned.slice(0, limit);
+  }
+  const remaining = limit - pinned.length;
+  const pinnedIds = new Set(pinned.map((p) => p.id));
+  const algorithmic = await fetchAlgorithmicTrending(
+    supabase,
+    pinnedIds,
+    remaining,
+  );
+  return [...pinned, ...algorithmic];
+}
 
-  // 1. Active, undeleted, verified fan_edits with the standard
-  //    filters used by getRecentFanEdits. The view-tracking-status
-  //    filter is critical — deleted/private/dead rows aren't
-  //    trending material.
+// Pinned rows for Trending. Bypasses snapshot-coverage entirely —
+// the algorithmic path's inner-join requirement (latest + ≥24h ago
+// snapshots) is skipped here so admins can pin freshly-imported
+// fan_edits and they'll surface on Trending immediately.
+//
+// view_tracking_status='active' is preserved on the pinned query
+// even though pin bypasses snapshot-coverage. Snapshot-coverage is a
+// data-availability filter; view_tracking_status='active' is a
+// content-viability filter (deleted_from_platform / private rows
+// would render as broken embeds). Pin overrides the former, not the
+// latter.
+async function fetchPinnedTrending(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+): Promise<FanEditWithTitle[]> {
+  const { data: pinnedRows } = await supabase
+    .from("fan_edits")
+    .select("id, trending_pin_order")
+    .eq("is_active", true)
+    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
+    .eq("view_tracking_status", "active")
+    .is("deleted_at", null)
+    .eq("is_hidden_from_trending", false)
+    .not("trending_pin_order", "is", null)
+    .order("trending_pin_order", { ascending: true });
+  const ids = (pinnedRows ?? []).map((r) => r.id as string);
+  return hydrateFanEditsForTrending(supabase, ids);
+}
+
+// Algorithmic Trending — original pre-slice-C body, modified to
+// exclude pinned IDs (avoid double-count in the merge) and to
+// exclude hidden rows from the algorithm's input set.
+async function fetchAlgorithmicTrending(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  pinnedIds: Set<string>,
+  limit: number,
+): Promise<FanEditWithTitle[]> {
+  if (limit <= 0) return [];
+
+  // 1. Active, undeleted, verified, view-tracking-active fan_edits
+  //    that aren't hidden — same standard filters as before, plus
+  //    the new is_hidden_from_trending=false guard. Pinned IDs are
+  //    filtered out client-side after the fetch.
   const { data: feActive } = await supabase
     .from("fan_edits")
     .select("id")
     .eq("is_active", true)
     .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
     .eq("view_tracking_status", "active")
-    .is("deleted_at", null);
-  const activeIds = (feActive ?? []).map((r) => r.id as string);
+    .is("deleted_at", null)
+    .eq("is_hidden_from_trending", false);
+  const activeIds = (feActive ?? [])
+    .map((r) => r.id as string)
+    .filter((id) => !pinnedIds.has(id));
   if (activeIds.length === 0) return [];
 
-  // 2. All snapshots for those fan_edits, oldest first so we can
-  //    walk the array and "last wins" for the latest pointer.
+  // 2. All snapshots for the candidate set, oldest first.
   const { data: allSnaps } = await supabase
     .from("view_tracking_snapshots")
     .select("fan_edit_id, view_count, captured_at")
@@ -810,30 +881,38 @@ export async function getTrendingFanEdits(
   const topIds = ranked.slice(0, limit).map((r) => r.id);
   if (topIds.length === 0) return [];
 
-  // 4. Hydrate to FanEditWithTitle shape — same JOIN pattern as
-  //    getRecentFanEdits. Service-role bypasses fan_edits and
-  //    titles RLS; both have public SELECT policies anyway but
-  //    we stay on service-role for consistency with this function's
-  //    snapshot read.
+  return hydrateFanEditsForTrending(supabase, topIds);
+}
+
+// Shared hydrate helper for both Trending paths — turns an ordered
+// list of fan_edit IDs into FanEditWithTitle rows in the same order.
+// Drops rows whose title isn't active or has no poster (the carousel
+// renders posters).
+async function hydrateFanEditsForTrending(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  ids: string[],
+): Promise<FanEditWithTitle[]> {
+  if (ids.length === 0) return [];
+
   const { data: hydrated } = await supabase
     .from("fan_edits")
     .select(
       "id, title_id, platform, embed_url, thumbnail_url, creator_handle_displayed, creator_id, created_at, titles!inner(slug, title, poster_url, is_active)",
     )
-    .in("id", topIds)
+    .in("id", ids)
     .eq("titles.is_active", true);
   const rowsRaw = (hydrated ?? []) as unknown as FanEditJoinRow[];
   const rows = rowsRaw.filter((r) => r.titles && r.titles.poster_url);
 
-  // Preserve the delta-ranked order (hydrate query loses it).
-  const orderIndex = new Map(topIds.map((id, i) => [id, i]));
+  // Preserve the input order (hydrate query loses it).
+  const orderIndex = new Map(ids.map((id, i) => [id, i]));
   rows.sort(
     (a, b) =>
       (orderIndex.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
       (orderIndex.get(b.id) ?? Number.MAX_SAFE_INTEGER),
   );
 
-  // Creator handle map (mirrors getRecentFanEdits).
+  // Creator handle map — same pattern as getRecentFanEdits.
   const creatorIds = Array.from(
     new Set(rows.map((r) => r.creator_id).filter((id): id is string => !!id)),
   );
