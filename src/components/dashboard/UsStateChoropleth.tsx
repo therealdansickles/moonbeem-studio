@@ -4,9 +4,10 @@
 // Internally we lookup USPS → FIPS for the us-atlas topology (which
 // keys states by 2-digit FIPS codes). Colors via a 5-step pink scale.
 //
-// The map is logo-only (no labels). Hover shows state code + count
-// via @visx/tooltip. Below the map, the page can render a top-states
-// table for explicit values.
+// The map is logo-only (no labels). Hover shows a styled tooltip
+// (state name + count + % of platform total) via @visx/tooltip's
+// useTooltipInPortal hook. Below the map, the page can render a
+// top-states table for explicit values.
 
 "use client";
 
@@ -17,6 +18,7 @@ import { scaleQuantile } from "@visx/scale";
 import { Group } from "@visx/group";
 import { feature } from "topojson-client";
 import type { FeatureCollection, Feature, Geometry } from "geojson";
+import { useTooltip, useTooltipInPortal } from "@visx/tooltip";
 // us-atlas ships pre-baked topojson at multiple resolutions. 10m is
 // detailed; 50m is lighter. Going with 10m for editorial polish on
 // large viewports. TypeScript resolves the JSON module via
@@ -63,6 +65,12 @@ type Props = {
 
 type StateFeature = Feature<Geometry, { name?: string }> & { id?: string };
 
+type TooltipData = {
+  name: string;
+  count: number;
+  pct: number;
+};
+
 function InnerMap({
   data,
   width,
@@ -88,6 +96,14 @@ function InnerMap({
     return m;
   }, [data]);
 
+  // Total across all input states — drives the "% of total" in the
+  // hover tooltip. Computed once per data change, not per render.
+  const total = useMemo(() => {
+    let s = 0;
+    for (const v of fipsCounts.values()) s += v;
+    return s;
+  }, [fipsCounts]);
+
   const colorScale = useMemo(() => {
     const values = Array.from(fipsCounts.values()).filter((v) => v > 0);
     if (values.length === 0) {
@@ -100,36 +116,89 @@ function InnerMap({
     return (v: number) => (v > 0 ? scale(v) : EMPTY_FILL);
   }, [fipsCounts]);
 
+  const {
+    tooltipOpen,
+    tooltipLeft,
+    tooltipTop,
+    tooltipData,
+    showTooltip,
+    hideTooltip,
+  } = useTooltip<TooltipData>();
+
+  // detectBounds keeps the tooltip on-screen near viewport edges; the
+  // portal escapes parent overflow:hidden so tooltips aren't clipped
+  // by the surrounding card. containerBounds gives us the live offset
+  // of the wrapper, so handleMove can pass container-local coords.
+  const { containerRef, containerBounds, TooltipInPortal } =
+    useTooltipInPortal({ detectBounds: true, scroll: true });
+
   if (width === 0) return null;
 
   return (
-    <svg width={width} height={height}>
-      <AlbersUsa<StateFeature>
-        data={states}
-        scale={Math.min(width, height * 1.6) * 1.05}
-        translate={[width / 2, height / 2]}
-      >
-        {({ features }) => (
-          <Group>
-            {features.map(({ feature: f, path }, i) => {
-              const fips = f.id?.toString().padStart(2, "0");
-              const count = fips ? fipsCounts.get(fips) ?? 0 : 0;
-              return (
-                <path
-                  key={`state-${i}`}
-                  d={path ?? ""}
-                  fill={colorScale(count)}
-                  stroke={STROKE}
-                  strokeWidth={0.5}
-                >
-                  <title>{`${f.properties?.name ?? "—"} · ${count.toLocaleString()}`}</title>
-                </path>
-              );
-            })}
-          </Group>
-        )}
-      </AlbersUsa>
-    </svg>
+    <div ref={containerRef} className="relative h-full w-full">
+      <svg width={width} height={height}>
+        <AlbersUsa<StateFeature>
+          data={states}
+          scale={Math.min(width, height * 1.6) * 1.05}
+          translate={[width / 2, height / 2]}
+        >
+          {({ features }) => (
+            <Group>
+              {features.map(({ feature: f, path }, i) => {
+                const fips = f.id?.toString().padStart(2, "0");
+                const count = fips ? fipsCounts.get(fips) ?? 0 : 0;
+                const name = f.properties?.name ?? "—";
+                const pct = total > 0 ? (count / total) * 100 : 0;
+                return (
+                  <path
+                    key={`state-${i}`}
+                    d={path ?? ""}
+                    fill={colorScale(count)}
+                    stroke={STROKE}
+                    strokeWidth={0.5}
+                    onMouseMove={(event) => {
+                      showTooltip({
+                        tooltipLeft: event.clientX - containerBounds.left,
+                        tooltipTop: event.clientY - containerBounds.top,
+                        tooltipData: { name, count, pct },
+                      });
+                    }}
+                    onMouseLeave={hideTooltip}
+                  />
+                );
+              })}
+            </Group>
+          )}
+        </AlbersUsa>
+      </svg>
+      {tooltipOpen && tooltipData && (
+        <TooltipInPortal
+          top={tooltipTop}
+          left={tooltipLeft}
+          unstyled
+          applyPositionStyle
+          // Offset above + to the right of the cursor so it doesn't
+          // sit under the pointer (which would block onMouseMove from
+          // firing on the next path).
+          offsetLeft={12}
+          offsetTop={-12}
+          className="pointer-events-none rounded-lg border border-white/10 bg-moonbeem-black/80 px-3 py-2 text-body-sm shadow-lg backdrop-blur-sm"
+        >
+          <div className="font-medium text-moonbeem-pink">
+            {tooltipData.name}
+          </div>
+          <div className="mt-0.5 text-moonbeem-ink tabular-nums">
+            {tooltipData.count.toLocaleString()}{" "}
+            {tooltipData.count === 1 ? "event" : "events"}
+            {total > 0 && tooltipData.count > 0 && (
+              <span className="ml-1.5 text-moonbeem-ink-subtle">
+                · {tooltipData.pct.toFixed(1)}%
+              </span>
+            )}
+          </div>
+        </TooltipInPortal>
+      )}
+    </div>
   );
 }
 

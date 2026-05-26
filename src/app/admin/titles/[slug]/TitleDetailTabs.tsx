@@ -1454,6 +1454,7 @@ function AnalyticsTab({
                 `${r.country_code ?? ""}|${r.region_code ?? ""}|${r.city}`
               }
               emptyMessage="No location data available for this window."
+              maxHeightClass="max-h-[360px]"
             />
           </div>
         </div>
