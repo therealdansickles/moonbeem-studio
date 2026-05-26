@@ -3,10 +3,18 @@
 // Mobile hamburger nav. Below md, the desktop <nav> in TopNav is
 // display:none, so this provides the navigation affordance.
 //
-// Auth handling: TopNav (server) computes the booleans once and
-// passes them in. We deliberately do NOT call getCurrentProfile()
-// or any auth helper here — one source of truth for "is this user
-// an admin" lives in TopNav.
+// Auth handling: TopNav (server) computes the booleans + membership
+// list once and passes them in. We deliberately do NOT call
+// getCurrentProfile() or any auth helper here — one source of truth
+// for "what admin surfaces does this user see" lives in TopNav.
+//
+// Admin section mirrors the desktop AdminNavDropdown — same row
+// composition (Super admin + per-partner rows), same divider when
+// both sections are present, same visual weight (Super admin in
+// pink, partner rows in ink with muted role tags on the right).
+// Flat-listed here instead of nested-in-a-dropdown because a
+// dropdown inside a hamburger is awkward; the hamburger is
+// already a panel.
 //
 // Overlay pattern (matches ConsentSettingsModal + AccountMenu +
 // FanEditModal conventions): role="dialog" root, click-on-backdrop
@@ -16,13 +24,21 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import type { PartnerMembership } from "@/lib/dal";
 
 type Props = {
   showForYou: boolean;
-  showAdmin: boolean;
+  isSuperAdmin: boolean;
+  memberships: PartnerMembership[];
 };
 
-export default function MobileNavMenu({ showForYou, showAdmin }: Props) {
+export default function MobileNavMenu({
+  showForYou,
+  isSuperAdmin,
+  memberships,
+}: Props) {
+  const showAdminSection = isSuperAdmin || memberships.length > 0;
+  const showAdminDivider = isSuperAdmin && memberships.length > 0;
   const [open, setOpen] = useState(false);
 
   // ESC closes. Listener only attached while open so non-menu
@@ -105,14 +121,36 @@ export default function MobileNavMenu({ showForYou, showAdmin }: Props) {
                   For You
                 </Link>
               )}
-              {showAdmin && (
-                <Link
-                  href="/admin"
-                  onClick={() => setOpen(false)}
-                  className="rounded-md px-3 py-3 text-body text-moonbeem-pink hover:bg-white/5 hover:opacity-80 transition-opacity"
-                >
-                  Admin
-                </Link>
+              {showAdminSection && (
+                <>
+                  {isSuperAdmin && (
+                    <Link
+                      href="/admin"
+                      onClick={() => setOpen(false)}
+                      className="rounded-md px-3 py-3 text-body text-moonbeem-pink hover:bg-white/5 hover:opacity-80 transition-opacity"
+                    >
+                      Super admin
+                    </Link>
+                  )}
+                  {showAdminDivider && (
+                    <div className="my-1 border-t border-white/5" />
+                  )}
+                  {memberships.map((m) => (
+                    <Link
+                      key={m.partner_id}
+                      href={`/p/${m.partner_slug}/dashboard`}
+                      onClick={() => setOpen(false)}
+                      className="flex items-center justify-between gap-3 rounded-md px-3 py-3 text-body text-moonbeem-ink hover:bg-white/5 transition-colors"
+                    >
+                      <span className="truncate">
+                        {m.partner_name} dashboard
+                      </span>
+                      <span className="shrink-0 text-caption text-moonbeem-ink-subtle">
+                        {m.role}
+                      </span>
+                    </Link>
+                  ))}
+                </>
               )}
             </nav>
           </div>
