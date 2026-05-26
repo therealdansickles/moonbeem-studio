@@ -461,6 +461,7 @@ export async function getRecentFanEdits(
     )
     .eq("is_active", true)
     .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
+    .is("deleted_at", null)
     .eq("titles.is_active", true)
     .order("created_at", { ascending: false })
     .limit(limit);
