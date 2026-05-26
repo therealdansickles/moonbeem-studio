@@ -67,6 +67,11 @@ export async function POST(
     .update({
       verification_status: "rejected",
       rejection_reason: reason,
+      // Audit columns added by 20260526000005. Same columns are
+      // populated by the partner-decide path so all three routes
+      // produce a consistent audit trail going forward.
+      decided_by_user_id: session.userId,
+      decided_at: new Date().toISOString(),
     })
     .eq("id", id);
   if (updateErr) {
