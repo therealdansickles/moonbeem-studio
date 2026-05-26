@@ -430,6 +430,15 @@ export default async function AdminLanding() {
           </p>
         </div>
 
+        <div className="mt-4">
+          <Link
+            href="/admin/homepage"
+            className="inline-flex items-center gap-2 rounded-md border border-white/10 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
+          >
+            Curate homepage →
+          </Link>
+        </div>
+
         {/* Quick actions */}
         <div className="mt-10">
           <SectionHeader
