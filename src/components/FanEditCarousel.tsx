@@ -51,7 +51,7 @@ export default function FanEditCarousel({ title, fanEdits }: Props) {
       <div className="relative">
         <motion.div
           ref={scrollRef}
-          className="flex select-none snap-x snap-mandatory gap-4 overflow-x-auto px-6 pb-2 [scrollbar-width:none] [-webkit-user-drag:none] [&::-webkit-scrollbar]:hidden"
+          className="flex select-none snap-x snap-proximity gap-4 overflow-x-auto px-6 pb-2 [scrollbar-width:none] [scroll-behavior:auto] [touch-action:pan-x] [scroll-padding-left:1.5rem] [-webkit-user-drag:none] [&::-webkit-scrollbar]:hidden"
           role="list"
           onDragStart={(e) => e.preventDefault()}
           variants={stagger}

@@ -67,7 +67,7 @@ export default function PartnerLogoStrip({ partners }: Props) {
         // site-wide consistency. Cursor grab feedback indicates the
         // drag affordance; useDragScroll swaps to grabbing on
         // mousedown.
-        className="flex select-none items-center gap-4 overflow-x-auto px-6 py-4 [scrollbar-width:none] [-webkit-user-drag:none] [&::-webkit-scrollbar]:hidden cursor-grab"
+        className="flex select-none items-center gap-4 overflow-x-auto px-6 py-4 [scrollbar-width:none] [scroll-behavior:auto] [touch-action:pan-x] [scroll-padding-left:1.5rem] [-webkit-user-drag:none] [&::-webkit-scrollbar]:hidden cursor-grab"
         role="list"
         onDragStart={(e) => e.preventDefault()}
         variants={stagger}
