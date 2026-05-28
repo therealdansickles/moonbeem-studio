@@ -13,6 +13,7 @@ import {
 } from "@/lib/queries/titles";
 import { SignOutButton } from "@/components/SignOutButton";
 import PlatformIcon from "@/components/PlatformIcon";
+import ClaimStubButton from "@/components/me/ClaimStubButton";
 import PayoutsControls from "@/components/me/PayoutsControls";
 import WelcomeBanner from "@/components/me/WelcomeBanner";
 import ProfileFanEditCard from "@/components/profile/ProfileFanEditCard";
@@ -423,43 +424,70 @@ export default async function MePage() {
                 look like yours. Verify the handle to claim them.
               </p>
               <ul className="mt-4 flex flex-col gap-3">
-                {unclaimedStubs.map((stub) => (
-                  <li
-                    key={stub.stubCreatorId}
-                    className="flex items-center gap-3 rounded-md border border-white/10 bg-white/[0.02] p-3"
-                  >
-                    {stub.thumbnails.length > 0 ? (
-                      <div className="flex shrink-0 -space-x-2">
-                        {stub.thumbnails.slice(0, 3).map((src, i) => (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            key={src}
-                            src={src}
-                            alt=""
-                            width={40}
-                            height={40}
-                            className="h-10 w-10 rounded-md border border-white/15 bg-black/40 object-cover"
-                            style={{ zIndex: 3 - i }}
-                          />
-                        ))}
-                      </div>
-                    ) : null}
-                    <div className="min-w-0 flex-1">
-                      <p className="m-0 text-body-sm text-moonbeem-ink">
-                        {stub.fanEditCount} edit
-                        {stub.fanEditCount === 1 ? "" : "s"} as @
-                        {stub.socialHandle} on{" "}
-                        {platformLabel[stub.platform as SocialPlatform]}
-                      </p>
-                    </div>
-                    <Link
-                      href={`/me/edit?return_to=${encodeURIComponent("/me")}&platform=${stub.platform}&handle=${encodeURIComponent(stub.socialHandle)}`}
-                      className="shrink-0 text-body-sm text-moonbeem-pink hover:opacity-90"
+                {unclaimedStubs.map((stub) => {
+                  // CTA selection. The verify-then-merge flow at
+                  // /me/edit only works when (a) the surface tied the
+                  // stub to a handle the user could still verify on
+                  // a not-yet-verified platform AND (b) the
+                  // verification's exact (platform, lower(handle))
+                  // lookup will hit the stub's social row. Heuristic
+                  // (a) — user_handle — only satisfies that when the
+                  // user hasn't verified the same platform under any
+                  // other handle (otherwise VerifySocialsCard
+                  // silently skips and dead-ends). Heuristic (b) —
+                  // verified_social — implies the user already
+                  // verified the platform, so verify-to-claim always
+                  // dead-ends there. The Claim button calls the new
+                  // merge_stub_creator RPC directly and works for
+                  // both heuristics.
+                  const platformAlreadyVerified = verifiedSocials.some(
+                    (v) => v.platform === stub.platform,
+                  );
+                  const useVerifyLink =
+                    stub.matchType === "user_handle" &&
+                    !platformAlreadyVerified;
+                  return (
+                    <li
+                      key={stub.stubCreatorId}
+                      className="flex items-center gap-3 rounded-md border border-white/10 bg-white/[0.02] p-3"
                     >
-                      Verify to claim →
-                    </Link>
-                  </li>
-                ))}
+                      {stub.thumbnails.length > 0 ? (
+                        <div className="flex shrink-0 -space-x-2">
+                          {stub.thumbnails.slice(0, 3).map((src, i) => (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              key={src}
+                              src={src}
+                              alt=""
+                              width={40}
+                              height={40}
+                              className="h-10 w-10 rounded-md border border-white/15 bg-black/40 object-cover"
+                              style={{ zIndex: 3 - i }}
+                            />
+                          ))}
+                        </div>
+                      ) : null}
+                      <div className="min-w-0 flex-1">
+                        <p className="m-0 text-body-sm text-moonbeem-ink">
+                          {stub.fanEditCount} edit
+                          {stub.fanEditCount === 1 ? "" : "s"} as @
+                          {stub.socialHandle} on{" "}
+                          {platformLabel[stub.platform as SocialPlatform]}
+                        </p>
+                      </div>
+                      {useVerifyLink ? (
+                        <Link
+                          href={`/me/edit?return_to=${encodeURIComponent("/me")}&platform=${stub.platform}&handle=${encodeURIComponent(stub.socialHandle)}`}
+                          className="shrink-0 text-body-sm text-moonbeem-pink hover:opacity-90"
+                        >
+                          Verify to claim →
+                        </Link>
+                      ) : (
+                        <ClaimStubButton stubCreatorId={stub.stubCreatorId} />
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           </section>
