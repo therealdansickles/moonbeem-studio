@@ -72,10 +72,35 @@ export async function POST(request: NextRequest) {
     embed_url: parsed.normalizedUrl,
   });
 
-  // Resolve the handle (parsed > metrics-returned) against
-  // creator_socials so the UI can show auto-attribution status.
+  // YouTube fallback: `channelTitle` from snippet is already in
+  // raw_payload (fetchVideoStats extracts it via mapVideoItem) but
+  // fetchYouTubeMetrics keeps creator_handle_displayed null by
+  // design — to preserve refresh idempotency, the metric layer
+  // never writes channelTitle into the DB field. The preview route
+  // is the right place to surface it as a display fallback so
+  // admins see "Searchlight Pictures" instead of "(handle not
+  // detected)" on /watch?v= URLs. raw_payload is typed unknown;
+  // guard every access defensively and fall through to null on
+  // any shape mismatch.
+  let youtubeChannelTitle: string | null = null;
+  if (parsed.platform === "youtube" && metrics.raw_payload && typeof metrics.raw_payload === "object") {
+    const items = (metrics.raw_payload as { items?: unknown }).items;
+    if (Array.isArray(items) && items.length > 0) {
+      const snippet = (items[0] as { snippet?: unknown }).snippet;
+      if (snippet && typeof snippet === "object") {
+        const title = (snippet as { channelTitle?: unknown }).channelTitle;
+        if (typeof title === "string" && title.trim()) {
+          youtubeChannelTitle = title.trim();
+        }
+      }
+    }
+  }
+
+  // Resolve the handle (parsed > metrics-returned > YouTube
+  // channelTitle fallback) against creator_socials so the UI can
+  // show auto-attribution status.
   const resolvedHandle =
-    parsed.handle ?? metrics.creator_handle_displayed ?? null;
+    parsed.handle ?? metrics.creator_handle_displayed ?? youtubeChannelTitle ?? null;
   let resolvedCreator: ResolvedCreator | null = null;
   if (resolvedHandle) {
     const sb = createServiceRoleClient();
