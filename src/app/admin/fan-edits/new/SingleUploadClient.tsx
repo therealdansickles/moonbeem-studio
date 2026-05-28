@@ -393,7 +393,7 @@ export default function SingleUploadClient() {
                 )}
                 {metadata.metrics.error && (
                   <p className="text-body-sm text-moonbeem-magenta">
-                    EnsembleData warning: {metadata.metrics.error}
+                    Import warning: {metadata.metrics.error}
                   </p>
                 )}
               </div>
