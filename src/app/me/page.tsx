@@ -604,15 +604,44 @@ export default async function MePage() {
           <div className="mt-3 border-t border-white/10 pt-3">
             {verifiedSocials.length === 0 && totalCents === 0
               ? (
-                <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
-                  When you create authorized fan edits, partners pay you for
-                  views and clicks through to their content. Earnings appear
-                  here once you&apos;ve verified a social handle and started
-                  getting attribution.
-                </p>
+                pendingSubmissions.length > 0 ? (
+                  // Pending-edit progress copy. Active when a creator
+                  // has zero earnings but at least one submission
+                  // awaiting admin review — replaces the passive
+                  // "When you create authorized fan edits…" empty-
+                  // state so the section acknowledges the work in
+                  // flight. The 24h response window is already shown
+                  // in the "Under review" section above, so this copy
+                  // stays earnings-focused and avoids duplicating it.
+                  <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
+                    {pendingSubmissions.length === 1
+                      ? "Your edit is under review. Earnings start the moment it's approved."
+                      : "Your edits are under review. Earnings start the moment they're approved."}
+                  </p>
+                ) : (
+                  <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
+                    When you create authorized fan edits, partners pay you for
+                    views and clicks through to their content. Earnings appear
+                    here once you&apos;ve verified a social handle and started
+                    getting attribution.
+                  </p>
+                )
               )
               : (
                 <div className="flex flex-col gap-4">
+                  {totalCents === 0 && pendingSubmissions.length > 0 && (
+                    // Same pending-edit progress copy as the empty-
+                    // state branch, surfaced ABOVE the $0.00 numbers
+                    // when a verified-social creator is waiting for
+                    // their first edit to be approved. Without this,
+                    // the populated dashboard shows just $0.00 with
+                    // no acknowledgment of the submission in flight.
+                    <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
+                      {pendingSubmissions.length === 1
+                        ? "Your edit is under review. Earnings start the moment it's approved."
+                        : "Your edits are under review. Earnings start the moment they're approved."}
+                    </p>
+                  )}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <div className="font-wordmark text-display-sm text-moonbeem-pink leading-none">
