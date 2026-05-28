@@ -21,6 +21,7 @@ export const HOMEPAGE_SECTION_SLUGS = [
   "trending",
   "recent",
   "all-films",
+  "active-campaigns",
 ] as const;
 
 export type HomepageSectionSlug = (typeof HOMEPAGE_SECTION_SLUGS)[number];
@@ -31,17 +32,26 @@ export const HOMEPAGE_SECTION_LABELS: Record<HomepageSectionSlug, string> = {
   trending: "Trending Edits",
   recent: "Recent Edits",
   "all-films": "All Films",
+  "active-campaigns": "Films you can earn from right now",
 };
 
 // Default order matches today's hardcoded JSX in src/app/page.tsx.
 // Used as the fallback when the DB returns empty / partial state and
 // as the seed value in the migration.
+//
+// "active-campaigns" intentionally has no row in homepage_sections
+// (the CHECK constraint still lists the original five). The loader's
+// missing-slug-append branch (the loop below the seen-set) will
+// append it to the rendered order, so the section lands at the
+// bottom of the homepage until a follow-up migration drops + recreates
+// the CHECK constraint and inserts a row positioning it explicitly.
 export const DEFAULT_HOMEPAGE_SECTION_ORDER: HomepageSectionSlug[] = [
   "marquee",
   "featured",
   "trending",
   "recent",
   "all-films",
+  "active-campaigns",
 ];
 
 const KNOWN_SLUGS = new Set<string>(HOMEPAGE_SECTION_SLUGS);

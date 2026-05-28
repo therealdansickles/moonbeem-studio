@@ -7,12 +7,16 @@ import TitleCard from "./TitleCard";
 import { useDragScroll } from "@/hooks/useDragScroll";
 import { fadeIn, noMotion, stagger } from "@/lib/motion";
 
+type CarouselTitle = Pick<Title, "id" | "slug" | "title" | "poster_url"> & {
+  cpmDisplay?: string | null;
+};
+
 type Props = {
   // Section header above the carousel. Omit / empty string to render
   // the carousel without a header (e.g. partner-catalog page where
   // the hero already names the section).
   title?: string;
-  titles: Pick<Title, "id" | "slug" | "title" | "poster_url">[];
+  titles: CarouselTitle[];
 };
 
 export default function TitleCarousel({ title, titles }: Props) {
@@ -71,7 +75,7 @@ export default function TitleCarousel({ title, titles }: Props) {
               className="w-[160px] shrink-0 snap-start md:w-[220px] lg:w-[240px]"
               variants={cardVariant}
             >
-              <TitleCard title={t} />
+              <TitleCard title={t} cpmDisplay={t.cpmDisplay ?? null} />
             </motion.div>
           ))}
         </motion.div>

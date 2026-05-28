@@ -8,6 +8,7 @@ import {
   getActiveOffersForTitle,
   getActiveStillsForTitle,
   getTitleBySlug,
+  isTitleInActiveCampaign,
   type TitleOffer,
 } from "@/lib/queries/titles";
 import TitleTabs from "@/components/TitleTabs";
@@ -113,12 +114,14 @@ export default async function TitlePage({ params }: PageProps) {
     partner_id: title.partner_id,
   });
   if (!visible) notFound();
-  const [offers, fanEdits, clips, stills] = await Promise.all([
-    getActiveOffersForTitle(title.id),
-    getActiveFanEditsForTitle(title.id),
-    getActiveClipsForTitle(title.id),
-    getActiveStillsForTitle(title.id),
-  ]);
+  const [offers, fanEdits, clips, stills, hasActiveCampaign] =
+    await Promise.all([
+      getActiveOffersForTitle(title.id),
+      getActiveFanEditsForTitle(title.id),
+      getActiveClipsForTitle(title.id),
+      getActiveStillsForTitle(title.id),
+      isTitleInActiveCampaign(title.id),
+    ]);
 
   const supabase = await createClient();
   const {
@@ -239,6 +242,20 @@ export default async function TitlePage({ params }: PageProps) {
             aboutContent={aboutContent}
             fanEditsContent={
               <>
+                {/* Active-campaign indicator. Rendered whenever the
+                    title sits in at least one funded-or-live
+                    campaign, regardless of viewer auth state — anon
+                    visitors see the same cue as signed-in creators
+                    and can act on it after signing up. The boolean
+                    comes from a service-role check
+                    (isTitleInActiveCampaign) because campaigns are
+                    deny-all under RLS; no campaign internals
+                    (pool, fee, partner, ids) cross the boundary. */}
+                {hasActiveCampaign ? (
+                  <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-moonbeem-pink/15 px-3 py-1 text-body-sm font-medium text-moonbeem-pink">
+                    Active Campaign · Earn from your Edit
+                  </div>
+                ) : null}
                 {/* Block 3 entry point: signed-in viewers see a link
                     to /c/<their-handle>/upload?title_id=<this title>.
                     The upload page itself redirects to /me/edit?
