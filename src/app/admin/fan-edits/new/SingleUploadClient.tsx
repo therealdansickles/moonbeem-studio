@@ -90,6 +90,12 @@ export default function SingleUploadClient() {
   const [creatorResults, setCreatorResults] = useState<CreatorResult[]>([]);
   const [creatorSearching, setCreatorSearching] = useState(false);
 
+  // Editable creator handle. Pre-fills from metadata.sourceHandle
+  // when /fetch-metadata returns; admin can override before save.
+  // Always-visible (every platform), so it doubles as a way to
+  // correct a wrong URL-detected handle on TikTok/IG/X too.
+  const [handleInput, setHandleInput] = useState("");
+
   const [notes, setNotes] = useState("");
 
   const [titleQuery, setTitleQuery] = useState("");
@@ -103,6 +109,15 @@ export default function SingleUploadClient() {
 
   const titleSearchAbort = useRef<AbortController | null>(null);
   const creatorSearchAbort = useRef<AbortController | null>(null);
+
+  // Reset handle input whenever a fresh metadata response arrives.
+  // sourceHandle is the route's resolution chain
+  // (parsed.handle → metrics.creator_handle_displayed → channelTitle
+  // for YouTube), so this pre-fills with the best auto-detected
+  // value. Admin sees it, accepts or edits.
+  useEffect(() => {
+    setHandleInput(metadata?.sourceHandle ?? "");
+  }, [metadata?.sourceHandle]);
 
   // Detect platform as user types (cheap, no API call).
   useEffect(() => {
@@ -249,7 +264,7 @@ export default function SingleUploadClient() {
         body: JSON.stringify({
           url: metadata.parsed.normalizedUrl,
           title_id: selectedTitle.id,
-          handle: metadata.sourceHandle ?? undefined,
+          handle: handleInput.trim() || undefined,
           attributed_creator_id: effectiveCreator?.id ?? null,
           notes: notes.trim() || undefined,
           metrics: metadata.metrics,
@@ -269,6 +284,7 @@ export default function SingleUploadClient() {
       setCreatorPickerOpen(false);
       setCreatorQuery("");
       setCreatorResults([]);
+      setHandleInput("");
       setNotes("");
       setTitleQuery("");
       setSelectedTitle(null);
@@ -403,19 +419,41 @@ export default function SingleUploadClient() {
 
         {metadata && (
           <div className="flex flex-col gap-5">
-            {/* Social attribution (read-only) */}
-            <div className="flex flex-col gap-1 rounded-md border border-white/10 bg-white/[0.02] p-3">
+            {/* Social attribution — editable. Pre-filled from the
+                route's sourceHandle resolution chain; admin can
+                accept or override (works for any platform, including
+                fixing a wrong URL-detected handle). On save, blank
+                falls back to parsed.handle server-side (typically
+                null for YouTube without a /@channel/ segment); any
+                non-blank value passes through verbatim, then
+                insert.ts strips the leading @ and lowercases. */}
+            <div className="flex flex-col gap-2 rounded-md border border-white/10 bg-white/[0.02] p-3">
               <span className="text-body-sm text-moonbeem-ink-subtle uppercase tracking-wider">
                 Posted by
               </span>
-              <p className="text-body text-moonbeem-ink">
-                {metadata.sourceHandle
-                  ? `@${metadata.sourceHandle}`
-                  : "(handle not detected)"}{" "}
-                <span className="text-moonbeem-ink-subtle">
+              <div className="flex items-center gap-2">
+                <span className="text-body text-moonbeem-ink-subtle">@</span>
+                <input
+                  type="text"
+                  value={handleInput}
+                  onChange={(e) => setHandleInput(e.target.value)}
+                  placeholder={
+                    metadata.sourceHandle
+                      ? ""
+                      : "handle not detected — enter to attribute"
+                  }
+                  className="flex-1 bg-transparent border border-white/15 rounded-md px-3 py-1.5 text-body text-moonbeem-ink placeholder:text-moonbeem-ink-subtle focus:outline-none focus:border-moonbeem-pink"
+                />
+                <span className="text-body-sm text-moonbeem-ink-subtle whitespace-nowrap">
                   on {platformLabel(metadata.parsed.platform)}
                 </span>
-              </p>
+              </div>
+              {metadata.sourceHandle && (
+                <p className="text-caption text-moonbeem-ink-subtle">
+                  Auto-detected: @{metadata.sourceHandle}. Edit to
+                  override.
+                </p>
+              )}
             </div>
 
             {/* Network attribution */}
