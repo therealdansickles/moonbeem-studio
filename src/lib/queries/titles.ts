@@ -735,7 +735,9 @@ export async function getFanEditsForCreator(
 }
 
 // Trending fan edits — pinned rows first, then the top N-pinned by
-// view-count delta over the past 24h.
+// per-24h-normalized view-count velocity (see Step 3 inside
+// fetchAlgorithmicTrending for why the raw delta is normalized
+// against the actual snapshot span).
 //
 // Slice C (homepage curation) restructured this from a single
 // algorithmic query into two-queries-then-merge:
@@ -867,15 +869,44 @@ async function fetchAlgorithmicTrending(
     if (snap.captured_at <= cutoff24h) oldByFe.set(id, snap);
   }
 
-  // 3. Compute deltas only for fan_edits with BOTH latest and ≥24h
-  //    ago snapshots. INNER JOIN semantics: rows without coverage
-  //    are skipped entirely, never padded with zeros.
+  // 3. Compute per-24h velocity for fan_edits with BOTH latest and
+  //    ≥24h ago snapshots. INNER JOIN semantics: rows without
+  //    coverage are skipped entirely, never padded with zeros.
+  //
+  //    Time-normalization: the view-tracking job refreshes each
+  //    fan_edit roughly once per 20 hours (per-edit rate limit, not
+  //    every 10 minutes like the cron tick). So the 24h cutoff
+  //    almost never lands between two snapshots — it lands either
+  //    just after the most-recent snapshot (latest is stale → span
+  //    is ~20h) or just before it (latest is fresh, old is two
+  //    cycles back → span is ~40h). Without normalization, two
+  //    edits with identical real velocity rank ~2x apart depending
+  //    on which side of the cutoff they sit, and an edit rotates
+  //    between states as its refresh time drifts ~4h per cycle.
+  //
+  //    Multiplying raw delta by (24 / spanHours) projects each
+  //    edit's accrual into a consistent per-24h rate. The ranking
+  //    value is sort-only — never displayed or stored — so the
+  //    rate stays as a float without rounding.
+  //
+  //    spanHours > 0 guard is defensive: oldByFe always satisfies
+  //    captured_at <= cutoff24h and latestByFe holds the last
+  //    snapshot (>= cutoff or equal), so old strictly precedes
+  //    latest in practice. The guard prevents a div-by-zero
+  //    pathology if a single snapshot ever ends up in both maps.
   const ranked: { id: string; delta: number }[] = [];
   for (const id of activeIds) {
     const latest = latestByFe.get(id);
     const old = oldByFe.get(id);
     if (!latest || !old) continue;
-    ranked.push({ id, delta: latest.view_count - old.view_count });
+    const spanMs =
+      Date.parse(latest.captured_at) - Date.parse(old.captured_at);
+    const spanHours = spanMs / (1000 * 60 * 60);
+    const rawDelta = latest.view_count - old.view_count;
+    const normalizedDelta = spanHours > 0
+      ? rawDelta * 24 / spanHours
+      : 0;
+    ranked.push({ id, delta: normalizedDelta });
   }
   ranked.sort((a, b) => b.delta - a.delta);
   const topIds = ranked.slice(0, limit).map((r) => r.id);
