@@ -32,7 +32,7 @@ export const HOMEPAGE_SECTION_LABELS: Record<HomepageSectionSlug, string> = {
   trending: "Trending Edits",
   recent: "Recent Edits",
   "all-films": "All Films",
-  "active-campaigns": "Films you can earn from right now",
+  "active-campaigns": "Active Fan Edit Campaigns",
 };
 
 // Default order matches today's hardcoded JSX in src/app/page.tsx.

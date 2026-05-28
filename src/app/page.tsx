@@ -61,7 +61,7 @@ export default async function Home() {
     "active-campaigns": () =>
       activeCampaignTitles.length > 0 ? (
         <TitleCarousel
-          title="Films you can earn from right now"
+          title="Active Fan Edit Campaigns"
           titles={activeCampaignTitles.map((t) => ({
             id: t.id,
             slug: t.slug,
