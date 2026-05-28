@@ -2,6 +2,7 @@ import {
   getAllFilms,
   getFeaturedTitles,
   getRecentFanEdits,
+  getTitlesWithActiveCampaigns,
   getTrendingFanEdits,
 } from "@/lib/queries/titles";
 import { getMarqueePartners } from "@/lib/queries/partners";
@@ -17,15 +18,23 @@ export default async function Home() {
   // Fetch every section's data + the configured section order in
   // parallel. Each carousel is a separate query (already the case
   // pre-slice-D); we just add one more for the order config.
-  const [order, featured, recentFanEdits, partners, allFilms, trending] =
-    await Promise.all([
-      getHomepageSectionOrder(),
-      getFeaturedTitles(),
-      getRecentFanEdits(12),
-      getMarqueePartners(),
-      getAllFilms(),
-      getTrendingFanEdits(12),
-    ]);
+  const [
+    order,
+    featured,
+    recentFanEdits,
+    partners,
+    allFilms,
+    trending,
+    activeCampaignTitles,
+  ] = await Promise.all([
+    getHomepageSectionOrder(),
+    getFeaturedTitles(),
+    getRecentFanEdits(12),
+    getMarqueePartners(),
+    getAllFilms(),
+    getTrendingFanEdits(12),
+    getTitlesWithActiveCampaigns(),
+  ]);
 
   // Renderer-per-slug — keeps the conditional length>0 guard
   // co-located with each section. Returning null means "the section
@@ -48,6 +57,19 @@ export default async function Home() {
     "all-films": () =>
       allFilms.length > 0 ? (
         <TitleCarousel title="All Films" titles={allFilms} />
+      ) : null,
+    "active-campaigns": () =>
+      activeCampaignTitles.length > 0 ? (
+        <TitleCarousel
+          title="Films you can earn from right now"
+          titles={activeCampaignTitles.map((t) => ({
+            id: t.id,
+            slug: t.slug,
+            title: t.title,
+            poster_url: t.poster_url,
+            cpmDisplay: t.cpm_display,
+          }))}
+        />
       ) : null,
   };
 

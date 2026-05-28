@@ -521,6 +521,117 @@ export async function getRecentFanEdits(
   });
 }
 
+// Creator-facing "films you can earn from" loader.
+//
+// campaigns / campaign_titles have RLS enabled with zero policies —
+// total deny for anon and authenticated. Reads run via service-role
+// (same pattern as the partner dashboard) and the boundary is the
+// returned shape: only title fields a creator should see, plus a
+// preformatted cpm_display string. Pool size, pool remaining, fee
+// pct, settling days, funded_at, partner identity, and campaign ids
+// stay server-side.
+//
+// Dedupe by title_id (one title can sit in multiple active campaigns
+// — Erupcja is in three today). FIFO-by-funded_at allocation between
+// concurrent campaigns is an internal detail; the surface says "this
+// film is earnable" and shows the highest CPM across that title's
+// active campaigns.
+//
+// "Active" = status IN ('funded','live'). The metering job
+// (supabase/functions/campaign-metering/index.ts:179) bills both —
+// `funded → live` is a side effect of the first payout, not a
+// payout gate. A creator submitting an edit on a funded-but-not-yet-
+// live title will earn on the next settle.
+//
+// Filters titles to is_public=true AND is_active=true. An unlisted or
+// retired title backing an active campaign would be a data-quality
+// problem (the partner-create flow blocks this); the filter is
+// defensive so we never surface a title a viewer can't load.
+export type EarnableTitle = Pick<
+  Title,
+  "id" | "slug" | "title" | "poster_url"
+> & {
+  cpm_display: string;
+};
+
+export async function getTitlesWithActiveCampaigns(): Promise<EarnableTitle[]> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("campaign_titles")
+    .select(
+      "title_id, campaigns!inner(status, cpm_rate_cents), titles!inner(id, slug, title, poster_url, is_public, is_active)",
+    )
+    .in("campaigns.status", ["funded", "live"])
+    .eq("titles.is_public", true)
+    .eq("titles.is_active", true);
+  if (error || !data) return [];
+
+  type Row = {
+    title_id: string;
+    campaigns: { status: string; cpm_rate_cents: number } | null;
+    titles: {
+      id: string;
+      slug: string;
+      title: string;
+      poster_url: string | null;
+      is_public: boolean;
+      is_active: boolean;
+    } | null;
+  };
+
+  const byTitle = new Map<string, EarnableTitle>();
+  for (const r of data as unknown as Row[]) {
+    if (!r.titles || !r.campaigns) continue;
+    const cents = r.campaigns.cpm_rate_cents;
+    const existing = byTitle.get(r.title_id);
+    if (existing) {
+      const prevCents = parseDisplayCents(existing.cpm_display);
+      if (cents > prevCents) {
+        existing.cpm_display = formatCpmDisplay(cents);
+      }
+      continue;
+    }
+    byTitle.set(r.title_id, {
+      id: r.titles.id,
+      slug: r.titles.slug,
+      title: r.titles.title,
+      poster_url: r.titles.poster_url,
+      cpm_display: formatCpmDisplay(cents),
+    });
+  }
+  return Array.from(byTitle.values());
+}
+
+function formatCpmDisplay(cents: number): string {
+  return `$${(cents / 100).toFixed(2)} per 1,000 views`;
+}
+
+function parseDisplayCents(display: string): number {
+  // Inverse of formatCpmDisplay — used only for max-CPM comparison
+  // inside the dedupe loop. Format is "$X.XX per 1,000 views".
+  const m = display.match(/^\$(\d+(?:\.\d+)?)/);
+  return m ? Math.round(Number(m[1]) * 100) : 0;
+}
+
+// Single-title check for /t/[slug]. Same RLS posture as the carousel
+// loader: campaigns/campaign_titles are deny-all under RLS so this
+// runs via service-role. Returns a boolean only — no CPM, no
+// campaign metadata — to keep the title-page surface minimal and to
+// avoid widening any shared Title shape.
+export async function isTitleInActiveCampaign(
+  titleId: string,
+): Promise<boolean> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("campaign_titles")
+    .select("campaign_id, campaigns!inner(status)")
+    .eq("title_id", titleId)
+    .in("campaigns.status", ["funded", "live"])
+    .limit(1);
+  if (error || !data) return false;
+  return data.length > 0;
+}
+
 // Block 3 user-submission queries. Pending / rejected fan_edits never
 // surface on public profiles or title pages (their RLS keeps anon out
 // already); these helpers run via service-role for the submitter's

@@ -7,9 +7,16 @@ import type { Title } from "@/lib/queries/titles";
 
 type Props = {
   title: Pick<Title, "id" | "slug" | "title" | "poster_url">;
+  // Optional CPM chip rendered in the top-right corner of the
+  // poster. Only the active-campaigns homepage carousel passes this
+  // today; all other call sites omit it and the chip is not
+  // rendered. The string is preformatted server-side
+  // ("$X.XX per 1,000 views") so the card doesn't reach for any
+  // campaign internals.
+  cpmDisplay?: string | null;
 };
 
-export default function TitleCard({ title }: Props) {
+export default function TitleCard({ title, cpmDisplay }: Props) {
   const href = `/t/${title.slug}`;
 
   return (
@@ -42,6 +49,11 @@ export default function TitleCard({ title }: Props) {
           </span>
         </div>
       )}
+      {cpmDisplay ? (
+        <span className="pointer-events-none absolute right-2 top-2 rounded-full bg-moonbeem-pink px-2 py-0.5 text-[10px] font-semibold text-moonbeem-navy shadow-md">
+          {cpmDisplay}
+        </span>
+      ) : null}
     </Link>
   );
 }
