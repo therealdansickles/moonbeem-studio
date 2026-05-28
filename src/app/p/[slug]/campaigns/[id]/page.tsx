@@ -722,30 +722,71 @@ function StatusTimeline({
     { key: "launched", label: "Launched", at: launchedAt },
     { key: "completed", label: "Completed", at: completedAt },
   ];
+  // Layout: three w-7 (28px) cells at 0% / 50% / 100% via
+  // flex+justify-between. Circle centers land at 14px, full/2, and
+  // full-14px. The line track is absolutely positioned with left-3.5
+  // / right-3.5 (14px) so it spans circle-center to circle-center,
+  // split into two equal segments that each color based on whether
+  // the NEXT step has fired. Labels + dates sit in a parallel row
+  // of w-7 cells; flex items-center centers each label's bounding
+  // box on the matching cell's midpoint — overflowing symmetrically
+  // outside the cell, which keeps each label visually centered on
+  // its node.
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
       <p className="text-caption uppercase tracking-wide text-moonbeem-ink-muted m-0">
         Lifecycle
       </p>
-      <div className="mt-4 flex items-center justify-between gap-2">
-        {steps.map((s, i) => {
-          const fired = !!s.at;
-          return (
-            <div key={s.key} className="flex flex-1 items-center">
-              <div className="flex flex-col items-center gap-1">
-                <div
-                  className={`flex h-7 w-7 items-center justify-center rounded-full border-2 ${
-                    fired
-                      ? "border-moonbeem-pink bg-moonbeem-pink/20"
-                      : "border-white/15 bg-transparent"
-                  }`}
-                >
-                  {fired ? (
-                    <div className="h-2.5 w-2.5 rounded-full bg-moonbeem-pink" />
-                  ) : null}
-                </div>
+      <div className="relative mt-6 px-3.5">
+        {/* Line track — center-to-center across all three nodes,
+            split into two equal segments. */}
+        <div className="absolute inset-x-3.5 top-3 flex h-px">
+          <div
+            className={`flex-1 ${
+              steps[1].at ? "bg-moonbeem-pink/40" : "bg-white/10"
+            }`}
+          />
+          <div
+            className={`flex-1 ${
+              steps[2].at ? "bg-moonbeem-pink/40" : "bg-white/10"
+            }`}
+          />
+        </div>
+        {/* Circles row — justify-between pushes outers to edges,
+            middle to center. */}
+        <div className="relative flex justify-between">
+          {steps.map((s) => {
+            const fired = !!s.at;
+            return (
+              <div
+                key={s.key}
+                className={`flex h-7 w-7 items-center justify-center rounded-full border-2 ${
+                  fired
+                    ? "border-moonbeem-pink bg-moonbeem-pink/20"
+                    : "border-white/15 bg-transparent"
+                }`}
+              >
+                {fired ? (
+                  <div className="h-2.5 w-2.5 rounded-full bg-moonbeem-pink" />
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+        {/* Labels + dates row — each cell w-7 matching the circle
+            above, items-center so the label/date center on the cell
+            midpoint (which sits over the circle center). Labels are
+            wider than 28px and overflow symmetrically. */}
+        <div className="mt-2 flex justify-between">
+          {steps.map((s) => {
+            const fired = !!s.at;
+            return (
+              <div
+                key={s.key}
+                className="flex w-7 flex-col items-center gap-0.5"
+              >
                 <span
-                  className={`text-caption font-medium ${
+                  className={`text-caption font-medium whitespace-nowrap ${
                     fired
                       ? "text-moonbeem-ink"
                       : "text-moonbeem-ink-subtle"
@@ -753,22 +794,13 @@ function StatusTimeline({
                 >
                   {s.label}
                 </span>
-                <span className="text-[10px] text-moonbeem-ink-subtle tabular-nums">
+                <span className="text-[10px] text-moonbeem-ink-subtle tabular-nums whitespace-nowrap">
                   {formatDateShort(s.at)}
                 </span>
               </div>
-              {i < steps.length - 1 && (
-                <div
-                  className={`mx-2 h-px flex-1 ${
-                    steps[i + 1].at
-                      ? "bg-moonbeem-pink/40"
-                      : "bg-white/10"
-                  }`}
-                />
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
