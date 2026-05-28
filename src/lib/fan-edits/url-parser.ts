@@ -218,10 +218,24 @@ export function parseFanEditUrl(rawUrl: string): ParsedFanEditUrl | null {
   // URLs). Force /reel/{shortcode} on www.instagram.com — IG
   // redirects between forms in the browser regardless, so all four
   // remain reachable from a single canonical stored URL.
+  //
+  // YouTube exception: the video ID lives in the QUERY STRING for
+  // /watch?v=ID URLs, so the generic "host + path" path-only
+  // normalization would silently drop it and downstream
+  // parseShortcodeFromUrl(normalizedUrl) → null → parse_error.
+  // The /shorts/, /embed/, /v/, /live/ path forms AND youtu.be all
+  // resolve to the same 11-char content ID; canonicalize every
+  // YouTube URL to https://www.youtube.com/watch?v={contentId}.
+  // Dedup safety: fan_edits' unique constraint is on
+  // (title_id, post_id), not embed_url, so existing rows stored in
+  // any URL form (e.g. /shorts/<id>) still dedupe against a
+  // re-import via canonical form (same post_id).
   const normalizedUrl =
     platform === "instagram"
       ? `https://www.instagram.com/reel/${contentId}`
-      : `https://${parsed.host}${parsed.pathname.replace(/\/$/, "")}`;
+      : platform === "youtube"
+        ? `https://www.youtube.com/watch?v=${contentId}`
+        : `https://${parsed.host}${parsed.pathname.replace(/\/$/, "")}`;
 
   return { platform, contentId, handle, normalizedUrl };
 }
