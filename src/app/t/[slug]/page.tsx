@@ -236,26 +236,26 @@ export default async function TitlePage({ params }: PageProps) {
                 Distributed by {title.distributor}
               </p>
             )}
+            {/* Active-campaign pill — page chrome, not tab content.
+                Lives above the tab strip so creators landing on the
+                title page see the cue immediately without clicking
+                into Fan Edits. Server-component territory; the
+                hasActiveCampaign boolean is resolved in this file
+                via isTitleInActiveCampaign (service-role single-
+                title check, deny-all RLS bypass). Rendered for both
+                anon and signed-in viewers; gating is purely on
+                title, not auth. */}
+            {hasActiveCampaign ? (
+              <div className="inline-flex items-center gap-2 rounded-full bg-moonbeem-pink/15 px-3 py-1 text-body-sm font-medium text-moonbeem-pink">
+                Active Campaign · Earn from your Edit
+              </div>
+            ) : null}
           </div>
 
           <TitleTabs
             aboutContent={aboutContent}
             fanEditsContent={
               <>
-                {/* Active-campaign indicator. Rendered whenever the
-                    title sits in at least one funded-or-live
-                    campaign, regardless of viewer auth state — anon
-                    visitors see the same cue as signed-in creators
-                    and can act on it after signing up. The boolean
-                    comes from a service-role check
-                    (isTitleInActiveCampaign) because campaigns are
-                    deny-all under RLS; no campaign internals
-                    (pool, fee, partner, ids) cross the boundary. */}
-                {hasActiveCampaign ? (
-                  <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-moonbeem-pink/15 px-3 py-1 text-body-sm font-medium text-moonbeem-pink">
-                    Active Campaign · Earn from your Edit
-                  </div>
-                ) : null}
                 {/* Block 3 entry point: signed-in viewers see a link
                     to /c/<their-handle>/upload?title_id=<this title>.
                     The upload page itself redirects to /me/edit?
