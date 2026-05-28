@@ -20,8 +20,10 @@
 //   re-trigger.
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import CampaignWizard from "./CampaignWizard";
+import { campaignStatusCopy } from "@/lib/campaigns/status";
 
 type CampaignSummary = {
   id: string;
@@ -34,6 +36,10 @@ type CampaignSummary = {
   ends_at: string | null;
   created_at: string;
   title_count: number;
+  // SUM(amount_cents) from partner_credits.source_campaign_id = this
+  // campaign. Drives the "Rolled over $X.XX" vs "Pool drained"
+  // distinction on completed-status pills. Null/0 → "Pool drained".
+  rollover_cents?: number | null;
 };
 
 type PartnerTitle = {
@@ -61,23 +67,6 @@ function formatDate(iso: string): string {
     month: "short",
     day: "numeric",
   });
-}
-
-function statusPillClass(status: string): string {
-  switch (status) {
-    case "draft":
-      return "bg-white/5 text-moonbeem-ink-muted";
-    case "funded":
-      return "bg-moonbeem-violet/20 text-moonbeem-violet-soft";
-    case "live":
-      return "bg-moonbeem-pink/15 text-moonbeem-pink";
-    case "paused":
-      return "bg-yellow-700/20 text-yellow-300";
-    case "completed":
-      return "bg-emerald-700/20 text-emerald-300";
-    default:
-      return "bg-white/5 text-moonbeem-ink-muted";
-  }
 }
 
 function friendlyFundError(code: string): string {
@@ -208,20 +197,36 @@ export default function CampaignsCard({
                 </tr>
               </thead>
               <tbody>
-                {campaigns.map((c) => (
+                {campaigns.map((c) => {
+                  const copy = campaignStatusCopy(c.status, {
+                    rolloverCents: c.rollover_cents ?? null,
+                  });
+                  return (
                   <tr
                     key={c.id}
                     className="border-b border-white/5 last:border-b-0"
                   >
                     <td className="px-3 py-2 text-moonbeem-ink">
-                      {c.name}
+                      <Link
+                        href={`/p/${partnerSlug}/campaigns/${c.id}`}
+                        className="text-moonbeem-ink hover:text-moonbeem-pink hover:underline"
+                      >
+                        {c.name}
+                      </Link>
                     </td>
                     <td className="px-3 py-2">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-caption uppercase tracking-wider ${statusPillClass(c.status)}`}
-                      >
-                        {c.status}
-                      </span>
+                      <div className="flex flex-col gap-0.5">
+                        <span
+                          className={`inline-flex w-fit rounded-full px-2 py-0.5 text-caption uppercase tracking-wider ${copy.pillClass}`}
+                        >
+                          {copy.label}
+                        </span>
+                        {copy.description && (
+                          <span className="text-caption text-moonbeem-ink-subtle">
+                            {copy.description}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-3 py-2 text-moonbeem-ink">
                       {formatCents(c.cpm_rate_cents)} / 1k
@@ -255,7 +260,8 @@ export default function CampaignsCard({
                       </td>
                     )}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

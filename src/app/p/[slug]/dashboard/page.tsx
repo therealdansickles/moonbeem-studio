@@ -1275,14 +1275,30 @@ export default async function PartnerDashboardPage({
     .order("created_at", { ascending: false });
   const campaignIds = (campaignRows ?? []).map((c) => c.id as string);
   const titleCountByCampaign = new Map<string, number>();
+  // Rollover credit per campaign — only present when a
+  // partner_credits row was written via write_partner_credit_for_campaign
+  // (manual early-end or auto live→completed). Drives the
+  // "Completed — Rolled over $X.XX" vs "Pool drained" pill copy.
+  const rolloverByCampaign = new Map<string, number>();
   if (campaignIds.length > 0) {
-    const { data: ctRows } = await supabase
-      .from("campaign_titles")
-      .select("campaign_id")
-      .in("campaign_id", campaignIds);
-    for (const r of ctRows ?? []) {
+    const [ctRes, pcRes] = await Promise.all([
+      supabase
+        .from("campaign_titles")
+        .select("campaign_id")
+        .in("campaign_id", campaignIds),
+      supabase
+        .from("partner_credits")
+        .select("source_campaign_id, amount_cents")
+        .in("source_campaign_id", campaignIds),
+    ]);
+    for (const r of ctRes.data ?? []) {
       const cid = r.campaign_id as string;
       titleCountByCampaign.set(cid, (titleCountByCampaign.get(cid) ?? 0) + 1);
+    }
+    for (const r of pcRes.data ?? []) {
+      const cid = r.source_campaign_id as string;
+      const cents = (r.amount_cents as number | null) ?? 0;
+      rolloverByCampaign.set(cid, (rolloverByCampaign.get(cid) ?? 0) + cents);
     }
   }
   const campaigns = (campaignRows ?? []).map((c) => ({
@@ -1296,6 +1312,7 @@ export default async function PartnerDashboardPage({
     ends_at: (c.ends_at as string | null) ?? null,
     created_at: c.created_at as string,
     title_count: titleCountByCampaign.get(c.id as string) ?? 0,
+    rollover_cents: rolloverByCampaign.get(c.id as string) ?? null,
   }));
 
   // Title picker for the campaign wizard. Pass the partner's full
