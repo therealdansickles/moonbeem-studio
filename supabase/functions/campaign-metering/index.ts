@@ -88,8 +88,8 @@
 //
 // LIFECYCLE — unexpected statuses ('paused', 'completed',
 // 'draft') log loudly and no-op. They shouldn't reach this code
-// (pickTargetCampaign filters to 'funded'/'live'), but if they
-// do — a concurrent admin override between pickTargetCampaign
+// (selectEligibleCampaigns filters to 'funded'/'live'), but if they
+// do — a concurrent admin override between selectEligibleCampaigns
 // and the lifecycle step — the run continues gracefully.
 //
 // AUTH — relies on Supabase Edge platform's default JWT verification.
@@ -121,6 +121,19 @@ const PUBLICLY_READABLE_FAN_EDIT_STATUSES = [
   "auto_verified",
   "approved",
 ] as const;
+
+// Wall-clock budget for one meter-all invocation. The binding platform
+// ceiling is the 150s request idle timeout (the function must respond
+// within 150s; the 400s worker max only applies to background tasks,
+// which this function does not use). The budget is checked BETWEEN
+// campaigns, so when it trips the overshoot is bounded by ONE more
+// campaign's duration — a heavy campaign billing hundreds of deltas at
+// ~30-40ms/RPC is ~10-20s. 90s budget + worst-case ~20s overshoot +
+// response serialization stays comfortably under 150s. At realistic
+// campaign counts a full sweep is a few seconds, so this never fires —
+// it is a pure backstop. When a run first reports budget_exhausted, that
+// is the signal to add a resume cursor + self-re-invocation (deferred).
+const BUDGET_MS = 90_000;
 
 function getEnv(name: string): string {
   const v = Deno.env.get(name);
@@ -164,17 +177,25 @@ type SettledRow = {
 type FanEditMeta = { creator_id: string | null; title_id: string };
 
 // ---------------------------------------------------------------
-// Setup — pick the target campaign.
+// Setup — select ALL eligible campaigns.
 // ---------------------------------------------------------------
-// Oldest funded eligible campaign with positive ledger pool. Walks
-// campaigns in funded_at ASC and returns the first whose
-// SUM(campaign_ledger.amount_cents) > 0. Pool-exhausted campaigns
-// (pool <= 0 but not yet 'completed') are skipped so a younger
-// campaign can advance — useful before 3c.3 wires the lifecycle.
+// Every funded/live campaign with a positive ledger pool, ordered
+// funded_at ASC then id ASC. The handler meters the whole set in one
+// invocation (3c-fairness), so a campaign with pool>0 but no billable
+// edits can no longer head-of-line-block younger campaigns the way the
+// old one-per-run pick did. The (funded_at, id) order is deterministic
+// so a budget-stopped run resumes in a stable order, and same-instant-
+// funded campaigns never reorder between runs.
+//
+// Pool is computed per-campaign (N+1 against campaign_ledger). That's
+// fine at realistic campaign counts; a GROUP BY RPC is an optional
+// later optimization. Pool-exhausted campaigns (<=0) are filtered here;
+// a campaign that drains to 0 mid-run is already 'completed' by its own
+// iteration and excluded from the NEXT run's query.
 
-async function pickTargetCampaign(
+async function selectEligibleCampaigns(
   supabase: SupabaseClient,
-): Promise<{ campaign: Campaign; poolRemaining: number } | null> {
+): Promise<Array<{ campaign: Campaign; poolRemaining: number }>> {
   const { data: campaigns, error: cErr } = await supabase
     .from("campaigns")
     .select(
@@ -182,17 +203,19 @@ async function pickTargetCampaign(
     )
     .in("status", ["funded", "live"])
     .not("funded_at", "is", null)
-    .order("funded_at", { ascending: true });
+    .order("funded_at", { ascending: true })
+    .order("id", { ascending: true });
   if (cErr) {
-    throw new Error(`pickTargetCampaign campaigns: ${cErr.message}`);
+    throw new Error(`selectEligibleCampaigns: ${cErr.message}`);
   }
+  const eligible: Array<{ campaign: Campaign; poolRemaining: number }> = [];
   for (const c of (campaigns ?? []) as Campaign[]) {
     const pool = await campaignPoolRemaining(supabase, c.id);
     if (pool > 0) {
-      return { campaign: c, poolRemaining: pool };
+      eligible.push({ campaign: c, poolRemaining: pool });
     }
   }
-  return null;
+  return eligible;
 }
 
 async function campaignPoolRemaining(
@@ -896,147 +919,167 @@ async function applyLifecycleTransitions(
 Deno.serve(async (_req: Request) => {
   const startTime = Date.now();
 
-  let supabase: SupabaseClient | null = null;
-  let runId: string | null = null;
-  let targetCampaignId: string | null = null;
-
   try {
-    supabase = createClient(
+    const supabase = createClient(
       getEnv("SUPABASE_URL"),
       getEnv("SUPABASE_SERVICE_ROLE_KEY"),
       { auth: { persistSession: false, autoRefreshToken: false } },
     );
 
-    const target = await pickTargetCampaign(supabase);
-    if (!target) {
+    // Run-level fatals (client creation, this query) propagate to the
+    // outer catch. EVERYTHING per-campaign is caught inside the loop, so
+    // one bad campaign can never abort the sweep and starve the others.
+    const eligible = await selectEligibleCampaigns(supabase);
+    if (eligible.length === 0) {
       console.log(
         "[campaign-metering] no eligible campaign with positive pool",
       );
       return jsonResponse({
         ok: true,
         no_eligible_campaign: true,
+        campaigns_processed: 0,
+        campaigns_remaining: 0,
+        budget_exhausted: false,
         duration_ms: Date.now() - startTime,
+        results: [],
       });
     }
-    targetCampaignId = target.campaign.id;
     console.log(
-      `[campaign-metering] target campaign=${target.campaign.id} pool=${target.poolRemaining}`,
+      `[campaign-metering] ${eligible.length} eligible campaign(s)`,
     );
 
-    runId = await startRun(
-      supabase,
-      target.campaign.id,
-      target.poolRemaining,
-    );
+    const results: object[] = [];
+    let processed = 0;
+    let budgetExhausted = false;
 
-    // Pass 1 — insert metering rows for new snapshots.
-    const rowsInserted = await pass1InsertDeltas(supabase, target.campaign);
-    console.log(
-      `[campaign-metering] Pass 1: inserted ${rowsInserted} metering rows`,
-    );
+    for (const { campaign, poolRemaining } of eligible) {
+      // Wall-clock budget — checked BETWEEN campaigns. The in-flight
+      // campaign always finishes atomically (its run row never half-
+      // commits); we only stop before STARTING the next one. Remaining
+      // campaigns are picked up by the next invocation.
+      if (Date.now() - startTime > BUDGET_MS) {
+        budgetExhausted = true;
+        console.warn(
+          `[campaign-metering] budget ${BUDGET_MS}ms exceeded after ${processed}/${eligible.length} campaigns; stopping cleanly`,
+        );
+        break;
+      }
 
-    // Flip matured rows. (Includes any newly-inserted rows whose
-    // settles_at is already in the past — retroactive billing on
-    // historical snapshots.)
-    await flipMaturedToSettled(supabase, target.campaign.id);
+      // Per-campaign isolation (load-bearing). A throw here — a Pass 1
+      // query error, the largest-remainder invariant, an unexpected RPC
+      // failure — fails ONLY this campaign's run and the loop CONTINUES.
+      // Without this, a single poison campaign would re-create the exact
+      // head-of-line freeze this change exists to prevent.
+      let runId: string | null = null;
+      try {
+        runId = await startRun(supabase, campaign.id, poolRemaining);
 
-    // Pass 2 — bill settled rows.
-    const result = await pass2BillSettled(
-      supabase,
-      target.campaign,
-      runId,
-      target.poolRemaining,
-    );
-    console.log(
-      `[campaign-metering] Pass 2: rows_billed=${result.rowsBilled} total_billed_cents=${result.totalBilledCents} factor=${result.factor} pool_after=${result.poolAfter} exhausted=${result.poolExhausted} skipped_rounding=${result.rowsSkippedRounding} skipped_orphan=${result.rowsSkippedOrphan} rpc_errors=${result.rpcErrors.length}`,
-    );
+        // Pass 1 — insert metering rows for new snapshots.
+        const rowsInserted = await pass1InsertDeltas(supabase, campaign);
 
-    // Authoritative pool — re-read from the campaign_ledger SUM
-    // after all the run's writes have landed. The in-loop
-    // result.poolAfter is a JS-tracker mirror (logging only); the
-    // value recorded on the run row and reported in the response is
-    // the ledger truth, so floor-rounding cents or tracker drift
-    // never leak into reporting.
-    const poolAfter = await campaignPoolRemaining(
-      supabase,
-      target.campaign.id,
-    );
+        // Flip matured rows (incl. newly-inserted rows already past
+        // settles_at — retroactive billing on historical snapshots).
+        await flipMaturedToSettled(supabase, campaign.id);
 
-    // Void any remaining 'settled' rows once the pool is fully drained.
-    // Gated on the authoritative ledger SUM (poolAfter === 0) — the
-    // SAME condition that fires completion below — so completion and
-    // void always happen together. (Previously gated on the mid-loop
-    // poolExhausted tracker, which could miss when the cent-bearing row
-    // was last or when rows billed 0, leaving settled stragglers
-    // against a drained pool.) voidRemainingSettled is idempotent and
-    // voids ALL status='settled' rows for the campaign, cleaning the
-    // zero-billed and full_cpm=0 stragglers in one shot.
-    let rowsVoided = 0;
-    if (poolAfter === 0) {
-      rowsVoided = await voidRemainingSettled(
-        supabase,
-        target.campaign.id,
-        runId,
-      );
-      console.log(
-        `[campaign-metering] pool drained (ledger SUM=0); voided ${rowsVoided} remaining settled rows`,
-      );
+        // Pass 2 — bill settled rows (commit-(i) largest-remainder
+        // two-pass; unchanged).
+        const result = await pass2BillSettled(
+          supabase,
+          campaign,
+          runId,
+          poolRemaining,
+        );
+
+        // Authoritative pool — ledger SUM after the run's writes land.
+        const poolAfter = await campaignPoolRemaining(supabase, campaign.id);
+
+        // Void remaining 'settled' rows once the pool is fully drained
+        // (poolAfter === 0) — the SAME condition that fires completion,
+        // so completion and void happen together. (Commit-(i) gate,
+        // unchanged.)
+        let rowsVoided = 0;
+        if (poolAfter === 0) {
+          rowsVoided = await voidRemainingSettled(
+            supabase,
+            campaign.id,
+            runId,
+          );
+        }
+
+        // Lifecycle transitions (3c.3) — funded -> live on first
+        // billing, live -> completed on pool == 0. Unchanged.
+        const lifecycleTransition = await applyLifecycleTransitions(
+          supabase,
+          campaign,
+          result.rowsBilled,
+          poolAfter,
+        );
+
+        await completeRun(supabase, runId, {
+          rows_billed: result.rowsBilled,
+          total_billed_cents: result.totalBilledCents,
+          pool_remaining_after_cents: poolAfter,
+        });
+
+        processed += 1;
+        console.log(
+          `[campaign-metering] campaign=${campaign.id} billed=${result.rowsBilled} total=${result.totalBilledCents} factor=${result.factor} pool_after=${poolAfter} voided=${rowsVoided} skipped_rounding=${result.rowsSkippedRounding} skipped_orphan=${result.rowsSkippedOrphan} rpc_errors=${result.rpcErrors.length} transition=${lifecycleTransition ?? "none"}`,
+        );
+        results.push({
+          ok: true,
+          run_id: runId,
+          campaign_id: campaign.id,
+          rows_inserted: rowsInserted,
+          rows_billed: result.rowsBilled,
+          total_billed_cents: result.totalBilledCents,
+          prorata_factor: result.factor,
+          pool_remaining_before_cents: poolRemaining,
+          pool_remaining_after_cents: poolAfter,
+          pool_exhausted: result.poolExhausted,
+          rows_voided: rowsVoided,
+          rows_skipped_rounding: result.rowsSkippedRounding,
+          rows_skipped_orphan: result.rowsSkippedOrphan,
+          rpc_errors: result.rpcErrors,
+          lifecycle_transition: lifecycleTransition,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(
+          `[campaign-metering] campaign=${campaign.id} FAILED: ${msg}`,
+        );
+        // Flip this campaign's run to 'failed' (best-effort) and move on.
+        // runId is null only if startRun itself threw (no run row to fail).
+        if (runId) await failRun(supabase, runId, msg);
+        processed += 1;
+        results.push({
+          ok: false,
+          run_id: runId,
+          campaign_id: campaign.id,
+          error_message: msg,
+        });
+        // Continue to the next campaign — do NOT abort the sweep.
+      }
     }
-
-    // Lifecycle transitions (3c.3) — funded -> live on first
-    // billing, live -> completed on pool == 0. Runs AFTER the
-    // pool re-read so it sees the ledger truth, BEFORE the run
-    // row is finalized so a failure here flips the run to
-    // 'failed' via the fatal-catch path.
-    const lifecycleTransition = await applyLifecycleTransitions(
-      supabase,
-      target.campaign,
-      result.rowsBilled,
-      poolAfter,
-    );
-    if (lifecycleTransition) {
-      console.log(
-        `[campaign-metering] lifecycle: campaign=${target.campaign.id} ${target.campaign.status} -> ${lifecycleTransition}`,
-      );
-    }
-
-    await completeRun(supabase, runId, {
-      rows_billed: result.rowsBilled,
-      total_billed_cents: result.totalBilledCents,
-      pool_remaining_after_cents: poolAfter,
-    });
 
     return jsonResponse({
       ok: true,
-      run_id: runId,
-      campaign_id: target.campaign.id,
-      rows_inserted: rowsInserted,
-      rows_billed: result.rowsBilled,
-      total_billed_cents: result.totalBilledCents,
-      prorata_factor: result.factor,
-      pool_remaining_before_cents: target.poolRemaining,
-      pool_remaining_after_cents: poolAfter,
-      pool_exhausted: result.poolExhausted,
-      rows_voided: rowsVoided,
-      rows_skipped_rounding: result.rowsSkippedRounding,
-      rows_skipped_orphan: result.rowsSkippedOrphan,
-      rpc_errors: result.rpcErrors,
-      lifecycle_transition: lifecycleTransition,
+      campaigns_processed: processed,
+      campaigns_remaining: eligible.length - processed,
+      budget_exhausted: budgetExhausted,
       duration_ms: Date.now() - startTime,
+      results,
     });
   } catch (err) {
+    // Run-level fatal ONLY: client creation or selectEligibleCampaigns.
+    // Per-campaign failures are caught inside the loop and never reach
+    // here, so no single campaign can produce a 500 that starves the rest.
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[campaign-metering] fatal:", msg);
-    if (supabase && runId) {
-      await failRun(supabase, runId, msg);
-    }
     return jsonResponse(
       {
         ok: false,
-        run_id: runId,
-        campaign_id: targetCampaignId,
-        duration_ms: Date.now() - startTime,
         error_message: msg,
+        duration_ms: Date.now() - startTime,
       },
       500,
     );
