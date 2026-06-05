@@ -155,6 +155,10 @@ type SettledRow = {
   id: string;
   fan_edit_id: string;
   full_cpm_cents: number;
+  // appeared_at is the deterministic secondary tiebreak (after
+  // remainder) for largest-remainder leftover-cent assignment, and
+  // the FIFO order the select already imposes.
+  appeared_at: string;
 };
 
 type FanEditMeta = { creator_id: string | null; title_id: string };
@@ -514,7 +518,7 @@ async function pass2BillSettled(
   // appeared_at first (FIFO within the campaign).
   const { data: settled, error } = await supabase
     .from("campaign_metering_deltas")
-    .select("id, fan_edit_id, full_cpm_cents")
+    .select("id, fan_edit_id, full_cpm_cents, appeared_at")
     .eq("campaign_id", campaign.id)
     .eq("status", "settled")
     .gt("full_cpm_cents", 0)
@@ -572,32 +576,92 @@ async function pass2BillSettled(
   const fanEditIds = Array.from(new Set(rows.map((r) => r.fan_edit_id)));
   const fanEdits = await fetchFanEditMeta(supabase, fanEditIds);
 
+  // ---- PASS 1: compute the authoritative per-delta billed amount ----
+  // No writes here. The amount source is now integer-exact, never a
+  // JS-double factor:
+  //   Full-CPM run (factor === null): each delta bills its exact
+  //   integer full_cpm. No apportionment, no flooring — identical to
+  //   the prior full-CPM behavior, just routed through the explicit
+  //   p_billed_cents param.
+  //   Pro-rata run: integer largest-remainder (Hamilton) apportionment
+  //   of the pool across the settled set, so Σ billed === pool EXACTLY.
+  //   This eliminates the floor() residue that used to wedge the pool a
+  //   few cents above zero and make strict-zero completion unreachable.
+  const finalCentsById = new Map<string, number>();
+
+  if (!isProrata) {
+    for (const row of rows) {
+      finalCentsById.set(row.id, row.full_cpm_cents);
+    }
+  } else {
+    // Integer arithmetic throughout — no JS-double factor touches the
+    // money. Magnitude safety: poolBefore is bounded by realistic pool
+    // sizes (≤ ~10^7 cents) and full_cpm_cents by per-delta CPM earnings
+    // (≤ ~10^6 cents), so numer = poolBefore * full_cpm_cents stays well
+    // under Number.MAX_SAFE_INTEGER (9.007×10^15). totalWanted > 0 here
+    // (isProrata implies totalWanted > poolBefore ≥ 1).
+    const apportioned = rows.map((row) => {
+      const numer = poolBefore * row.full_cpm_cents;
+      const floorCents = Math.floor(numer / totalWanted);
+      const remainder = numer - floorCents * totalWanted; // numer mod totalWanted
+      return { row, floorCents, remainder };
+    });
+
+    const allocated = apportioned.reduce((s, a) => s + a.floorCents, 0);
+    const leftover = poolBefore - allocated; // proven: 0 ≤ leftover < N
+
+    // Deterministic leftover-cent assignment: highest remainder first,
+    // then FIFO (appeared_at ASC), then id ASC. Sort a COPY — PASS 2
+    // writes in the original FIFO order. Determinism makes a retried
+    // run reproduce the same assignment for the same settled set.
+    const byRemainder = [...apportioned].sort((a, b) => {
+      if (b.remainder !== a.remainder) return b.remainder - a.remainder;
+      if (a.row.appeared_at !== b.row.appeared_at) {
+        return a.row.appeared_at < b.row.appeared_at ? -1 : 1;
+      }
+      return a.row.id < b.row.id ? -1 : a.row.id > b.row.id ? 1 : 0;
+    });
+
+    for (const a of apportioned) finalCentsById.set(a.row.id, a.floorCents);
+    for (let i = 0; i < leftover && i < byRemainder.length; i++) {
+      const a = byRemainder[i];
+      finalCentsById.set(a.row.id, a.floorCents + 1);
+    }
+
+    // Invariant: Σ final === pool EXACTLY. A violation means an
+    // apportionment bug; bail the run safely (write NOTHING) rather
+    // than bill wrong amounts on the money rail. The fatal-catch flips
+    // the run to 'failed' and leaves all deltas 'settled' for retry.
+    const finalSum = rows.reduce(
+      (s, r) => s + (finalCentsById.get(r.id) ?? 0),
+      0,
+    );
+    if (finalSum !== poolBefore) {
+      throw new Error(
+        `largest-remainder invariant violated: Σfinal=${finalSum} != pool=${poolBefore} (totalWanted=${totalWanted}, leftover=${leftover}, rows=${rows.length})`,
+      );
+    }
+  }
+
+  // ---- PASS 2: write, in original FIFO order ----
+  // poolRemaining is a logging/tracker mirror only — it is NO LONGER
+  // the money source and NO LONGER gates anything (void is decoupled
+  // and keyed off the authoritative ledger SUM in the handler).
   let poolRemaining = poolBefore;
   let rowsBilled = 0;
   let totalBilledCents = 0;
-  let poolExhausted = false;
   let rowsSkippedRounding = 0;
   let rowsSkippedOrphan = 0;
   const rpcErrors: Array<{ delta_id: string; error: string }> = [];
 
   for (const row of rows) {
-    // Defensive — should not trigger in normal pro-rata math
-    // (floor() leaves a few cents in the pool), but if the pool
-    // somehow hits 0 mid-loop, stop and void the rest.
-    if (poolRemaining <= 0) {
-      poolExhausted = true;
-      break;
-    }
-
-    const billedCents = Math.floor(row.full_cpm_cents * factorForRpc);
+    const billedCents = finalCentsById.get(row.id) ?? 0;
     if (billedCents <= 0) {
-      // Sub-row rounded to 0 (small full_cpm under a tiny factor).
-      // Skip — the RPC would raise 'prorata_yields_zero'. The row
-      // stays 'settled' until the next run or 3c.3 voids it.
+      // Pro-rata floor rounded this delta to 0 and it did not win a
+      // leftover cent. Skip — it stays 'settled' and is voided when the
+      // campaign completes (ledger SUM === 0). On full-CPM runs this
+      // never happens: the select filters full_cpm_cents > 0.
       rowsSkippedRounding += 1;
-      console.warn(
-        `[campaign-metering] skipping delta=${row.id}: floor(${row.full_cpm_cents} * ${factorForRpc}) <= 0`,
-      );
       continue;
     }
 
@@ -624,6 +688,7 @@ async function pass2BillSettled(
           p_metering_delta_id: row.id,
           p_prorata_run_id: runId,
           p_prorata_factor: factorForRpc,
+          p_billed_cents: billedCents,
           p_creator_id: fe.creator_id,
           p_partner_id: campaign.partner_id,
           p_title_id: fe.title_id,
@@ -644,6 +709,10 @@ async function pass2BillSettled(
       // single bad row.
     }
   }
+
+  // Informational only — the handler gates completion AND void on the
+  // authoritative ledger SUM, not on this tracker.
+  const poolExhausted = poolRemaining <= 0;
 
   return {
     rowsBilled,
@@ -882,29 +951,37 @@ Deno.serve(async (_req: Request) => {
       `[campaign-metering] Pass 2: rows_billed=${result.rowsBilled} total_billed_cents=${result.totalBilledCents} factor=${result.factor} pool_after=${result.poolAfter} exhausted=${result.poolExhausted} skipped_rounding=${result.rowsSkippedRounding} skipped_orphan=${result.rowsSkippedOrphan} rpc_errors=${result.rpcErrors.length}`,
     );
 
-    let rowsVoided = 0;
-    if (result.poolExhausted) {
-      rowsVoided = await voidRemainingSettled(
-        supabase,
-        target.campaign.id,
-        runId,
-      );
-      console.log(
-        `[campaign-metering] pool exhausted; voided ${rowsVoided} remaining settled rows`,
-      );
-    }
-
     // Authoritative pool — re-read from the campaign_ledger SUM
     // after all the run's writes have landed. The in-loop
-    // result.poolAfter is a JS-tracker mirror used only for the
-    // mid-loop "should we stop and void?" defense; the value
-    // recorded on the run row and reported in the response is
+    // result.poolAfter is a JS-tracker mirror (logging only); the
+    // value recorded on the run row and reported in the response is
     // the ledger truth, so floor-rounding cents or tracker drift
     // never leak into reporting.
     const poolAfter = await campaignPoolRemaining(
       supabase,
       target.campaign.id,
     );
+
+    // Void any remaining 'settled' rows once the pool is fully drained.
+    // Gated on the authoritative ledger SUM (poolAfter === 0) — the
+    // SAME condition that fires completion below — so completion and
+    // void always happen together. (Previously gated on the mid-loop
+    // poolExhausted tracker, which could miss when the cent-bearing row
+    // was last or when rows billed 0, leaving settled stragglers
+    // against a drained pool.) voidRemainingSettled is idempotent and
+    // voids ALL status='settled' rows for the campaign, cleaning the
+    // zero-billed and full_cpm=0 stragglers in one shot.
+    let rowsVoided = 0;
+    if (poolAfter === 0) {
+      rowsVoided = await voidRemainingSettled(
+        supabase,
+        target.campaign.id,
+        runId,
+      );
+      console.log(
+        `[campaign-metering] pool drained (ledger SUM=0); voided ${rowsVoided} remaining settled rows`,
+      );
+    }
 
     // Lifecycle transitions (3c.3) — funded -> live on first
     // billing, live -> completed on pool == 0. Runs AFTER the
