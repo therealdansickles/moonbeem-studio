@@ -29,6 +29,7 @@ import {
 } from "@/lib/admin-action-runs";
 import AdminQuickActions from "./AdminQuickActions";
 import AttachTitleButton from "./AttachTitleButton";
+import CreateTitleButton from "./CreateTitleButton";
 import PartnerRow from "./PartnerRow";
 import TitleRowControls from "./TitleRowControls";
 
@@ -536,6 +537,7 @@ export default async function AdminLanding() {
               >
                 Curate featured →
               </Link>
+              <CreateTitleButton />
               <AttachTitleButton />
             </div>
           </div>

@@ -80,6 +80,10 @@ export default function FanEditCard({
     }
   }
 
+  // Both can be null (a deleted-from-platform fan_edit on a poster-less
+  // title), so guard before rendering — <Image src={null}> breaks the rail.
+  const thumbSrc = fanEdit.thumbnail_url ?? fanEdit.title_poster_url;
+
   return (
     // Outer wrapper enforces aspect-ratio independently of the
     // motion.button's layoutId measurement — same split pattern
@@ -92,19 +96,26 @@ export default function FanEditCard({
       onClick={openModal}
       className="group absolute inset-0 block cursor-pointer overflow-hidden rounded-xl bg-moonbeem-navy/40 text-left transition-[transform,box-shadow] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] hover:scale-[1.03] hover:shadow-[0_20px_40px_rgba(245,197,225,0.3)] focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
     >
-      <Image
-        src={fanEdit.thumbnail_url ?? fanEdit.title_poster_url}
-        alt={
-          fanEdit.thumbnail_url
-            ? `${fanEdit.title_name} fan edit by ${displayHandle ?? "@anon"}`
-            : `${fanEdit.title_name} poster`
-        }
-        fill
-        sizes="(max-width: 768px) 75vw, 280px"
-        draggable={false}
-        className="select-none object-cover"
-        unoptimized={!!fanEdit.thumbnail_url}
-      />
+      {thumbSrc ? (
+        <Image
+          src={thumbSrc}
+          alt={
+            fanEdit.thumbnail_url
+              ? `${fanEdit.title_name} fan edit by ${displayHandle ?? "@anon"}`
+              : `${fanEdit.title_name} poster`
+          }
+          fill
+          sizes="(max-width: 768px) 75vw, 280px"
+          draggable={false}
+          className="select-none object-cover"
+          unoptimized={!!fanEdit.thumbnail_url}
+        />
+      ) : (
+        <div
+          aria-hidden
+          className="absolute inset-0 bg-gradient-to-br from-moonbeem-navy to-black"
+        />
+      )}
 
       <div className="absolute left-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-moonbeem-ink backdrop-blur-sm">
         <PlatformIcon platform={fanEdit.platform} className="h-4 w-4" />
