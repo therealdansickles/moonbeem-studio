@@ -220,6 +220,27 @@ export async function getAllFilms(): Promise<Title[]> {
   return data as Title[];
 }
 
+// The TV-series analog of getAllFilms — feeds the homepage "Series"
+// rail. Same is_public + is_active gate and same ordering as the films
+// catalog, but media_type='tv'. Deliberately does NOT filter
+// is_hidden_from_all_films (that flag is film-rail scoped). Uses the
+// service-role client to match getAllFilms (the catalog rail this
+// mirrors). When the title_type column ships (see getAllFilms note),
+// swap the filter to title_type='tv_series'.
+export async function getSeriesTitles(): Promise<Title[]> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("titles")
+    .select("*")
+    .eq("is_public", true)
+    .eq("is_active", true)
+    .eq("media_type", "tv")
+    .order("allfilms_pin_order", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: false });
+  if (error || !data) return [];
+  return data as Title[];
+}
+
 export type TitleOffer = {
   id: string;
   title_id: string;
