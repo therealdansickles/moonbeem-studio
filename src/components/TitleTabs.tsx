@@ -4,12 +4,16 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useState, type ReactNode } from "react";
 import { fadeIn } from "@/lib/motion";
 
-type SectionId = "about" | "fan-edits" | "videos" | "stills";
+type SectionId = "about" | "watch" | "fan-edits" | "videos" | "stills";
 
 type Section = { id: SectionId; label: string; content: ReactNode };
 
 type Props = {
   aboutContent: ReactNode;
+  // Optional — when provided (the title has published episodes), a
+  // "Watch" tab is inserted after About. Absent/null → no Watch tab
+  // (same empty-guard discipline as the homepage Series rail).
+  watchContent?: ReactNode;
   fanEditsContent: ReactNode;
   videosContent: ReactNode;
   stillsContent: ReactNode;
@@ -17,6 +21,7 @@ type Props = {
 
 export default function TitleTabs({
   aboutContent,
+  watchContent,
   fanEditsContent,
   videosContent,
   stillsContent,
@@ -25,6 +30,9 @@ export default function TitleTabs({
 
   const sections: Section[] = [
     { id: "about", label: "About", content: aboutContent },
+    ...(watchContent != null
+      ? [{ id: "watch" as SectionId, label: "Watch", content: watchContent }]
+      : []),
     { id: "fan-edits", label: "Fan Edits", content: fanEditsContent },
     { id: "videos", label: "Clips", content: videosContent },
     { id: "stills", label: "Stills", content: stillsContent },
