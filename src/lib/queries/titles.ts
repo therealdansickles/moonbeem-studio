@@ -33,6 +33,14 @@ export type Title = {
   is_public: boolean;
   is_featured: boolean;
   partner_id: string | null;
+  // Content-type discriminator (CHECK: movie | tv | event). Always present
+  // (select("*")); declared here so the title page can branch on
+  // media_type === 'event' without a cast.
+  media_type: string;
+  // Event-only fields (media_type='event'); null for movie/tv. Added by
+  // 20260606000002_titles_event_type.sql.
+  event_date: string | null;
+  venue: string | null;
   cast_members: CastMember[] | null;
   crew: CrewMember[] | null;
 };
@@ -235,6 +243,27 @@ export async function getSeriesTitles(): Promise<Title[]> {
     .eq("is_public", true)
     .eq("is_active", true)
     .eq("media_type", "tv")
+    .order("allfilms_pin_order", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: false });
+  if (error || !data) return [];
+  return data as Title[];
+}
+
+// The event analog of getSeriesTitles — feeds the homepage "Events" rail
+// for event-as-title content (Sukeban-style, media_type='event'). Same
+// is_public + is_active gate and the SAME ordering as the films/series
+// catalog rails (allfilms_pin_order ASC NULLS LAST, then created_at DESC)
+// so the three shelves behave identically. Service-role client to match
+// getAllFilms/getSeriesTitles. Event-date-based ordering is a populate-
+// time refinement, intentionally not done here (mirror Series for v1).
+export async function getEventTitles(): Promise<Title[]> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("titles")
+    .select("*")
+    .eq("is_public", true)
+    .eq("is_active", true)
+    .eq("media_type", "event")
     .order("allfilms_pin_order", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: false });
   if (error || !data) return [];
