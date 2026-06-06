@@ -8,10 +8,12 @@ import {
   getActiveOffersForTitle,
   getActiveStillsForTitle,
   getTitleBySlug,
+  getTitleEpisodes,
   isTitleInActiveCampaign,
   type TitleOffer,
 } from "@/lib/queries/titles";
 import TitleTabs from "@/components/TitleTabs";
+import EpisodeList from "@/components/EpisodeList";
 import FanEditsTab from "@/components/FanEditsTab";
 import VideosTab from "@/components/VideosTab";
 import StillsTab from "@/components/StillsTab";
@@ -114,13 +116,14 @@ export default async function TitlePage({ params }: PageProps) {
     partner_id: title.partner_id,
   });
   if (!visible) notFound();
-  const [offers, fanEdits, clips, stills, hasActiveCampaign] =
+  const [offers, fanEdits, clips, stills, hasActiveCampaign, episodes] =
     await Promise.all([
       getActiveOffersForTitle(title.id),
       getActiveFanEditsForTitle(title.id),
       getActiveClipsForTitle(title.id),
       getActiveStillsForTitle(title.id),
       isTitleInActiveCampaign(title.id),
+      getTitleEpisodes(title.id),
     ]);
 
   const supabase = await createClient();
@@ -254,6 +257,9 @@ export default async function TitlePage({ params }: PageProps) {
 
           <TitleTabs
             aboutContent={aboutContent}
+            watchContent={
+              episodes.length > 0 ? <EpisodeList episodes={episodes} /> : undefined
+            }
             fanEditsContent={
               <>
                 {/* Block 3 entry point: signed-in viewers see a link
