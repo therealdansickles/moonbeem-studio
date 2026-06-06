@@ -2,6 +2,7 @@ import {
   getAllFilms,
   getFeaturedTitles,
   getRecentFanEdits,
+  getSeriesTitles,
   getTitlesWithActiveCampaigns,
   getTrendingFanEdits,
 } from "@/lib/queries/titles";
@@ -26,6 +27,7 @@ export default async function Home() {
     allFilms,
     trending,
     activeCampaignTitles,
+    series,
   ] = await Promise.all([
     getHomepageSectionOrder(),
     getFeaturedTitles(),
@@ -34,6 +36,7 @@ export default async function Home() {
     getAllFilms(),
     getTrendingFanEdits(12),
     getTitlesWithActiveCampaigns(),
+    getSeriesTitles(),
   ]);
 
   // Renderer-per-slug — keeps the conditional length>0 guard
@@ -78,8 +81,27 @@ export default async function Home() {
   // larger bottom padding (pb-20) there instead of pb-10. This used
   // to be hardcoded to "All Films" pre-slice-D; under arbitrary
   // reorder it's whichever section ends up rendered last.
-  const rendered: Array<{ slug: HomepageSectionSlug; node: React.ReactNode }> =
+  const rendered: Array<{ slug: string; node: React.ReactNode }> =
     order.map((slug) => ({ slug, node: renderers[slug]() }));
+  // Series rail — a fixed shelf rendered immediately after All Films.
+  // NOT a homepage_sections slug: keeping it out of the orderable
+  // taxonomy avoids touching the section CHECK constraint, the admin
+  // reorder route, and a migration. Splices right after the all-films
+  // node (falls back to the end if all-films isn't in the configured
+  // order). Guarded on empty so there's no "Series" header on an
+  // empty shelf (TitleCarousel also no-ops on an empty list).
+  if (series.length > 0) {
+    const seriesEntry = {
+      slug: "series",
+      node: <TitleCarousel title="Series" titles={series} />,
+    };
+    const afterAllFilms = rendered.findIndex((r) => r.slug === "all-films");
+    if (afterAllFilms >= 0) {
+      rendered.splice(afterAllFilms + 1, 0, seriesEntry);
+    } else {
+      rendered.push(seriesEntry);
+    }
+  }
   const visibleIndexes = rendered
     .map((r, i) => (r.node ? i : -1))
     .filter((i) => i >= 0);
