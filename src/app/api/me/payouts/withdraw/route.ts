@@ -8,18 +8,27 @@
 //
 // Flow:
 //   1. Validate caller has creator + payout account + payouts_enabled.
-//   2. Reject if any pending withdrawal exists (ui already disables
-//      the button, this is defensive).
+//   2. Reject if a withdrawal is already in flight ('pending') OR parked
+//      in 'needs_reconciliation' (a prior stamp failure — see step 7a).
 //   3. Compute the available balance from unwithdrawn earnings.
 //   4. Reject if balance < MIN_WITHDRAWAL_CENTS.
 //   5. Insert a withdrawal row in 'pending'.
 //   6. Call stripe.transfers.create with the withdrawal id as
 //      idempotency key — guards against double-clicks.
-//   7. On Stripe success: stamp withdrawn_at on the earnings rows
-//      we just settled, mark withdrawal completed with the
-//      transfer id.
-//   8. On Stripe failure: mark withdrawal failed; earnings rows
-//      stay unwithdrawn so the user can retry.
+//   7. On Stripe success + earnings-stamp success: mark withdrawal
+//      'completed' with the transfer id. (This is the ONLY path to
+//      'completed'.)
+//   7a. On Stripe success but earnings-stamp FAILURE: money moved but the
+//      earnings are still withdrawn_at NULL — park the withdrawal in
+//      'needs_reconciliation' (NOT 'completed'), record the transfer id,
+//      leave completed_at null, and return a non-success response. The
+//      step-2 guard then blocks this creator's future withdrawals until an
+//      admin reconciles by hand (docs/payout-reconciliation.md). This is
+//      FIX A, closing the double-pay window; FIX B (a structural
+//      creator_earnings.withdrawal_id link + auto reconciler) is the
+//      durable follow-up.
+//   8. On Stripe failure (transfer throw): mark withdrawal 'failed';
+//      earnings stay unwithdrawn so the user can retry (no money moved).
 
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
@@ -60,22 +69,32 @@ export async function POST() {
     });
   }
 
-  // Reject if a withdrawal is already in flight. Race window: two
-  // simultaneous POSTs could both pass this check; the idempotency
-  // key on the Stripe call protects against double-transfer, and
-  // the second insert would fail uniquely if we add a partial-unique
-  // constraint later. For v1 the UI disables the button; this is a
-  // backstop.
-  const { data: pending } = await supabase
+  // Reject if a withdrawal is already in flight ('pending') OR if a prior
+  // withdrawal is parked in 'needs_reconciliation'. The latter means a
+  // transfer SUCCEEDED but the earnings stamp failed, so those earnings are
+  // still withdrawn_at NULL — letting a new withdrawal through would re-sum
+  // and re-pay them (double-pay). Blocking on both statuses is FIX A: the
+  // creator stays blocked until an admin clears the stuck row by hand
+  // (docs/payout-reconciliation.md). Race window: two simultaneous POSTs
+  // could both pass this check; the idempotency key on the Stripe call
+  // backstops a double-transfer. For v1 the UI disables the button too.
+  const { data: blocking } = await supabase
     .from("withdrawals")
-    .select("id")
+    .select("id, status")
     .eq("creator_id", creator.id)
-    .eq("status", "pending")
+    .in("status", ["pending", "needs_reconciliation"])
     .limit(1);
-  if ((pending ?? []).length > 0) {
-    return NextResponse.json({ error: "pending_withdrawal_in_flight" }, {
-      status: 409,
-    });
+  if ((blocking ?? []).length > 0) {
+    const blockedStatus = (blocking![0].status as string) ?? "pending";
+    return NextResponse.json(
+      {
+        error:
+          blockedStatus === "needs_reconciliation"
+            ? "withdrawal_needs_reconciliation"
+            : "pending_withdrawal_in_flight",
+      },
+      { status: 409 },
+    );
   }
 
   // Snapshot the rows we're about to settle. Doing this BEFORE the
@@ -158,23 +177,57 @@ export async function POST() {
     );
   }
 
-  // Stripe succeeded. Stamp withdrawn_at on the earnings rows we
-  // settled (clamp to the snapshotted ids — a row that landed
-  // between snapshot and now stays unwithdrawn for the next call).
+  // Stripe succeeded — the money has moved to the connected account. Stamp
+  // withdrawn_at on the earnings rows we settled (clamp to the snapshotted
+  // ids — a row that landed between snapshot and now stays unwithdrawn for
+  // the next call). This is a single UPDATE … WHERE id IN (…): all-or-nothing
+  // for the batch.
   const withdrawnAt = new Date().toISOString();
   const { error: stampErr } = await supabase
     .from("creator_earnings")
     .update({ withdrawn_at: withdrawnAt })
     .in("id", earningsIdsToSettle);
+
   if (stampErr) {
-    // Money has already moved. We log loudly but still report
-    // success to the user; the reconciliation job (future work)
-    // will re-stamp from withdrawals.completed_at.
+    // DOUBLE-PAY GUARD (FIX A). The transfer SUCCEEDED but we could not stamp
+    // withdrawn_at, so these earnings are still withdrawn_at NULL. We must NOT
+    // mark this 'completed' and must NOT report clean success — either would
+    // let the creator withdraw again and re-pay the same earnings. Park the
+    // row in 'needs_reconciliation' (money moved → record the transfer id;
+    // completed_at stays null because it is NOT complete). The step-2 re-entry
+    // guard blocks this creator's future withdrawals until an admin reconciles
+    // the row by hand. Manual-clear steps: docs/payout-reconciliation.md.
+    // (FIX B — a structural creator_earnings.withdrawal_id link + an auto
+    // reconciler — is the durable follow-up, not this change.)
     console.error(
-      `[payouts] stamp earnings failed for withdrawal=${withdrawalId} after successful transfer=${transfer.id}: ${stampErr.message}`,
+      `[payouts] RECONCILE-REQUIRED withdrawal=${withdrawalId} transfer=${transfer.id} ` +
+        `stamp failed AFTER successful transfer (money moved, earnings NOT stamped): ${stampErr.message}; ` +
+        `unstamped earnings_ids=[${earningsIdsToSettle.join(",")}]`,
+    );
+    await supabase
+      .from("withdrawals")
+      .update({
+        status: "needs_reconciliation",
+        stripe_transfer_id: transfer.id,
+        completed_at: null,
+      })
+      .eq("id", withdrawalId);
+    return NextResponse.json(
+      {
+        ok: false,
+        needs_reconciliation: true,
+        withdrawal_id: withdrawalId,
+        stripe_transfer_id: transfer.id,
+        amount_cents: totalCents,
+        detail:
+          "Your payout was sent but our records need a manual check. " +
+          "It will be reconciled shortly — no further action is needed.",
+      },
+      { status: 202 },
     );
   }
 
+  // Stamp succeeded — this is the ONLY path to 'completed'.
   await supabase
     .from("withdrawals")
     .update({
