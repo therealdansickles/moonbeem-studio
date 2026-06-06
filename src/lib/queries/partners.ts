@@ -36,3 +36,34 @@ export async function getMarqueePartners(): Promise<MarqueePartner[]> {
     )
     .map((r) => ({ slug: r.slug, name: r.name, logo_url: r.logo_url }));
 }
+
+export type PartnerSummary = {
+  id: string;
+  name: string;
+  logo_url: string | null;
+};
+
+// Scoped partner lookup by id — used by the EVENT title page to render the
+// league/partner logo "up top". No reusable partner-by-id getter existed
+// before this (only inline .from("partners") reads scattered across admin
+// routes). Service-role for the same RLS reason as getMarqueePartners
+// (partners has RLS on with no public SELECT policy). Returns name +
+// logo_url so the title page can do the logo_url → name-text → nothing
+// fallback chain. This is fetched ONLY for events; getTitleBySlug is not
+// modified.
+export async function getPartnerById(
+  id: string,
+): Promise<PartnerSummary | null> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("partners")
+    .select("id, name, logo_url")
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !data) return null;
+  return {
+    id: data.id as string,
+    name: data.name as string,
+    logo_url: (data.logo_url as string | null) ?? null,
+  };
+}
