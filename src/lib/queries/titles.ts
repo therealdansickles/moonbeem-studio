@@ -241,6 +241,39 @@ export async function getSeriesTitles(): Promise<Title[]> {
   return data as Title[];
 }
 
+export type TitleEpisode = {
+  id: string;
+  title_id: string;
+  episode_number: number;
+  label: string | null;
+  embed_url: string;
+  source: string;
+  access: string;
+  cover_image_url: string | null;
+  is_published: boolean;
+};
+
+// Published episodes for a title's Watch tab, in episode order. Reads
+// via the service-role client (title_episodes is RLS-enabled with no
+// policies — service-role only — matching getAllFilms/getSeriesTitles
+// and the campaigns family). Episode visibility rides on the title
+// page's own canViewTitle gate.
+export async function getTitleEpisodes(
+  titleId: string,
+): Promise<TitleEpisode[]> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("title_episodes")
+    .select(
+      "id, title_id, episode_number, label, embed_url, source, access, cover_image_url, is_published",
+    )
+    .eq("title_id", titleId)
+    .eq("is_published", true)
+    .order("episode_number", { ascending: true });
+  if (error || !data) return [];
+  return data as TitleEpisode[];
+}
+
 export type TitleOffer = {
   id: string;
   title_id: string;
