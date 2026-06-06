@@ -1,5 +1,6 @@
 import {
   getAllFilms,
+  getEventTitles,
   getFeaturedTitles,
   getRecentFanEdits,
   getSeriesTitles,
@@ -28,6 +29,7 @@ export default async function Home() {
     trending,
     activeCampaignTitles,
     series,
+    events,
   ] = await Promise.all([
     getHomepageSectionOrder(),
     getFeaturedTitles(),
@@ -37,6 +39,7 @@ export default async function Home() {
     getTrendingFanEdits(12),
     getTitlesWithActiveCampaigns(),
     getSeriesTitles(),
+    getEventTitles(),
   ]);
 
   // Renderer-per-slug — keeps the conditional length>0 guard
@@ -100,6 +103,31 @@ export default async function Home() {
       rendered.splice(afterAllFilms + 1, 0, seriesEntry);
     } else {
       rendered.push(seriesEntry);
+    }
+  }
+  // Events rail — clones the Series shelf for event-as-title content
+  // (media_type='event', e.g. Sukeban matches). Same out-of-taxonomy
+  // approach as Series (no homepage_sections slug, so no CHECK / reorder
+  // route / migration to touch). Splices AFTER the Series node when
+  // present, else after all-films, else pushes — yielding the order
+  // All Films → Series → Events. Runs after the Series splice above so
+  // the "series" node already exists in `rendered`. Guarded on empty so
+  // there's no "Events" header on an empty shelf.
+  if (events.length > 0) {
+    const eventsEntry = {
+      slug: "events",
+      node: <TitleCarousel title="Events" titles={events} />,
+    };
+    const afterSeries = rendered.findIndex((r) => r.slug === "series");
+    const afterAllFilmsForEvents = rendered.findIndex(
+      (r) => r.slug === "all-films",
+    );
+    if (afterSeries >= 0) {
+      rendered.splice(afterSeries + 1, 0, eventsEntry);
+    } else if (afterAllFilmsForEvents >= 0) {
+      rendered.splice(afterAllFilmsForEvents + 1, 0, eventsEntry);
+    } else {
+      rendered.push(eventsEntry);
     }
   }
   const visibleIndexes = rendered

@@ -12,6 +12,7 @@ import {
   isTitleInActiveCampaign,
   type TitleOffer,
 } from "@/lib/queries/titles";
+import { getPartnerById } from "@/lib/queries/partners";
 import TitleTabs from "@/components/TitleTabs";
 import EpisodeList from "@/components/EpisodeList";
 import FanEditsTab from "@/components/FanEditsTab";
@@ -30,6 +31,32 @@ import { getUsageCount } from "@/lib/gating/usage-counts";
 import { Suspense } from "react";
 
 type PageProps = { params: Promise<{ slug: string }> };
+
+// Render a stored event_date (timestamptz) readably for the event meta
+// line. Date always shown; time appended only when the stored value
+// carries a non-midnight-UTC time component (Dan stores date-only as
+// 00:00). Formatted in UTC for SSR determinism — timezone-perfect local
+// display is a populate-time refinement, not this build. Returns null for
+// null/unparseable input so the caller can omit the segment entirely.
+function formatEventDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const dateStr = d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+  const hasTime = d.getUTCHours() !== 0 || d.getUTCMinutes() !== 0;
+  if (!hasTime) return dateStr;
+  const timeStr = d.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  });
+  return `${dateStr} · ${timeStr}`;
+}
 
 export async function generateMetadata({
   params,
@@ -125,6 +152,17 @@ export default async function TitlePage({ params }: PageProps) {
       isTitleInActiveCampaign(title.id),
       getTitleEpisodes(title.id),
     ]);
+
+  // Event-only: fetch the title's partner (the league) for the header
+  // logo treatment. Conditional so films/series never pay for this read,
+  // and so getTitleBySlug stays untouched. Fallback chain handled in the
+  // header JSX: logo_url → name text → nothing.
+  const eventPartner =
+    title.media_type === "event" && title.partner_id
+      ? await getPartnerById(title.partner_id)
+      : null;
+  const eventDateDisplay =
+    title.media_type === "event" ? formatEventDate(title.event_date) : null;
 
   const supabase = await createClient();
   const {
@@ -226,6 +264,30 @@ export default async function TitlePage({ params }: PageProps) {
 
         <div className="w-full md:flex-1 md:min-w-0 flex flex-col items-center gap-8 md:items-stretch">
           <div className="flex flex-col items-center gap-3 max-w-prose text-center md:items-start md:text-left md:max-w-none">
+            {/* Event-only league/partner banner, "up top" above the
+                title — prominent but contained (≤64px tall). Fallback
+                chain: logo image → partner name as text → nothing.
+                Plain <img> matches the partner-logo convention
+                (PartnerLogoStrip) so the R2 host doesn't need a
+                next.config remotePatterns entry per uploaded logo. */}
+            {title.media_type === "event" &&
+              eventPartner &&
+              (eventPartner.logo_url || eventPartner.name) && (
+                <div className="flex w-full items-center justify-center md:justify-start">
+                  {eventPartner.logo_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={eventPartner.logo_url}
+                      alt={eventPartner.name}
+                      className="h-12 w-auto max-w-[240px] object-contain md:h-16"
+                    />
+                  ) : (
+                    <span className="font-wordmark text-display-sm text-moonbeem-ink-muted">
+                      {eventPartner.name}
+                    </span>
+                  )}
+                </div>
+              )}
             <h1 className="font-wordmark font-bold text-display-md md:text-display-lg text-moonbeem-pink m-0">
               {title.title}
             </h1>
@@ -234,6 +296,18 @@ export default async function TitlePage({ params }: PageProps) {
                 {metaParts.join(" · ")}
               </p>
             )}
+            {/* Event-only meta line: date · venue, reusing the film
+                meta styling. Renders only what exists (date and/or
+                venue); the film metaParts above stay empty for events
+                (director/year/runtime null → auto-suppressed). */}
+            {title.media_type === "event" &&
+              (eventDateDisplay || title.venue) && (
+                <p className="text-body text-moonbeem-ink-muted m-0">
+                  {[eventDateDisplay, title.venue]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              )}
             {title.distributor && (
               <p className="text-body-sm text-moonbeem-ink-subtle m-0">
                 Distributed by {title.distributor}
