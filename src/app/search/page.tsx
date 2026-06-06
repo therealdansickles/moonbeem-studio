@@ -12,7 +12,7 @@ export async function generateMetadata({
   const { q, person } = await searchParams;
   const personTrimmed = (person ?? "").trim();
   if (personTrimmed) {
-    return { title: `Films with ${personTrimmed} · Moonbeem` };
+    return { title: `Titles with ${personTrimmed} · Moonbeem` };
   }
   const trimmed = (q ?? "").trim();
   return {
@@ -30,11 +30,11 @@ export default async function SearchPage({ searchParams }: PageProps) {
       <div className="flex-1 py-12">
         <div className="mx-auto max-w-7xl px-6">
           <h1 className="font-wordmark text-display-sm md:text-display-md text-moonbeem-pink m-0">
-            Films with {personName}
+            Titles with {personName}
           </h1>
           <p className="mt-2 text-body-sm text-moonbeem-ink-muted">
             {results.length === 0
-              ? `No films found for ${personName}.`
+              ? `No titles found for ${personName}.`
               : `${personName} appears in ${results.length} ${
                   results.length === 1 ? "title" : "titles"
                 }`}
@@ -72,7 +72,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
               Search
             </h1>
             <p className="text-body text-moonbeem-ink-muted">
-              Search for any film in our catalog of 86,000+ titles.
+              Search for any title in our catalog of 86,000+ titles.
             </p>
           </div>
         ) : (
@@ -82,8 +82,8 @@ export default async function SearchPage({ searchParams }: PageProps) {
             </h1>
             <p className="mt-2 text-body-sm text-moonbeem-ink-muted">
               {results.length === 0
-                ? `No films match '${query}'. Try a different search.`
-                : `${results.length} ${results.length === 1 ? "film" : "films"}`}
+                ? `No titles match '${query}'. Try a different search.`
+                : `${results.length} ${results.length === 1 ? "title" : "titles"}`}
             </p>
 
             {results.length > 0 && (
