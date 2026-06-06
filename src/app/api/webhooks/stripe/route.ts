@@ -49,8 +49,25 @@ import { getStripe } from "@/lib/stripe/server";
 
 export async function POST(request: NextRequest) {
   const signature = request.headers.get("stripe-signature");
-  const secret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!signature || !secret) {
+  // Two Stripe endpoints point at THIS same URL, each with its own signing
+  // secret:
+  //   - Connect-scope endpoint  → STRIPE_WEBHOOK_SECRET
+  //       events: account.updated / account.application.deauthorized /
+  //               payout.paid / payout.failed (fire on connected accounts)
+  //   - account-scope endpoint  → STRIPE_WEBHOOK_SECRET_ACCOUNT
+  //       events: checkout.session.completed / checkout.session.expired /
+  //               payment_intent.payment_failed (the PLATFORM-scope funding
+  //               charge; it only reaches us via this account endpoint)
+  // Any one delivery is signed by exactly one of these secrets, so we try
+  // each PRESENT secret in turn and accept the first that verifies. Both env
+  // vars may not be set during rollout (e.g. STRIPE_WEBHOOK_SECRET_ACCOUNT
+  // unset before the account endpoint's secret lands in Vercel) — we filter
+  // to the secrets actually configured and fail closed if NONE is present.
+  const secrets = [
+    process.env.STRIPE_WEBHOOK_SECRET,
+    process.env.STRIPE_WEBHOOK_SECRET_ACCOUNT,
+  ].filter((s): s is string => typeof s === "string" && s.length > 0);
+  if (!signature || secrets.length === 0) {
     return NextResponse.json({ error: "missing_signature_or_secret" }, {
       status: 400,
     });
@@ -60,12 +77,21 @@ export async function POST(request: NextRequest) {
   const body = await request.text();
   const stripe = getStripe();
 
-  let event: Stripe.Event;
-  try {
-    event = stripe.webhooks.constructEvent(body, signature, secret);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "unknown";
-    console.error(`[stripe-webhook] signature verification failed: ${msg}`);
+  let event: Stripe.Event | null = null;
+  let lastErr = "unknown";
+  for (const secret of secrets) {
+    try {
+      event = stripe.webhooks.constructEvent(body, signature, secret);
+      break;
+    } catch (err) {
+      // constructEvent throws on a secret mismatch. Keep the error and try
+      // the next present secret — do NOT short-circuit on the first failure,
+      // or events signed by the other endpoint's secret would be rejected.
+      lastErr = err instanceof Error ? err.message : "unknown";
+    }
+  }
+  if (!event) {
+    console.error(`[stripe-webhook] signature verification failed: ${lastErr}`);
     return NextResponse.json({ error: "bad_signature" }, { status: 400 });
   }
 
