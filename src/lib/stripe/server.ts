@@ -13,9 +13,12 @@ export function getStripe(): Stripe {
     throw new Error("STRIPE_SECRET_KEY missing");
   }
   cached = new Stripe(key, {
-    // No apiVersion override — use the SDK's pinned default so the
-    // response types stay aligned with what we're calling. Bumping
-    // the SDK is the way to move to a newer API version.
+    // Explicitly pinned to the SDK's current default API version. This
+    // is a no-op today (it equals what the SDK would use anyway), but it
+    // freezes the money path against silent behavior shifts on a future
+    // SDK bump. Moving versions is now a deliberate edit here, paired
+    // with bumping the SDK so the response types stay aligned.
+    apiVersion: "2026-04-22.dahlia",
     typescript: true,
     appInfo: { name: "moonbeem-studio", version: "1.0" },
   });
