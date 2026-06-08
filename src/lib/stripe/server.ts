@@ -18,7 +18,7 @@ export function getStripe(): Stripe {
     // freezes the money path against silent behavior shifts on a future
     // SDK bump. Moving versions is now a deliberate edit here, paired
     // with bumping the SDK so the response types stay aligned.
-    apiVersion: "2026-04-22.dahlia",
+    apiVersion: "2026-05-27.dahlia",
     typescript: true,
     appInfo: { name: "moonbeem-studio", version: "1.0" },
   });
