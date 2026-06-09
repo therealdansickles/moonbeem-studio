@@ -44,6 +44,11 @@ function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
+// Mirrors the DB default campaigns.moonbeem_fee_pct (0.10). Display-only:
+// the actual fee is computed server-side at funding from the campaign row
+// (src/app/api/p/[slug]/campaigns/[id]/fund/route.ts). Keep these in sync.
+const MOONBEEM_FEE_PCT = 0.1;
+
 // Friendly mapping of the API's snake_case error codes. Anything we
 // don't recognize falls back to the raw code so it's at least
 // debuggable in the UI.
@@ -140,6 +145,14 @@ export default function CampaignWizard({
   const cpmOk = cpmCents !== null && cpmCents >= 1;
   const budgetCents = parseDollars(budgetInput);
   const budgetOk = budgetCents !== null && budgetCents > 0;
+
+  // Display-only fee/total. Computed in the same integer order as the
+  // backend (Math.round on cents, fee on top of budget) so the readout
+  // matches the funding charge to the cent. Null when budget is empty or
+  // invalid — we render nothing rather than flash a $0.00 fee.
+  const feeCents = budgetOk ? Math.round(budgetCents! * MOONBEEM_FEE_PCT) : null;
+  const totalCents =
+    budgetCents !== null && feeCents !== null ? budgetCents + feeCents : null;
   const titlesOk = selectedTitleIds.size > 0;
   const datesOk =
     !startsAt || !endsAt || new Date(endsAt) > new Date(startsAt);
@@ -378,6 +391,18 @@ export default function CampaignWizard({
                   total
                 </span>
               </div>
+              {feeCents !== null && totalCents !== null && (
+                <div className="mt-1 flex flex-col gap-0.5 text-caption text-moonbeem-ink-subtle">
+                  <div className="flex justify-between">
+                    <span>Platform fee (10%)</span>
+                    <span>{formatCents(feeCents)}</span>
+                  </div>
+                  <div className="flex justify-between text-moonbeem-ink-muted">
+                    <span>Total charged at funding</span>
+                    <span>{formatCents(totalCents)}</span>
+                  </div>
+                </div>
+              )}
             </section>
 
             {/* STEP 5 — optional dates */}
@@ -466,6 +491,11 @@ export default function CampaignWizard({
               />
               <Row label="Budget pool" value={formatCents(budgetCents ?? 0)} />
               <Row
+                label="Platform fee (10%)"
+                value={formatCents(feeCents ?? 0)}
+              />
+              <Row label="Total at funding" value={formatCents(totalCents ?? 0)} />
+              <Row
                 label="Window"
                 value={
                   startsAt || endsAt
@@ -476,9 +506,10 @@ export default function CampaignWizard({
             </section>
 
             <p className="mt-4 text-caption text-moonbeem-ink-subtle">
-              Views settle for 7 days before they count toward payout. Moonbeem
-              takes a 10% fee on metered views. Saving creates the campaign as
-              a draft — you fund it in the next step.
+              A 10% platform fee is added to your budget and charged up front
+              when you fund the campaign. Your full budget goes to the creator
+              pool. Saving creates the campaign as a draft — you fund it in the
+              next step.
             </p>
 
             {submitErr && (
