@@ -26,10 +26,10 @@ export default function Footer() {
         <div className="flex flex-col gap-3 md:items-end">
           <nav className="flex flex-wrap items-center gap-5">
             <Link
-              href="/partners"
+              href="/partners/campaigns"
               className="text-body-sm text-moonbeem-ink-muted transition-colors hover:text-moonbeem-pink"
             >
-              Partners
+              Campaigns
             </Link>
             <Link
               href="/privacy-policy"

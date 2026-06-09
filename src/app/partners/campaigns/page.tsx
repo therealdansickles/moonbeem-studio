@@ -1,11 +1,11 @@
-// /partners — public marketing page explaining how Moonbeem campaigns
-// work for distribution partners. Static server component; inherits the
-// nav, footer, and gradient background from the root layout.
+// /partners/campaigns — public marketing page explaining how Moonbeem
+// campaigns work for distribution partners. Static server component;
+// inherits the nav, footer, and gradient background from the root layout.
 
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Partners · Moonbeem",
+  title: "Campaigns · Moonbeem",
   description:
     "How Moonbeem campaigns work for distribution partners: set a budget and CPM rate, reward fan edits for the views they drive, and pay creators on measured, platform-reported engagement.",
 };
