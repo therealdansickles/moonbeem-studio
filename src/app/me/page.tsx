@@ -172,6 +172,16 @@ export default async function MePage() {
     ? await getFanEditsForCreator(creator.id)
     : [];
 
+  // Diary entry count — drives the "Your diary" section.
+  const diaryCount = creator
+    ? (
+        await service
+          .from("diary_entries")
+          .select("id", { count: "exact", head: true })
+          .eq("creator_id", creator.id)
+      ).count ?? 0
+    : 0;
+
   // Stub creators with edits that look like they belong to this user
   // (handle match or already-verified-social match). Surfaces an
   // "Edits to claim" prompt; only renders when non-empty.
@@ -549,6 +559,37 @@ export default async function MePage() {
                   {top12Count === 12 ? "Edit your list →" : "Add more films →"}
                 </Link>
               </>
+            )}
+          </div>
+        </section>
+
+        {/* Your diary — count + link to the management page, mirroring the
+            Top-12 section shape. */}
+        <section>
+          <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
+            Your diary{diaryCount > 0 ? ` (${diaryCount})` : ""}
+          </h2>
+          <div className="mt-3 border-t border-white/10 pt-3">
+            {diaryCount === 0 ? (
+              <>
+                <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
+                  Log films and series you&apos;ve watched — with a rating, a
+                  date, and an optional review. They show on your profile.
+                </p>
+                <Link
+                  href="/me/diary"
+                  className="mt-3 inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
+                >
+                  Go to your diary →
+                </Link>
+              </>
+            ) : (
+              <Link
+                href="/me/diary"
+                className="inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
+              >
+                View your diary →
+              </Link>
             )}
           </div>
         </section>

@@ -9,11 +9,14 @@ import PlatformIcon from "@/components/PlatformIcon";
 import AvatarCircle from "./AvatarCircle";
 import Top12Grid from "./Top12Grid";
 import ProfileFanEditCard from "./ProfileFanEditCard";
+import DiaryRow from "@/components/diary/DiaryRow";
+import type { DiaryEntry } from "@/lib/queries/diary";
 
 type Props = {
   profile: Profile | null;
   handle: string;
   topTitles: TopTitle[];
+  diary: DiaryEntry[];
   fanEdits: FanEditWithTitle[];
   isOwner: boolean;
 };
@@ -22,6 +25,7 @@ export default function ProfileView({
   profile,
   handle,
   topTitles,
+  diary,
   fanEdits,
   isOwner,
 }: Props) {
@@ -162,6 +166,23 @@ export default function ProfileView({
             renders read-only here, even for the profile owner. */}
         <Top12Grid topTitles={topTitles} isOwner={false} />
       </section>
+
+      {/* Diary — public watch-log entries, newest first. Sits between Top 12
+          and Fan edits; omitted when empty (same discipline as Fan edits). */}
+      {diary.length > 0 && (
+        <section className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-pink uppercase m-0">
+              Diary
+            </h2>
+          </div>
+          <div className="flex flex-col gap-3">
+            {diary.map((e) => (
+              <DiaryRow key={e.id} entry={e} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Fan edits attributed to this creator. Omitted entirely when
           empty — strangers viewing the profile don't need the

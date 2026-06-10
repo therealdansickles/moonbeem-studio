@@ -1,5 +1,5 @@
 // Shared native-rating upsert + validator, used by BOTH the ratings route
-// (/api/me/ratings) and the reviews route (/api/me/reviews, when a review
+// (/api/me/ratings) and the diary route (/api/me/diary, when a log/review
 // carries a rating). title_ratings' unique is PARTIAL ((creator_id,title_id)
 // WHERE title_id IS NOT NULL), which PostgREST .upsert(onConflict) cannot
 // bind — so this is an explicit select-then-update-else-insert with a 23505

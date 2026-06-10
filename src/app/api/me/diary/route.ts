@@ -1,7 +1,12 @@
-// Native review write — Phase 1B. A review = a diary_entries row with a
-// non-empty review_text. Mirrors /api/me/ratings in shape. When a review
-// carries a rating, it also syncs the title_ratings "current rating" via the
-// shared upsert (the aggregate trigger then updates titles.rating_avg/_count).
+// Unified diary write — Phase 1C. Supersedes /api/me/reviews. A diary entry is
+// the general "I watched this" act; a review is just a diary entry that also
+// carries review_text. Same gating/validation chain as the old reviews route,
+// except review_text is OPTIONAL (when present: trimmed non-empty, ≤10000;
+// when absent: contains_spoilers is forced false). rewatch defaults false.
+// When a rating is present it syncs title_ratings via the shared upsert FIRST,
+// so a sync failure returns 500 before the diary row is inserted (the rating
+// change is user-intended). Note diary_entries has no per-title uniqueness, so
+// a lost-response retry can still duplicate a successful log.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentProfile } from "@/lib/dal";
@@ -10,12 +15,12 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getUserTier } from "@/lib/gating/get-user-tier";
 import { canPerform } from "@/lib/gating/can-perform";
 import { isHalfStepRating, upsertTitleRating } from "@/lib/ratings/upsert";
+import { loadVisibleTitleById } from "@/lib/title-access";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_REVIEW_LEN = 10000;
 
-// A date string (YYYY-MM-DD), valid, and not in the future (UTC date compare).
 function isValidWatchedOn(s: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
   const d = new Date(`${s}T00:00:00Z`);
@@ -43,21 +48,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "auth_required" }, { status: 401 });
   }
 
-  const rl = await enforce("userWrites", userId, "me/reviews");
+  const rl = await enforce("userWrites", userId, "me/diary");
   if (!rl.ok) return rl.response;
 
   const tier = await getUserTier(userId);
-  const gate = canPerform(tier, "write_review", 0, isSuperAdmin);
+  const gate = canPerform(tier, "log_diary", 0, isSuperAdmin);
   if (!gate.allowed) {
     return NextResponse.json({ error: gate.reason }, { status: 403 });
   }
 
   let body: {
     title_id?: string;
-    review_text?: string;
     rating?: number | null;
     watched_on?: string;
+    review_text?: string | null;
     contains_spoilers?: boolean;
+    rewatch?: boolean;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -70,12 +76,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid title_id" }, { status: 400 });
   }
 
-  const reviewText =
-    typeof body.review_text === "string" ? body.review_text.trim() : "";
-  if (!reviewText) {
-    return NextResponse.json({ error: "review_text required" }, { status: 400 });
+  // review_text is OPTIONAL. Present-and-non-empty → stored; absent/empty → null.
+  if (body.review_text != null && typeof body.review_text !== "string") {
+    return NextResponse.json({ error: "invalid review_text" }, { status: 400 });
   }
-  if (reviewText.length > MAX_REVIEW_LEN) {
+  const trimmedText =
+    typeof body.review_text === "string" ? body.review_text.trim() : "";
+  const reviewText = trimmedText.length > 0 ? trimmedText : null;
+  if (reviewText && reviewText.length > MAX_REVIEW_LEN) {
     return NextResponse.json(
       { error: `review_text too long (max ${MAX_REVIEW_LEN})` },
       { status: 400 },
@@ -102,7 +110,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const containsSpoilers = body.contains_spoilers === true;
+  // Spoiler flag only means something with a review body; force false otherwise.
+  const containsSpoilers = reviewText ? body.contains_spoilers === true : false;
+  const rewatch = body.rewatch === true;
 
   const creatorId = await resolveCreatorId(userId);
   if (!creatorId) {
@@ -113,20 +123,15 @@ export async function POST(request: NextRequest) {
   }
 
   const sb = createServiceRoleClient();
-  const { data: title } = await sb
-    .from("titles")
-    .select("id")
-    .eq("id", titleId)
-    .maybeSingle();
+  // Existence + visibility: reject a title the caller can't view, so a hidden/
+  // embargoed title can't be surfaced on their public diary. Also rejects
+  // soft-deleted titles.
+  const title = await loadVisibleTitleById(sb, titleId);
   if (!title) {
     return NextResponse.json({ error: "unknown_title" }, { status: 404 });
   }
 
-  // Sync the title_ratings current rating FIRST (idempotent upsert) when the
-  // review carries one, so a rating-sync failure returns 500 BEFORE any review
-  // row is committed — a client retry then can't duplicate the review
-  // (diary_entries has no per-title uniqueness). Same upsert as /api/me/ratings;
-  // the trigger recomputes the title aggregate.
+  // Rating sync FIRST (idempotent) — a sync failure aborts before the insert.
   if (rating !== null) {
     const r = await upsertTitleRating({ creatorId, titleId, rating });
     if (r) return NextResponse.json({ error: r.error }, { status: 500 });
@@ -141,9 +146,9 @@ export async function POST(request: NextRequest) {
       rating,
       review_text: reviewText,
       contains_spoilers: containsSpoilers,
+      rewatch,
       source: "native",
       visibility: "public",
-      rewatch: false,
     })
     .select("id")
     .maybeSingle();
@@ -162,11 +167,11 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "auth_required" }, { status: 401 });
   }
 
-  const rl = await enforce("userWrites", userId, "me/reviews");
+  const rl = await enforce("userWrites", userId, "me/diary");
   if (!rl.ok) return rl.response;
 
   const tier = await getUserTier(userId);
-  const gate = canPerform(tier, "write_review", 0, isSuperAdmin);
+  const gate = canPerform(tier, "log_diary", 0, isSuperAdmin);
   if (!gate.allowed) {
     return NextResponse.json({ error: gate.reason }, { status: 403 });
   }
@@ -211,6 +216,6 @@ export async function DELETE(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  // Ruling 2: deleting a review does NOT touch title_ratings.
+  // Ruling 2 (1B): deleting a diary entry does NOT touch title_ratings.
   return NextResponse.json({ ok: true });
 }

@@ -1,10 +1,10 @@
 "use client";
 
-// Phase 1B — the write-a-review modal. AddToTop12Modal precedent (inline
-// z-50 overlay, ESC + outside-click dismiss). Optional clearable star rating,
-// watched_on date (defaults today, capped at today), textarea (max 10000),
-// spoiler checkbox. Submit → POST /api/me/reviews → optimistic close +
-// router.refresh(); inline error on failure.
+// Phase 1C — the unified "Log a watch" modal (generalizes 1B's ReviewModal).
+// AddToTop12Modal precedent (inline z-50, ESC + outside-click). A log needs
+// only a watched_on date; rating + review + spoiler + rewatch are optional —
+// a review is just a log that carries text. Submit → POST /api/me/diary →
+// optimistic close + router.refresh; inline error on failure.
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -12,7 +12,7 @@ import { StarRatingInput } from "@/components/StarRating";
 
 const MAX_REVIEW_LEN = 10000;
 
-export default function ReviewModal({
+export default function LogModal({
   titleId,
   titleName,
   onClose,
@@ -27,17 +27,13 @@ export default function ReviewModal({
   const [watchedOn, setWatchedOn] = useState<string>(today);
   const [text, setText] = useState("");
   const [spoilers, setSpoilers] = useState(false);
+  const [rewatch, setRewatch] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const textRef = useRef<HTMLTextAreaElement>(null);
-  // Synchronous in-flight latch — `disabled={busy}` only applies after the
-  // next render, so two fast clicks could both pass a stale `busy` check and
-  // double-POST (diary_entries has no per-title uniqueness).
+  // Synchronous in-flight latch — `disabled={busy}` only applies after the next
+  // render, so two fast clicks could double-POST (diary has no uniqueness).
   const inFlight = useRef(false);
 
-  useEffect(() => {
-    textRef.current?.focus();
-  }, []);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape" && !busy) onClose();
@@ -49,25 +45,26 @@ export default function ReviewModal({
   const trimmed = text.trim();
 
   async function submit() {
-    if (!trimmed || inFlight.current) return;
+    if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/me/reviews", {
+      const res = await fetch("/api/me/diary", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           title_id: titleId,
-          review_text: trimmed,
           rating: rating ?? undefined,
           watched_on: watchedOn,
-          contains_spoilers: spoilers,
+          review_text: trimmed.length > 0 ? trimmed : undefined,
+          contains_spoilers: trimmed.length > 0 ? spoilers : false,
+          rewatch,
         }),
       });
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(j.error ?? "Couldn't post your review.");
+        setError(j.error ?? "Couldn't save your log.");
         setBusy(false);
         inFlight.current = false;
         return;
@@ -75,7 +72,7 @@ export default function ReviewModal({
       onClose(); // optimistic close
       router.refresh();
     } catch {
-      setError("Couldn't post your review.");
+      setError("Couldn't save your log.");
       setBusy(false);
       inFlight.current = false;
     }
@@ -88,7 +85,7 @@ export default function ReviewModal({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={`Write a review for ${titleName}`}
+      aria-label={`Log a watch for ${titleName}`}
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 px-4 pt-20 backdrop-blur-sm"
       onClick={() => {
         if (!busy) onClose();
@@ -100,7 +97,7 @@ export default function ReviewModal({
       >
         <div className="flex items-center justify-between gap-3">
           <h2 className="m-0 font-wordmark text-heading-md text-moonbeem-ink">
-            Write a review
+            Log a watch
           </h2>
           <button
             type="button"
@@ -141,33 +138,50 @@ export default function ReviewModal({
             />
           </label>
 
-          <label className="flex flex-col gap-1">
-            <span className="text-body-sm text-moonbeem-ink-muted">Review</span>
-            <textarea
-              ref={textRef}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              rows={6}
-              maxLength={MAX_REVIEW_LEN}
-              placeholder="What did you think?"
-              className={inputClass}
-            />
-            <span className="self-end text-caption text-moonbeem-ink-subtle">
-              {trimmed.length}/{MAX_REVIEW_LEN}
-            </span>
-          </label>
-
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
-              checked={spoilers}
-              onChange={(e) => setSpoilers(e.target.checked)}
+              checked={rewatch}
+              onChange={(e) => setRewatch(e.target.checked)}
               className="accent-moonbeem-pink"
             />
             <span className="text-body-sm text-moonbeem-ink-muted">
-              This review contains spoilers
+              I&apos;ve watched this before
             </span>
           </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-body-sm text-moonbeem-ink-muted">
+              Review <span className="text-moonbeem-ink-subtle">(optional)</span>
+            </span>
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={5}
+              maxLength={MAX_REVIEW_LEN}
+              placeholder="Add a review…"
+              className={inputClass}
+            />
+            {trimmed.length > 0 && (
+              <span className="self-end text-caption text-moonbeem-ink-subtle">
+                {trimmed.length}/{MAX_REVIEW_LEN}
+              </span>
+            )}
+          </label>
+
+          {trimmed.length > 0 && (
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={spoilers}
+                onChange={(e) => setSpoilers(e.target.checked)}
+                className="accent-moonbeem-pink"
+              />
+              <span className="text-body-sm text-moonbeem-ink-muted">
+                This review contains spoilers
+              </span>
+            </label>
+          )}
 
           {error && (
             <p className="m-0 text-body-sm text-moonbeem-magenta">{error}</p>
@@ -184,10 +198,10 @@ export default function ReviewModal({
             <button
               type="button"
               onClick={submit}
-              disabled={!trimmed || busy}
+              disabled={busy}
               className="rounded-md bg-moonbeem-pink px-5 py-2 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {busy ? "Posting…" : "Post review"}
+              {busy ? "Saving…" : "Save to diary"}
             </button>
           </div>
         </div>

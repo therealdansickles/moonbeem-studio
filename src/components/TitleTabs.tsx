@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { fadeIn } from "@/lib/motion";
 
 type SectionId =
@@ -46,6 +46,15 @@ export default function TitleTabs({
     { id: "videos", label: "Clips", content: videosContent },
     { id: "stills", label: "Stills", content: stillsContent },
   ];
+
+  // Deep-link support: /t/[slug]#reviews (etc.) opens that tab on mount —
+  // used by the diary "Review" chip.
+  useEffect(() => {
+    const h = window.location.hash.replace("#", "");
+    if (h && sections.some((s) => s.id === h)) setActive(h as SectionId);
+    // sections is derived from props (stable for a title); run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const activeSection = sections.find((s) => s.id === active) ?? sections[0];
 

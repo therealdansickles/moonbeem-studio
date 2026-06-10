@@ -24,7 +24,7 @@ import AboutCredits from "@/components/AboutCredits";
 import OfferButtonClient from "@/components/OfferButtonClient";
 import TitlePosterShared from "@/components/TitlePosterShared";
 import TitleRatingControl from "@/components/TitleRatingControl";
-import WriteReviewControl from "@/components/WriteReviewControl";
+import LogControl from "@/components/diary/LogControl";
 import ReviewCard from "@/components/reviews/ReviewCard";
 import { StarRatingDisplay } from "@/components/StarRating";
 import { createClient } from "@/lib/supabase/server";
@@ -353,12 +353,13 @@ export default async function TitlePage({ params }: PageProps) {
               </div>
             )}
             <TitleRatingControl
+              key={`rating-${myRating.rating ?? "none"}`}
               titleId={title.id}
               initialRating={myRating.rating}
               authState={ratingAuthState}
               returnTo={`/t/${title.slug}`}
             />
-            <WriteReviewControl
+            <LogControl
               titleId={title.id}
               titleName={title.title}
               authState={ratingAuthState}

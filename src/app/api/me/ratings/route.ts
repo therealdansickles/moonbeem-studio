@@ -8,7 +8,7 @@
 //   - native writes always source='native', visibility='public'
 //
 // The title_ratings upsert + half-step validator live in @/lib/ratings/upsert
-// (shared with /api/me/reviews); the partial unique (creator_id, title_id)
+// (shared with /api/me/diary); the partial unique (creator_id, title_id)
 // can't bind PostgREST onConflict, so the helper does select-then-update-else-
 // insert with a 23505 race fallback.
 
@@ -19,6 +19,7 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getUserTier } from "@/lib/gating/get-user-tier";
 import { canPerform } from "@/lib/gating/can-perform";
 import { isHalfStepRating, upsertTitleRating } from "@/lib/ratings/upsert";
+import { loadVisibleTitleById } from "@/lib/title-access";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -80,12 +81,9 @@ export async function POST(request: NextRequest) {
 
   const sb = createServiceRoleClient();
 
-  // Verify the title exists.
-  const { data: title } = await sb
-    .from("titles")
-    .select("id")
-    .eq("id", titleId)
-    .maybeSingle();
+  // Existence + visibility — same gate as /api/me/diary: reject a title the
+  // caller can't view (and soft-deleted titles). 404 unknown_title.
+  const title = await loadVisibleTitleById(sb, titleId);
   if (!title) {
     return NextResponse.json({ error: "unknown_title" }, { status: 404 });
   }

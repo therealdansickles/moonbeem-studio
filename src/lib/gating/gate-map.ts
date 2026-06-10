@@ -44,9 +44,9 @@ export const gateMap: Record<Capability, Record<Tier, GateConfig>> = {
     signed_in: { allowed: true },
     verified: { allowed: true },
   },
-  // Phase 1B — native reviews (a diary_entries row with review_text). Same
-  // posture as rate_title: signed-in may review; anonymous denied.
-  write_review: {
+  // Phase 1C — unified diary logging (a diary_entries row; a review is one
+  // with review_text). Same posture as rate_title: signed-in may log.
+  log_diary: {
     anonymous: { allowed: false },
     signed_in: { allowed: true },
     verified: { allowed: true },

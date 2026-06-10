@@ -1,17 +1,18 @@
 "use client";
 
-// Phase 1B — the "Write a review" entry control in the title header. Same
-// three auth branches as TitleRatingControl: ready → open the review modal;
-// no_creator → handle-funnel nudge; anon → GateModal.
+// Phase 1C — unified "Log or review" entry control in the title header
+// (replaces 1B's WriteReviewControl). Same three auth branches as
+// TitleRatingControl: ready → open the log modal; no_creator → handle-funnel
+// nudge; anon → GateModal.
 
 import { useState } from "react";
 import Link from "next/link";
 import GateModal from "@/components/gating/GateModal";
-import ReviewModal from "@/components/reviews/ReviewModal";
+import LogModal from "@/components/diary/LogModal";
 
 type AuthState = "anon" | "no_creator" | "ready";
 
-export default function WriteReviewControl({
+export default function LogControl({
   titleId,
   titleName,
   authState,
@@ -45,7 +46,7 @@ export default function WriteReviewControl({
         onClick={onClick}
         className="rounded-md border border-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-pink transition-colors hover:bg-moonbeem-pink hover:text-moonbeem-navy"
       >
-        Write a review
+        Log or review
       </button>
 
       {showNudge && authState === "no_creator" && (
@@ -54,7 +55,7 @@ export default function WriteReviewControl({
             href={`/onboarding/handle?next=${encodeURIComponent(returnTo)}`}
             className="text-moonbeem-pink hover:opacity-90"
           >
-            Claim a Moonbeem handle to review →
+            Claim a Moonbeem handle to log watches →
           </Link>
         </p>
       )}
@@ -69,7 +70,7 @@ export default function WriteReviewControl({
       )}
 
       {modalOpen && authState === "ready" && (
-        <ReviewModal
+        <LogModal
           titleId={titleId}
           titleName={titleName}
           onClose={() => setModalOpen(false)}

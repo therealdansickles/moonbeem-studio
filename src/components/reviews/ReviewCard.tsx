@@ -44,7 +44,7 @@ export default function ReviewCard({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/me/reviews", {
+      const res = await fetch("/api/me/diary", {
         method: "DELETE",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ id: review.id }),
@@ -139,7 +139,7 @@ export default function ReviewCard({
       <ConfirmModal
         isOpen={confirmOpen}
         title="Delete your review?"
-        description="This permanently removes your review."
+        description="This removes the whole diary entry (watch + review)."
         detail="Your star rating for this title is kept."
         confirmLabel="Delete review"
         tone="destructive"
