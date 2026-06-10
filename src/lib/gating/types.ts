@@ -12,6 +12,7 @@ export type Capability =
   | "purchase_rental"
   | "view_public_profile"
   | "save_to_top12"
+  | "rate_title"
   | "download_clip"
   | "download_still"
   | "upload_fan_edit"

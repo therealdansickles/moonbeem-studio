@@ -23,9 +23,12 @@ import RequestSubmittedToast from "@/components/RequestSubmittedToast";
 import AboutCredits from "@/components/AboutCredits";
 import OfferButtonClient from "@/components/OfferButtonClient";
 import TitlePosterShared from "@/components/TitlePosterShared";
+import TitleRatingControl from "@/components/TitleRatingControl";
+import { StarRatingDisplay } from "@/components/StarRating";
 import { createClient } from "@/lib/supabase/server";
 import { canViewTitle } from "@/lib/title-access";
 import { getCurrentProfile } from "@/lib/dal";
+import { getMyRatingForTitle } from "@/lib/queries/ratings";
 import { getUserTier } from "@/lib/gating/get-user-tier";
 import { getUsageCount } from "@/lib/gating/usage-counts";
 import { Suspense } from "react";
@@ -143,15 +146,23 @@ export default async function TitlePage({ params }: PageProps) {
     partner_id: title.partner_id,
   });
   if (!visible) notFound();
-  const [offers, fanEdits, clips, stills, hasActiveCampaign, episodes] =
-    await Promise.all([
-      getActiveOffersForTitle(title.id),
-      getActiveFanEditsForTitle(title.id),
-      getActiveClipsForTitle(title.id),
-      getActiveStillsForTitle(title.id),
-      isTitleInActiveCampaign(title.id),
-      getTitleEpisodes(title.id),
-    ]);
+  const [
+    offers,
+    fanEdits,
+    clips,
+    stills,
+    hasActiveCampaign,
+    episodes,
+    myRating,
+  ] = await Promise.all([
+    getActiveOffersForTitle(title.id),
+    getActiveFanEditsForTitle(title.id),
+    getActiveClipsForTitle(title.id),
+    getActiveStillsForTitle(title.id),
+    isTitleInActiveCampaign(title.id),
+    getTitleEpisodes(title.id),
+    getMyRatingForTitle(title.id),
+  ]);
 
   // Event-only: fetch the title's partner (the league) for the header
   // logo treatment. Conditional so films/series never pay for this read,
@@ -207,6 +218,16 @@ export default async function TitlePage({ params }: PageProps) {
     title.year ? String(title.year) : null,
     title.runtime_min ? `${title.runtime_min} min` : null,
   ].filter((part): part is string => Boolean(part));
+
+  // Ratings "Your rating" control state, resolved server-side. anon → gate
+  // modal; signed-in but creatorless → handle-funnel nudge; ready →
+  // interactive. (getUserTier collapses creator/creatorless into signed_in,
+  // so myRating.hasCreator is the distinguishing signal.)
+  const ratingAuthState: "anon" | "no_creator" | "ready" = !user
+    ? "anon"
+    : myRating.hasCreator
+      ? "ready"
+      : "no_creator";
 
   const aboutContent = (
     <div className="flex flex-col items-center gap-8">
@@ -296,6 +317,23 @@ export default async function TitlePage({ params }: PageProps) {
                 {metaParts.join(" · ")}
               </p>
             )}
+            {/* Ratings aggregate — denormalized titles.rating_avg/_count,
+                trigger-maintained over PUBLIC title_ratings. Hidden until the
+                first public rating exists (count 0 → nothing). */}
+            {title.rating_count > 0 && (
+              <div className="flex items-center gap-2">
+                <StarRatingDisplay value={Number(title.rating_avg ?? 0)} size={16} />
+                <span className="text-body-sm text-moonbeem-ink-muted">
+                  {Number(title.rating_avg ?? 0).toFixed(1)} · {title.rating_count}
+                </span>
+              </div>
+            )}
+            <TitleRatingControl
+              titleId={title.id}
+              initialRating={myRating.rating}
+              authState={ratingAuthState}
+              returnTo={`/t/${title.slug}`}
+            />
             {/* Event-only meta line: date · venue, reusing the film
                 meta styling. Renders only what exists (date and/or
                 venue); the film metaParts above stay empty for events

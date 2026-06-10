@@ -43,6 +43,13 @@ export type Title = {
   venue: string | null;
   cast_members: CastMember[] | null;
   crew: CrewMember[] | null;
+  // Phase 1A ratings aggregate (20260610000002_title_ratings_aggregate.sql):
+  // denormalized, trigger-maintained over PUBLIC title_ratings rows. Rides
+  // getTitleBySlug's select("*") with no query change — undefined until that
+  // migration applies, so consumers default (rating_avg ?? 0; rating_count
+  // reads as 0 via `> 0` against undefined).
+  rating_avg: number | null;
+  rating_count: number;
 };
 
 const WRITING_JOBS = new Set([

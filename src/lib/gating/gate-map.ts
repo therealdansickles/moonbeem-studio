@@ -37,6 +37,13 @@ export const gateMap: Record<Capability, Record<Tier, GateConfig>> = {
     signed_in: { allowed: true },
     verified: { allowed: true },
   },
+  // Phase 1A — native title ratings. Same posture as save_to_top12:
+  // signed-in (any creator) may rate; anonymous is denied (auth_required).
+  rate_title: {
+    anonymous: { allowed: false },
+    signed_in: { allowed: true },
+    verified: { allowed: true },
+  },
   download_clip: {
     anonymous: { allowed: false },
     signed_in: { allowed: true, limit: { type: "lifetime", count: 3 } },
