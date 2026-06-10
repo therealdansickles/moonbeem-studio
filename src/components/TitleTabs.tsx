@@ -4,7 +4,13 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useState, type ReactNode } from "react";
 import { fadeIn } from "@/lib/motion";
 
-type SectionId = "about" | "watch" | "fan-edits" | "videos" | "stills";
+type SectionId =
+  | "about"
+  | "watch"
+  | "fan-edits"
+  | "reviews"
+  | "videos"
+  | "stills";
 
 type Section = { id: SectionId; label: string; content: ReactNode };
 
@@ -15,6 +21,7 @@ type Props = {
   // (same empty-guard discipline as the homepage Series rail).
   watchContent?: ReactNode;
   fanEditsContent: ReactNode;
+  reviewsContent: ReactNode;
   videosContent: ReactNode;
   stillsContent: ReactNode;
 };
@@ -23,6 +30,7 @@ export default function TitleTabs({
   aboutContent,
   watchContent,
   fanEditsContent,
+  reviewsContent,
   videosContent,
   stillsContent,
 }: Props) {
@@ -34,6 +42,7 @@ export default function TitleTabs({
       ? [{ id: "watch" as SectionId, label: "Watch", content: watchContent }]
       : []),
     { id: "fan-edits", label: "Fan Edits", content: fanEditsContent },
+    { id: "reviews", label: "Reviews", content: reviewsContent },
     { id: "videos", label: "Clips", content: videosContent },
     { id: "stills", label: "Stills", content: stillsContent },
   ];

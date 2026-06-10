@@ -13,9 +13,9 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 
 export async function getMyRatingForTitle(
   titleId: string,
-): Promise<{ hasCreator: boolean; rating: number | null }> {
+): Promise<{ hasCreator: boolean; creatorId: string | null; rating: number | null }> {
   const user = await getUser(); // cached (react cache) — dedupes with the page
-  if (!user) return { hasCreator: false, rating: null };
+  if (!user) return { hasCreator: false, creatorId: null, rating: null };
 
   const service = createServiceRoleClient();
   const { data: creator } = await service
@@ -24,7 +24,7 @@ export async function getMyRatingForTitle(
     .eq("user_id", user.id)
     .is("deleted_at", null)
     .maybeSingle();
-  if (!creator?.id) return { hasCreator: false, rating: null };
+  if (!creator?.id) return { hasCreator: false, creatorId: null, rating: null };
 
   const supabase = await createClient();
   const { data: row } = await supabase
@@ -34,5 +34,9 @@ export async function getMyRatingForTitle(
     .eq("creator_id", creator.id as string)
     .maybeSingle();
 
-  return { hasCreator: true, rating: row ? Number(row.rating) : null };
+  return {
+    hasCreator: true,
+    creatorId: creator.id as string,
+    rating: row ? Number(row.rating) : null,
+  };
 }

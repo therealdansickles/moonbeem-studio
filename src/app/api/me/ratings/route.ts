@@ -7,10 +7,10 @@
 //     creatorless users get 400 no_creator (they must claim a handle first)
 //   - native writes always source='native', visibility='public'
 //
-// title_ratings' unique is PARTIAL ((creator_id, title_id) WHERE title_id IS
-// NOT NULL), which PostgREST .upsert(onConflict) cannot bind — so the write is
-// an explicit select-then-update-else-insert, with a 23505 fallback that
-// retries as an update (lost insert race).
+// The title_ratings upsert + half-step validator live in @/lib/ratings/upsert
+// (shared with /api/me/reviews); the partial unique (creator_id, title_id)
+// can't bind PostgREST onConflict, so the helper does select-then-update-else-
+// insert with a 23505 race fallback.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentProfile } from "@/lib/dal";
@@ -18,25 +18,10 @@ import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getUserTier } from "@/lib/gating/get-user-tier";
 import { canPerform } from "@/lib/gating/can-perform";
+import { isHalfStepRating, upsertTitleRating } from "@/lib/ratings/upsert";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-// Mirror the DB CHECK (numeric(2,1), 0.5–5.0, half-steps) so we 400 before
-// the constraint can 23514.
-function isValidRating(r: unknown): r is number {
-  return (
-    typeof r === "number" &&
-    Number.isFinite(r) &&
-    r >= 0.5 &&
-    r <= 5.0 &&
-    r * 2 === Math.floor(r * 2)
-  );
-}
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD (rated_on::date)
-}
 
 async function resolveCreatorId(userId: string): Promise<string | null> {
   const sb = createServiceRoleClient();
@@ -77,7 +62,7 @@ export async function POST(request: NextRequest) {
   if (!UUID_RE.test(titleId)) {
     return NextResponse.json({ error: "invalid title_id" }, { status: 400 });
   }
-  if (!isValidRating(body.rating)) {
+  if (!isHalfStepRating(body.rating)) {
     return NextResponse.json(
       { error: "invalid rating (0.5–5.0, half-steps)" },
       { status: 400 },
@@ -105,50 +90,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "unknown_title" }, { status: 404 });
   }
 
-  const fields = {
-    rating,
-    rated_on: today(),
-    source: "native",
-    visibility: "public",
-  } as const;
-
-  const { data: existing } = await sb
-    .from("title_ratings")
-    .select("id")
-    .eq("creator_id", creatorId)
-    .eq("title_id", titleId)
-    .maybeSingle();
-
-  if (existing?.id) {
-    const { error } = await sb
-      .from("title_ratings")
-      .update(fields)
-      .eq("id", existing.id as string);
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-    return NextResponse.json({ ok: true, rating });
-  }
-
-  const { error } = await sb.from("title_ratings").insert({
-    creator_id: creatorId,
-    title_id: titleId,
-    ...fields,
-  });
-  if (error) {
-    if (error.code === "23505") {
-      // Lost an insert race — the row exists now; switch to update.
-      const { error: uErr } = await sb
-        .from("title_ratings")
-        .update(fields)
-        .eq("creator_id", creatorId)
-        .eq("title_id", titleId);
-      if (uErr) {
-        return NextResponse.json({ error: uErr.message }, { status: 500 });
-      }
-      return NextResponse.json({ ok: true, rating });
-    }
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  const result = await upsertTitleRating({ creatorId, titleId, rating });
+  if (result) {
+    return NextResponse.json({ error: result.error }, { status: 500 });
   }
   return NextResponse.json({ ok: true, rating });
 }

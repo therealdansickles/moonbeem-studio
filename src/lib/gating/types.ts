@@ -13,6 +13,7 @@ export type Capability =
   | "view_public_profile"
   | "save_to_top12"
   | "rate_title"
+  | "write_review"
   | "download_clip"
   | "download_still"
   | "upload_fan_edit"

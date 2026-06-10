@@ -24,11 +24,14 @@ import AboutCredits from "@/components/AboutCredits";
 import OfferButtonClient from "@/components/OfferButtonClient";
 import TitlePosterShared from "@/components/TitlePosterShared";
 import TitleRatingControl from "@/components/TitleRatingControl";
+import WriteReviewControl from "@/components/WriteReviewControl";
+import ReviewCard from "@/components/reviews/ReviewCard";
 import { StarRatingDisplay } from "@/components/StarRating";
 import { createClient } from "@/lib/supabase/server";
 import { canViewTitle } from "@/lib/title-access";
 import { getCurrentProfile } from "@/lib/dal";
 import { getMyRatingForTitle } from "@/lib/queries/ratings";
+import { getPublicReviewsForTitle } from "@/lib/queries/reviews";
 import { getUserTier } from "@/lib/gating/get-user-tier";
 import { getUsageCount } from "@/lib/gating/usage-counts";
 import { Suspense } from "react";
@@ -154,6 +157,7 @@ export default async function TitlePage({ params }: PageProps) {
     hasActiveCampaign,
     episodes,
     myRating,
+    reviews,
   ] = await Promise.all([
     getActiveOffersForTitle(title.id),
     getActiveFanEditsForTitle(title.id),
@@ -162,6 +166,7 @@ export default async function TitlePage({ params }: PageProps) {
     isTitleInActiveCampaign(title.id),
     getTitleEpisodes(title.id),
     getMyRatingForTitle(title.id),
+    getPublicReviewsForTitle(title.id),
   ]);
 
   // Event-only: fetch the title's partner (the league) for the header
@@ -228,6 +233,25 @@ export default async function TitlePage({ params }: PageProps) {
     : myRating.hasCreator
       ? "ready"
       : "no_creator";
+
+  // Reviews tab content: cards (owner sees a delete control on their own) or a
+  // short empty state. Ownership = the review's creator is the viewer's creator.
+  const reviewsContent =
+    reviews.length === 0 ? (
+      <p className="text-body-sm text-moonbeem-ink-subtle">No reviews yet.</p>
+    ) : (
+      <div className="flex flex-col gap-5">
+        {reviews.map((rv) => (
+          <ReviewCard
+            key={rv.id}
+            review={rv}
+            isOwner={
+              !!myRating.creatorId && rv.creator_id === myRating.creatorId
+            }
+          />
+        ))}
+      </div>
+    );
 
   const aboutContent = (
     <div className="flex flex-col items-center gap-8">
@@ -334,6 +358,12 @@ export default async function TitlePage({ params }: PageProps) {
               authState={ratingAuthState}
               returnTo={`/t/${title.slug}`}
             />
+            <WriteReviewControl
+              titleId={title.id}
+              titleName={title.title}
+              authState={ratingAuthState}
+              returnTo={`/t/${title.slug}`}
+            />
             {/* Event-only meta line: date · venue, reusing the film
                 meta styling. Renders only what exists (date and/or
                 venue); the film metaParts above stay empty for events
@@ -398,6 +428,7 @@ export default async function TitlePage({ params }: PageProps) {
                 />
               </>
             }
+            reviewsContent={reviewsContent}
             videosContent={
               <VideosTab
                 clips={clips}
