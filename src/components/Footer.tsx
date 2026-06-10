@@ -26,6 +26,12 @@ export default function Footer() {
         <div className="flex flex-col gap-3 md:items-end">
           <nav className="flex flex-wrap items-center gap-5">
             <Link
+              href="/faq"
+              className="text-body-sm text-moonbeem-ink-muted transition-colors hover:text-moonbeem-pink"
+            >
+              FAQ
+            </Link>
+            <Link
               href="/partners/campaigns"
               className="text-body-sm text-moonbeem-ink-muted transition-colors hover:text-moonbeem-pink"
             >
