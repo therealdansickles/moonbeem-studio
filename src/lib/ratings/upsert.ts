@@ -28,6 +28,11 @@ export async function upsertTitleRating(params: {
   rating: number;
 }): Promise<{ error: string } | null> {
   const sb = createServiceRoleClient();
+  // `fields` is applied on BOTH the update and the insert branch, so a deliberate
+  // native rating write CONVERTS an existing row to source='native',
+  // visibility='public' — i.e. it attests an imported (source='letterboxd',
+  // visibility='private') row by rating it. This is the single place that
+  // conversion is decided, shared by /api/me/ratings and /api/me/diary.
   const fields = {
     rating: params.rating,
     rated_on: new Date().toISOString().slice(0, 10), // YYYY-MM-DD (rated_on::date)

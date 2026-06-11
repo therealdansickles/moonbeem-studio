@@ -42,3 +42,13 @@ next-env.d.ts
 public/moonbeem-logo-original.png
 .claude/
 handoff_*.md
+
+# Letterboxd import fixtures — personal viewing data (raw exports + extracted
+# CSVs) must never enter git. The subdir rule covers the extracted CSV tree;
+# the zip rules catch the raw export wherever it lands (Letterboxd names it
+# letterboxd-<user>-<date>-utc.zip). 2B MUST download/extract inside
+# fixtures/letterboxd/. Scoped so committable test fixtures can still live
+# elsewhere under fixtures/.
+fixtures/letterboxd/
+fixtures/letterboxd*.zip
+letterboxd-*.zip

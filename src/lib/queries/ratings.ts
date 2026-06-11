@@ -27,11 +27,19 @@ export async function getMyRatingForTitle(
   if (!creator?.id) return { hasCreator: false, creatorId: null, rating: null };
 
   const supabase = await createClient();
+  // The star control must NEVER pre-fill from an unattested import. Exclude
+  // rows that are (source='letterboxd' AND visibility='private') — the shape a
+  // Letterboxd import lands in before the user attests it by rating natively.
+  // Predicate: source<>'letterboxd' OR visibility<>'private' (the De Morgan of
+  // "not an unattested import"). Both columns are NOT NULL, so no tri-valued
+  // surprise; the (creator_id,title_id) partial unique keeps this <=1 row, so
+  // .maybeSingle() is still correct (an unattested row simply reads as null).
   const { data: row } = await supabase
     .from("title_ratings")
     .select("rating")
     .eq("title_id", titleId)
     .eq("creator_id", creator.id as string)
+    .or("source.neq.letterboxd,visibility.neq.private")
     .maybeSingle();
 
   return {

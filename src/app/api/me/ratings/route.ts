@@ -133,6 +133,12 @@ export async function DELETE(request: NextRequest) {
   }
 
   const sb = createServiceRoleClient();
+  // No source/visibility guard here on purpose: the only UI path to DELETE is
+  // the "Clear" control, which renders solely when a rating is DISPLAYED — and
+  // getMyRatingForTitle now hides unattested imports (source='letterboxd' AND
+  // visibility='private'), so Clear is never offered for one. A deliberate
+  // DELETE of an imported-then-attested row is the user's own native rating,
+  // which is the correct thing to remove.
   const { error } = await sb
     .from("title_ratings")
     .delete()

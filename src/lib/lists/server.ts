@@ -92,15 +92,18 @@ export async function findOrCreateWatchlist(
 }
 
 // Add a title to a list. Idempotent on (list_id, title_id) via an app-level
-// dup check (there is NO DB unique on that pair — confirmed by recon). position
+// dup check, backstopped by the partial unique user_list_items_list_title_unique
+// (list_id, title_id) WHERE title_id IS NOT NULL (added 20260610000003). position
 // is append-only max+1; retries on a (list_id, position) deferred-unique race.
 export async function addItemToList(
   sb: SupabaseClient,
   params: { creatorId: string; listId: string; titleId: string },
 ): Promise<{ already: boolean }> {
   const { listId, titleId, creatorId } = params;
-  // .limit(1) not .maybeSingle(): there is no (list_id, title_id) unique, so a
-  // pre-existing dup (from a concurrent add) must degrade gracefully, not throw.
+  // .limit(1) (not .maybeSingle()): a cheap short-circuit so an existing
+  // membership returns already=true without attempting an insert. The
+  // (list_id, title_id) partial unique now guarantees at most one matched row,
+  // but .limit(1) stays dup-tolerant regardless of any legacy pre-index dup.
   const { data: existingRows } = await sb
     .from("user_list_items")
     .select("id")
@@ -127,10 +130,11 @@ export async function addItemToList(
     });
     if (!error) return { already: false };
     if (error.code === "23505") {
-      // The only unique here is (list_id, position), so a 23505 is a position
-      // race — recompute max+1 and retry. (No (list_id, title_id) unique exists,
-      // so a title dup never 23505s; this recheck is a cheap belt for any future
-      // unique and tolerates a dup created by a concurrent add.)
+      // A 23505 here is now one of two uniques: (list_id, title_id) [added
+      // 20260610000003] when a concurrent add inserted this title first, or
+      // (list_id, position) on a position race. Re-check the pair to tell them
+      // apart: if the title already exists, treat as already=true; otherwise it
+      // was a position race, so recompute max+1 and retry.
       const { data: dupRows } = await sb
         .from("user_list_items")
         .select("id")
