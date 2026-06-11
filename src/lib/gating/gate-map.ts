@@ -51,6 +51,13 @@ export const gateMap: Record<Capability, Record<Tier, GateConfig>> = {
     signed_in: { allowed: true },
     verified: { allowed: true },
   },
+  // Phase 1D — lists + watchlist (create/edit/delete lists, add/remove items,
+  // toggle watchlist). Same posture as log_diary: signed-in may manage.
+  manage_lists: {
+    anonymous: { allowed: false },
+    signed_in: { allowed: true },
+    verified: { allowed: true },
+  },
   download_clip: {
     anonymous: { allowed: false },
     signed_in: { allowed: true, limit: { type: "lifetime", count: 3 } },

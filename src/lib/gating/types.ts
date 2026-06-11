@@ -14,6 +14,7 @@ export type Capability =
   | "save_to_top12"
   | "rate_title"
   | "log_diary"
+  | "manage_lists"
   | "download_clip"
   | "download_still"
   | "upload_fan_edit"

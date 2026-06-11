@@ -58,7 +58,7 @@ async function mapRows(
       .select("id, slug, title, poster_url")
       .in("id", titleIds);
     const { data: titles } = await (publicTitlesOnly
-      ? base.eq("is_public", true)
+      ? base.eq("is_public", true).is("deleted_at", null)
       : base);
     for (const t of titles ?? []) {
       titleById.set(t.id as string, {

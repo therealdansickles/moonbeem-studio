@@ -182,6 +182,16 @@ export default async function MePage() {
       ).count ?? 0
     : 0;
 
+  // List count — drives the "Your lists" section.
+  const listsCount = creator
+    ? (
+        await service
+          .from("user_lists")
+          .select("id", { count: "exact", head: true })
+          .eq("creator_id", creator.id)
+      ).count ?? 0
+    : 0;
+
   // Stub creators with edits that look like they belong to this user
   // (handle match or already-verified-social match). Surfaces an
   // "Edits to claim" prompt; only renders when non-empty.
@@ -589,6 +599,36 @@ export default async function MePage() {
                 className="inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
               >
                 View your diary →
+              </Link>
+            )}
+          </div>
+        </section>
+
+        {/* Your lists — count + link to the management page. */}
+        <section>
+          <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
+            Your lists{listsCount > 0 ? ` (${listsCount})` : ""}
+          </h2>
+          <div className="mt-3 border-t border-white/10 pt-3">
+            {listsCount === 0 ? (
+              <>
+                <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
+                  Group films into lists, or keep a watchlist. They show on your
+                  profile.
+                </p>
+                <Link
+                  href="/me/lists"
+                  className="mt-3 inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
+                >
+                  Go to your lists →
+                </Link>
+              </>
+            ) : (
+              <Link
+                href="/me/lists"
+                className="inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
+              >
+                View your lists →
               </Link>
             )}
           </div>

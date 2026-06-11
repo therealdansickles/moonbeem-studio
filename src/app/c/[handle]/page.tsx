@@ -5,6 +5,7 @@ import {
 } from "@/lib/queries/profiles";
 import { getFanEditsForCreator } from "@/lib/queries/titles";
 import { getPublicDiaryForCreator } from "@/lib/queries/diary";
+import { getPublicListsForCreator } from "@/lib/queries/lists";
 import ProfileView from "@/components/profile/ProfileView";
 
 export default async function ProfilePage({
@@ -26,16 +27,18 @@ export default async function ProfilePage({
         handle={profile?.handle ?? handle}
         topTitles={[]}
         diary={[]}
+        lists={[]}
         fanEdits={[]}
         isOwner={false}
       />
     );
   }
 
-  const [topTitles, fanEdits, diary] = await Promise.all([
+  const [topTitles, fanEdits, diary, lists] = await Promise.all([
     getTopTitlesForUser(profile.user_id),
     getFanEditsForCreator(profile.creator_id),
     getPublicDiaryForCreator(profile.creator_id),
+    getPublicListsForCreator(profile.creator_id),
   ]);
   const isOwner = currentUser?.userId === profile.user_id;
 
@@ -45,6 +48,7 @@ export default async function ProfilePage({
       handle={profile.handle}
       topTitles={topTitles}
       diary={diary}
+      lists={lists}
       fanEdits={fanEdits}
       isOwner={isOwner}
     />

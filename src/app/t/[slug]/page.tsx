@@ -25,6 +25,8 @@ import OfferButtonClient from "@/components/OfferButtonClient";
 import TitlePosterShared from "@/components/TitlePosterShared";
 import TitleRatingControl from "@/components/TitleRatingControl";
 import LogControl from "@/components/diary/LogControl";
+import WatchlistToggle from "@/components/lists/WatchlistToggle";
+import AddToListControl from "@/components/lists/AddToListControl";
 import ReviewCard from "@/components/reviews/ReviewCard";
 import { StarRatingDisplay } from "@/components/StarRating";
 import { createClient } from "@/lib/supabase/server";
@@ -32,6 +34,7 @@ import { canViewTitle } from "@/lib/title-access";
 import { getCurrentProfile } from "@/lib/dal";
 import { getMyRatingForTitle } from "@/lib/queries/ratings";
 import { getPublicReviewsForTitle } from "@/lib/queries/reviews";
+import { getMyWatchlistStateForTitle } from "@/lib/queries/lists";
 import { getUserTier } from "@/lib/gating/get-user-tier";
 import { getUsageCount } from "@/lib/gating/usage-counts";
 import { Suspense } from "react";
@@ -158,6 +161,7 @@ export default async function TitlePage({ params }: PageProps) {
     episodes,
     myRating,
     reviews,
+    watchlistOn,
   ] = await Promise.all([
     getActiveOffersForTitle(title.id),
     getActiveFanEditsForTitle(title.id),
@@ -167,6 +171,7 @@ export default async function TitlePage({ params }: PageProps) {
     getTitleEpisodes(title.id),
     getMyRatingForTitle(title.id),
     getPublicReviewsForTitle(title.id),
+    getMyWatchlistStateForTitle(title.id),
   ]);
 
   // Event-only: fetch the title's partner (the league) for the header
@@ -352,19 +357,37 @@ export default async function TitlePage({ params }: PageProps) {
                 </span>
               </div>
             )}
-            <TitleRatingControl
-              key={`rating-${myRating.rating ?? "none"}`}
-              titleId={title.id}
-              initialRating={myRating.rating}
-              authState={ratingAuthState}
-              returnTo={`/t/${title.slug}`}
-            />
-            <LogControl
-              titleId={title.id}
-              titleName={title.title}
-              authState={ratingAuthState}
-              returnTo={`/t/${title.slug}`}
-            />
+            {/* Header action cluster — kept as one wrapping row (rating, log,
+                watchlist, add-to-list). On narrow widths it wraps rather than
+                overflowing. */}
+            <div className="flex flex-row flex-wrap items-start justify-center gap-x-4 gap-y-2 md:justify-start">
+              <TitleRatingControl
+                key={`rating-${myRating.rating ?? "none"}`}
+                titleId={title.id}
+                initialRating={myRating.rating}
+                authState={ratingAuthState}
+                returnTo={`/t/${title.slug}`}
+              />
+              <LogControl
+                titleId={title.id}
+                titleName={title.title}
+                authState={ratingAuthState}
+                returnTo={`/t/${title.slug}`}
+              />
+              <WatchlistToggle
+                key={`wl-${watchlistOn}`}
+                titleId={title.id}
+                initialOn={watchlistOn}
+                authState={ratingAuthState}
+                returnTo={`/t/${title.slug}`}
+              />
+              <AddToListControl
+                titleId={title.id}
+                titleName={title.title}
+                authState={ratingAuthState}
+                returnTo={`/t/${title.slug}`}
+              />
+            </div>
             {/* Event-only meta line: date · venue, reusing the film
                 meta styling. Renders only what exists (date and/or
                 venue); the film metaParts above stay empty for events

@@ -11,12 +11,15 @@ import Top12Grid from "./Top12Grid";
 import ProfileFanEditCard from "./ProfileFanEditCard";
 import DiaryRow from "@/components/diary/DiaryRow";
 import type { DiaryEntry } from "@/lib/queries/diary";
+import ListCard from "@/components/lists/ListCard";
+import type { PublicListSummary } from "@/lib/queries/lists";
 
 type Props = {
   profile: Profile | null;
   handle: string;
   topTitles: TopTitle[];
   diary: DiaryEntry[];
+  lists: PublicListSummary[];
   fanEdits: FanEditWithTitle[];
   isOwner: boolean;
 };
@@ -26,6 +29,7 @@ export default function ProfileView({
   handle,
   topTitles,
   diary,
+  lists,
   fanEdits,
   isOwner,
 }: Props) {
@@ -179,6 +183,23 @@ export default function ProfileView({
           <div className="flex flex-col gap-3">
             {diary.map((e) => (
               <DiaryRow key={e.id} entry={e} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Lists — public lists (watchlist pinned first). Between Diary and Fan
+          edits; omitted when empty. */}
+      {lists.length > 0 && (
+        <section className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-pink uppercase m-0">
+              Lists
+            </h2>
+          </div>
+          <div className="flex flex-col gap-3">
+            {lists.map((l) => (
+              <ListCard key={l.id} handle={handle} list={l} />
             ))}
           </div>
         </section>
