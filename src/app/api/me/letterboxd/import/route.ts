@@ -176,25 +176,39 @@ async function processImportJob(
       matches.map((m) => [m.idx, m]),
     );
 
-    // Resolve matched title names for the fuzzy-review table (the RPC returns
-    // slug + id but not the display title).
-    const matchedIds = [
+    // Enrich the fuzzy-review table with each matched title's NAME + YEAR. Only
+    // FUZZY matches need this: the verification surface is "input name (year) ->
+    // matched name (year)", where the year is what exposes an off-by-one in the
+    // ±1 window. Exact matches are counted, not name-displayed, so we skip them.
+    //
+    // We look up ONLY the unique fuzzy title_ids. The prior code did .in() over
+    // ALL matched ids (~hundreds for a full library), which encodes into the
+    // PostgREST GET URL and overruns its length limit — the request errored, the
+    // error was unchecked, `data` came back null, and EVERY fuzzy row lost its
+    // name (the live row fell back to its slug, catalog rows showed a dash). The
+    // fuzzy set is small (one row per fuzzy match), so its .in() URL is safe.
+    // slug + is_public come straight from the RPC. service-role bypasses RLS, so
+    // catalog-only (is_public=false) titles resolve here too.
+    const fuzzyIds = [
       ...new Set(
         matches
-          .map((m) => m.title_id)
-          .filter((x): x is string => Boolean(x)),
+          .filter((m) => m.matched_via === "fuzzy" && m.title_id)
+          .map((m) => m.title_id as string),
       ),
     ];
-    const titleInfoById = new Map<string, { title: string; slug: string }>();
-    if (matchedIds.length) {
-      const { data: titles } = await sb
+    const fuzzyInfoById = new Map<string, { title: string; year: number | null }>();
+    if (fuzzyIds.length) {
+      const { data: titles, error: titleErr } = await sb
         .from("titles")
-        .select("id, title, slug")
-        .in("id", matchedIds);
+        .select("id, title, year")
+        .in("id", fuzzyIds);
+      if (titleErr) {
+        throw new Error(`fuzzy title enrich failed: ${titleErr.message}`);
+      }
       for (const t of titles ?? []) {
-        titleInfoById.set(t.id as string, {
+        fuzzyInfoById.set(t.id as string, {
           title: t.title as string,
-          slug: t.slug as string,
+          year: (t.year as number | null) ?? null,
         });
       }
     }
@@ -204,6 +218,7 @@ async function processImportJob(
       titleId: null,
       slug: null,
       titleName: null,
+      matchedYear: null,
       isPublic: null,
     };
     const keyToIdx = new Map<string, number>();
@@ -212,12 +227,13 @@ async function processImportJob(
       const idx = keyToIdx.get(keyOf(ref));
       const m = idx === undefined ? undefined : matchByIdx.get(idx);
       if (!m || m.matched_via === "none" || !m.title_id) return none;
-      const info = titleInfoById.get(m.title_id);
+      const info = fuzzyInfoById.get(m.title_id);
       return {
         via: m.matched_via,
         titleId: m.title_id,
-        slug: m.slug ?? info?.slug ?? null,
+        slug: m.slug ?? null,
         titleName: info?.title ?? null,
+        matchedYear: info?.year ?? null,
         isPublic: m.is_public ?? null,
       };
     };

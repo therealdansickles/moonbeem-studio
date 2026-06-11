@@ -16,6 +16,7 @@ export type ResolvedMatch = {
   titleId: string | null;
   slug: string | null;
   titleName: string | null;
+  matchedYear: number | null;
   isPublic: boolean | null;
 };
 
@@ -37,6 +38,9 @@ export type FuzzyPair = {
   input_name: string;
   input_year: number | null;
   matched_name: string | null;
+  // 2B.2: matched title's year — the verification surface for a ±1-year fuzzy
+  // match is "input (year) -> matched (year)"; the year makes the off-by-one visible.
+  matched_year: number | null;
   matched_slug: string | null;
   // 2B.1: the UI links /t/{slug} only when the matched title is live.
   matched_is_public: boolean;
@@ -113,6 +117,7 @@ function accumulate(
           input_name: rec.name,
           input_year: rec.year,
           matched_name: m.titleName,
+          matched_year: m.matchedYear,
           matched_slug: m.slug,
           matched_is_public: Boolean(m.isPublic),
         });

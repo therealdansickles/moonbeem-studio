@@ -23,6 +23,7 @@ type FuzzyPair = {
   input_name: string;
   input_year: number | null;
   matched_name: string | null;
+  matched_year: number | null;
   matched_slug: string | null;
   matched_is_public: boolean;
 };
@@ -371,6 +372,7 @@ function PreviewView({
                 <tr className="text-left text-caption text-moonbeem-ink-subtle">
                   <th className="px-3 py-2 font-normal">Your film</th>
                   <th className="px-3 py-2 font-normal">Matched to</th>
+                  <th className="px-3 py-2 font-normal">From</th>
                 </tr>
               </thead>
               <tbody>
@@ -387,17 +389,22 @@ function PreviewView({
                           className="text-moonbeem-pink hover:opacity-90"
                         >
                           {f.matched_name ?? f.matched_slug}
+                          {f.matched_year ? ` (${f.matched_year})` : ""}
                         </Link>
-                      ) : (
+                      ) : f.matched_name ? (
                         <span>
-                          {f.matched_name ?? "—"}
-                          {f.matched_name && (
-                            <span className="ml-2 rounded-full bg-white/10 px-2 py-0.5 text-caption text-moonbeem-ink-subtle">
-                              in our catalog, not yet live
-                            </span>
-                          )}
+                          {f.matched_name}
+                          {f.matched_year ? ` (${f.matched_year})` : ""}
+                          <span className="ml-2 rounded-full bg-white/10 px-2 py-0.5 text-caption text-moonbeem-ink-subtle">
+                            in our catalog, not yet live
+                          </span>
                         </span>
+                      ) : (
+                        "—"
                       )}
+                    </td>
+                    <td className="px-3 py-2 text-moonbeem-ink-subtle">
+                      {f.category}
                     </td>
                   </tr>
                 ))}
