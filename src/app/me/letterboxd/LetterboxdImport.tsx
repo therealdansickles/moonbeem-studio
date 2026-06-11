@@ -13,6 +13,8 @@ type CategoryStats = {
   total: number;
   matched_exact: number;
   matched_fuzzy: number;
+  matched_live: number;
+  matched_catalog: number;
   unmatched: number;
   already_imported: number;
 };
@@ -22,6 +24,7 @@ type FuzzyPair = {
   input_year: number | null;
   matched_name: string | null;
   matched_slug: string | null;
+  matched_is_public: boolean;
 };
 type UnmatchedRef = { category: string; name: string; year: number | null };
 type ListPreview = {
@@ -288,6 +291,9 @@ function StatCard({ label, s }: { label: string; s: CategoryStats }) {
       </div>
       <div className="mt-2 flex flex-col gap-0.5 text-caption text-moonbeem-ink-subtle">
         <span>{matched} matched{s.matched_fuzzy > 0 ? ` (${s.matched_fuzzy} fuzzy)` : ""}</span>
+        {s.matched_catalog > 0 && (
+          <span>{s.matched_catalog} in our catalog, not yet live</span>
+        )}
         <span>{s.unmatched} unmatched</span>
         {s.already_imported > 0 && <span>{s.already_imported} already imported</span>}
       </div>
@@ -375,7 +381,7 @@ function PreviewView({
                       {f.input_year ? ` (${f.input_year})` : ""}
                     </td>
                     <td className="px-3 py-2 text-moonbeem-ink">
-                      {f.matched_slug ? (
+                      {f.matched_is_public && f.matched_slug ? (
                         <Link
                           href={`/t/${f.matched_slug}`}
                           className="text-moonbeem-pink hover:opacity-90"
@@ -383,7 +389,14 @@ function PreviewView({
                           {f.matched_name ?? f.matched_slug}
                         </Link>
                       ) : (
-                        (f.matched_name ?? "—")
+                        <span>
+                          {f.matched_name ?? "—"}
+                          {f.matched_name && (
+                            <span className="ml-2 rounded-full bg-white/10 px-2 py-0.5 text-caption text-moonbeem-ink-subtle">
+                              in our catalog, not yet live
+                            </span>
+                          )}
+                        </span>
                       )}
                     </td>
                   </tr>

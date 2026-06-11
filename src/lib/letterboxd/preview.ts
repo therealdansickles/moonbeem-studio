@@ -16,12 +16,18 @@ export type ResolvedMatch = {
   titleId: string | null;
   slug: string | null;
   titleName: string | null;
+  isPublic: boolean | null;
 };
 
 export type CategoryStats = {
   total: number;
   matched_exact: number;
   matched_fuzzy: number;
+  // 2B.1: of the matched (exact + fuzzy), how many resolved to a LIVE title
+  // (is_public) vs a catalog-only one (a staged title not yet published).
+  // matched_live + matched_catalog === matched_exact + matched_fuzzy.
+  matched_live: number;
+  matched_catalog: number;
   unmatched: number;
   already_imported: number;
 };
@@ -32,6 +38,8 @@ export type FuzzyPair = {
   input_year: number | null;
   matched_name: string | null;
   matched_slug: string | null;
+  // 2B.1: the UI links /t/{slug} only when the matched title is live.
+  matched_is_public: boolean;
 };
 
 export type UnmatchedRef = { category: string; name: string; year: number | null };
@@ -86,14 +94,19 @@ function accumulate(
 ): CategoryStats {
   let matched_exact = 0;
   let matched_fuzzy = 0;
+  let matched_live = 0;
+  let matched_catalog = 0;
   let unmatched = 0;
   let already_imported = 0;
   for (const rec of records) {
     const m = resolve(rec);
-    if (m.via === "exact") {
-      matched_exact++;
-    } else if (m.via === "fuzzy") {
-      matched_fuzzy++;
+    if (m.via === "exact" || m.via === "fuzzy") {
+      if (m.via === "exact") matched_exact++;
+      else matched_fuzzy++;
+      if (m.isPublic) matched_live++;
+      else matched_catalog++;
+    }
+    if (m.via === "fuzzy") {
       if (sink.fuzzy.length < LIST_CAP) {
         sink.fuzzy.push({
           category,
@@ -101,11 +114,12 @@ function accumulate(
           input_year: rec.year,
           matched_name: m.titleName,
           matched_slug: m.slug,
+          matched_is_public: Boolean(m.isPublic),
         });
       } else {
         sink.truncFuzzy();
       }
-    } else {
+    } else if (m.via === "none") {
       unmatched++;
       if (sink.unmatched.length < LIST_CAP) {
         sink.unmatched.push({ category, name: rec.name, year: rec.year });
@@ -119,6 +133,8 @@ function accumulate(
     total: records.length,
     matched_exact,
     matched_fuzzy,
+    matched_live,
+    matched_catalog,
     unmatched,
     already_imported,
   };
@@ -159,6 +175,8 @@ export function buildPreview(
   const listPreviews: ListPreview[] = [];
   let lAggExact = 0;
   let lAggFuzzy = 0;
+  let lAggLive = 0;
+  let lAggCatalog = 0;
   let lAggUnmatched = 0;
   let lAggAlready = 0;
   let lAggTotal = 0;
@@ -184,6 +202,8 @@ export function buildPreview(
     lAggTotal += s.total;
     lAggExact += s.matched_exact;
     lAggFuzzy += s.matched_fuzzy;
+    lAggLive += s.matched_live;
+    lAggCatalog += s.matched_catalog;
     lAggUnmatched += s.unmatched;
     lAggAlready += s.already_imported;
   }
@@ -198,6 +218,8 @@ export function buildPreview(
         total: lAggTotal,
         matched_exact: lAggExact,
         matched_fuzzy: lAggFuzzy,
+        matched_live: lAggLive,
+        matched_catalog: lAggCatalog,
         unmatched: lAggUnmatched,
         already_imported: lAggAlready,
       },

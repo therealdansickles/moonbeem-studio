@@ -29,6 +29,16 @@ const MAX_BYTES = 25 * 1024 * 1024;
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// The preview worker runs in after() INSIDE this invocation, so it must finish
+// within the function's maxDuration. Budget: in-memory unzip (fflate, sync; 25 MB
+// hard cap, real exports << 1 MB) + ceil(N/100) sequential match RPCs (recon: 836
+// refs -> 9 chunks, each index-served and well under service_role's 8s
+// statement_timeout) + O(rows) preview assembly + a few small existing-uri SELECTs
+// — a few seconds in practice. 60s is the ceiling on Vercel Hobby and far under
+// Pro's 300s, so it is valid on any plan (the project's exact plan could not be
+// confirmed via the CLI in this environment). 60 gives wide headroom.
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   const gate = await requireCreatorForImport("me/letterboxd/import");
   if ("error" in gate) return gate.error;
@@ -194,6 +204,7 @@ async function processImportJob(
       titleId: null,
       slug: null,
       titleName: null,
+      isPublic: null,
     };
     const keyToIdx = new Map<string, number>();
     refs.forEach((ref, i) => keyToIdx.set(keyOf(ref), i));
@@ -207,6 +218,7 @@ async function processImportJob(
         titleId: m.title_id,
         slug: m.slug ?? info?.slug ?? null,
         titleName: info?.title ?? null,
+        isPublic: m.is_public ?? null,
       };
     };
 

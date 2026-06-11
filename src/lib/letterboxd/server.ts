@@ -60,18 +60,44 @@ export type FilmMatch = {
   // kept for the 2C apply / telemetry, which may log the resolved TMDb id.
   tmdb_id: number | null;
   slug: string | null;
+  // 2B.1: full-catalog match. is_public distinguishes a LIVE title (links to
+  // /t/{slug}) from a catalog-only match — a staged title matched but not yet
+  // published. Null when matched_via = 'none'.
+  is_public: boolean | null;
   matched_via: "exact" | "fuzzy" | "none";
 };
 
 // Call match_letterboxd_films(items jsonb). MUST be invoked with the
 // service-role client (the RPC is granted to service_role only). Returns one
 // row per input ref, in idx order.
+//
+// 2B.1: chunk at 100 refs per call, sequential. The matcher is index-served, but
+// one RPC over a whole library (recon: 836 unique refs) can still exceed
+// service_role's ~8s statement_timeout; 100-ref chunks keep each call well inside
+// budget. The RPC's idx is 0-based WITHIN its chunk, so re-base it to the global
+// ref position before concatenating. A chunk failure fails the whole job, naming
+// the offending chunk's range.
+const MATCH_CHUNK = 100;
+
 export async function matchFilms(
   sb: SupabaseClient,
   refs: Array<{ name: string; year: number | null }>,
 ): Promise<FilmMatch[]> {
   if (refs.length === 0) return [];
-  const { data, error } = await sb.rpc("match_letterboxd_films", { items: refs });
-  if (error) throw new Error(`match_letterboxd_films failed: ${error.message}`);
-  return (data ?? []) as FilmMatch[];
+  const out: FilmMatch[] = [];
+  for (let start = 0; start < refs.length; start += MATCH_CHUNK) {
+    const chunk = refs.slice(start, start + MATCH_CHUNK);
+    const { data, error } = await sb.rpc("match_letterboxd_films", { items: chunk });
+    if (error) {
+      const end = start + chunk.length - 1;
+      throw new Error(
+        `match_letterboxd_films failed on chunk ${start}–${end} of ${refs.length} refs: ${error.message}`,
+      );
+    }
+    for (const row of (data ?? []) as FilmMatch[]) {
+      // Re-base the chunk-local idx (0..chunk.length-1) to the global ref index.
+      out.push({ ...row, idx: row.idx + start });
+    }
+  }
+  return out;
 }
