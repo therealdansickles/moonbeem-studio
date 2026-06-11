@@ -58,6 +58,14 @@ export const gateMap: Record<Capability, Record<Tier, GateConfig>> = {
     signed_in: { allowed: true },
     verified: { allowed: true },
   },
+  // Phase 2B — Letterboxd ZIP import (upload + parse + preview; the apply step
+  // is gated separately in 2C). Same posture as manage_lists: signed-in (any
+  // creator) may import their own export; anonymous is denied (auth_required).
+  import_letterboxd: {
+    anonymous: { allowed: false },
+    signed_in: { allowed: true },
+    verified: { allowed: true },
+  },
   download_clip: {
     anonymous: { allowed: false },
     signed_in: { allowed: true, limit: { type: "lifetime", count: 3 } },

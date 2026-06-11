@@ -634,6 +634,27 @@ export default async function MePage() {
           </div>
         </section>
 
+        {/* Import from Letterboxd — entry to /me/letterboxd, same section
+            idiom as Your lists / Your diary. */}
+        <section>
+          <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
+            Import from Letterboxd
+          </h2>
+          <div className="mt-3 border-t border-white/10 pt-3">
+            <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
+              Bring over your ratings, diary, reviews, watchlist, and lists from
+              a Letterboxd export. We&apos;ll match your films to Moonbeem and
+              show you a preview first.
+            </p>
+            <Link
+              href="/me/letterboxd"
+              className="mt-3 inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
+            >
+              Import your data →
+            </Link>
+          </div>
+        </section>
+
         {/* Browse Moonbeem — standalone nudge between Top 12 and
             Verified accounts. Shown only once the user has started a
             Top 12 and still has no verified handle. */}

@@ -15,6 +15,7 @@ export type Capability =
   | "rate_title"
   | "log_diary"
   | "manage_lists"
+  | "import_letterboxd"
   | "download_clip"
   | "download_still"
   | "upload_fan_edit"
