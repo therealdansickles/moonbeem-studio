@@ -49,36 +49,53 @@ async function mapRows(
   ];
   const titleById = new Map<
     string,
-    { slug: string; title: string; poster_url: string | null }
+    {
+      slug: string;
+      title: string;
+      poster_url: string | null;
+      year: number | null;
+      is_public: boolean;
+      deleted_at: string | null;
+    }
   >();
   if (titleIds.length) {
-    // A non-live title (is_public=false OR soft-deleted) must NEVER surface its
-    // name/poster/slug on ANY surface — owner or public. Such rows (and
-    // title_id-NULL rows) fall back to raw_title (+ raw_year) text, no link, no
-    // poster. So the title join is ALWAYS filtered to live titles.
+    // 2D.1: a MATCHED title (title_id NOT NULL) surfaces its canonical name,
+    // year, and poster on EVERY surface regardless of is_public/deleted_at —
+    // mirroring the Top 12 precedent (getTopTitlesForUser applies no live
+    // filter; TitleCard renders the poster unconditionally). Only the LINK
+    // (title_slug) stays live-only (is_public AND deleted_at IS NULL), so a
+    // non-live matched title shows as name + poster with no /t link. A
+    // title_id-NULL row still falls back to raw_title (+ raw_year) text.
     const { data: titles } = await supabase
       .from("titles")
-      .select("id, slug, title, poster_url")
-      .in("id", titleIds)
-      .eq("is_public", true)
-      .is("deleted_at", null);
+      .select("id, slug, title, poster_url, year, is_public, deleted_at")
+      .in("id", titleIds);
     for (const t of titles ?? []) {
       titleById.set(t.id as string, {
         slug: t.slug as string,
         title: t.title as string,
         poster_url: (t.poster_url as string | null) ?? null,
+        year: (t.year as number | null) ?? null,
+        is_public: t.is_public as boolean,
+        deleted_at: (t.deleted_at as string | null) ?? null,
       });
     }
   }
 
   return rows.map((r) => {
     const t = r.title_id ? titleById.get(r.title_id) : undefined;
+    // Link only when live; a matched-but-non-live title renders as text.
+    const titleSlug =
+      t && t.is_public && t.deleted_at == null ? t.slug : null;
     return {
       id: r.id,
       title_id: r.title_id ?? null,
-      title_slug: t?.slug ?? null,
+      title_slug: titleSlug,
       title_name: t?.title ?? r.raw_title ?? "Untitled",
-      raw_year: r.raw_year ?? null,
+      // Canonical year from the matched title (else the row's raw year);
+      // unmatched rows keep raw_year. Field stays named raw_year so DiaryRow's
+      // text branch needs no change.
+      raw_year: t ? t.year ?? r.raw_year ?? null : r.raw_year ?? null,
       poster_url: t?.poster_url ?? null,
       watched_on: r.watched_on,
       rating: r.rating != null ? Number(r.rating) : null,

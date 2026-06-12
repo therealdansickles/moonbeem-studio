@@ -1,9 +1,11 @@
 // Phase 1D — list reads. Public reads use the anon SSR client (the user_lists /
 // user_list_items "public read" RLS policies scope anon to visibility='public'
 // lists); owner reads (/me) use the service-role client. Titles are batch-joined
-// via .in() and ALWAYS filtered to live (is_public + non-deleted) titles; a
-// non-live or unmatched item renders as raw_title text (never skipped). List
-// counts include EVERY item; poster strips stay live-titles-only.
+// via .in(). 2D.1: a MATCHED item (title_id NOT NULL) renders its canonical name
+// + poster regardless of is_public/deleted_at (Top 12 precedent); only the link
+// (title_slug) stays live-only. An unmatched item (title_id NULL) renders as
+// raw_title text (never skipped). List counts include EVERY item; poster strips
+// include EVERY matched item's poster, in position order.
 
 import { getUser } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
@@ -24,7 +26,7 @@ export type PublicListSummary = {
   name: string;
   kind: string; // 'list' | 'watchlist'
   item_count: number;
-  posters: string[]; // up to 4, visible titles only
+  posters: string[]; // up to 4 matched-title posters, in position order
 };
 
 export type PublicListDetail = {
@@ -55,33 +57,43 @@ async function mapItems(
   ];
   const titleById = new Map<
     string,
-    { slug: string; title: string; poster_url: string | null }
+    {
+      slug: string;
+      title: string;
+      poster_url: string | null;
+      is_public: boolean;
+      deleted_at: string | null;
+    }
   >();
   if (titleIds.length) {
-    // Always filtered to LIVE titles: a non-live title never contributes its
-    // name/poster/slug. Non-live and title_id-NULL items render as raw_title
-    // text below — never skipped.
+    // 2D.1: a MATCHED title contributes its canonical name + poster regardless
+    // of is_public/deleted_at (Top 12 precedent). Only the link (title_slug)
+    // stays live-only (is_public AND deleted_at IS NULL). A title_id-NULL item
+    // renders as raw_title text below — never skipped.
     const { data: titles } = await supabase
       .from("titles")
-      .select("id, slug, title, poster_url")
-      .in("id", titleIds)
-      .eq("is_public", true)
-      .is("deleted_at", null);
+      .select("id, slug, title, poster_url, is_public, deleted_at")
+      .in("id", titleIds);
     for (const t of titles ?? []) {
       titleById.set(t.id as string, {
         slug: t.slug as string,
         title: t.title as string,
         poster_url: (t.poster_url as string | null) ?? null,
+        is_public: t.is_public as boolean,
+        deleted_at: (t.deleted_at as string | null) ?? null,
       });
     }
   }
   const out: ListItem[] = [];
   for (const r of rows) {
     const t = r.title_id ? titleById.get(r.title_id) : undefined;
+    // Link only when live; a matched-but-non-live item renders as text + poster.
+    const titleSlug =
+      t && t.is_public && t.deleted_at == null ? t.slug : null;
     out.push({
       id: r.id,
       title_id: r.title_id ?? null,
-      title_slug: t?.slug ?? null,
+      title_slug: titleSlug,
       title_name: t?.title ?? r.raw_title ?? "Untitled",
       poster_url: t?.poster_url ?? null,
       position: r.position,
@@ -126,7 +138,7 @@ export async function getMyWatchlistStateForTitle(
 }
 
 // Public lists for a creator's profile — anon SSR client, visibility='public'.
-// Per-list count + up to 4 visible posters; watchlist pinned first when non-empty.
+// Per-list count + up to 4 matched-title posters; watchlist pinned first when non-empty.
 export async function getPublicListsForCreator(
   creatorId: string,
 ): Promise<PublicListSummary[]> {
@@ -146,9 +158,11 @@ export async function getPublicListsForCreator(
     .in("list_id", listIds)
     .order("position", { ascending: true });
 
-  // Resolve ALL referenced LIVE titles up front (for posters). The count below
-  // includes EVERY item (matching getPublicListDetail's item_count); the poster
-  // strip takes the first 4 live-title posters per list in position order.
+  // Resolve ALL referenced matched titles up front (for posters). 2D.1: no live
+  // filter — a matched title contributes its poster regardless of
+  // is_public/deleted_at (Top 12 precedent). The count below includes EVERY item
+  // (matching getPublicListDetail's item_count); the poster strip takes the
+  // first 4 matched-title posters per list in position order.
   const allTitleIds = [
     ...new Set(
       (items ?? [])
@@ -161,9 +175,7 @@ export async function getPublicListsForCreator(
     const { data: titles } = await supabase
       .from("titles")
       .select("id, poster_url")
-      .in("id", allTitleIds)
-      .eq("is_public", true)
-      .is("deleted_at", null);
+      .in("id", allTitleIds);
     for (const t of titles ?? []) {
       posterById.set(t.id as string, (t.poster_url as string | null) ?? null);
     }
