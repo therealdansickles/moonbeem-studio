@@ -21,6 +21,7 @@ type Props = {
   diary: DiaryEntry[];
   lists: PublicListSummary[];
   fanEdits: FanEditWithTitle[];
+  watchedCount: number;
   isOwner: boolean;
 };
 
@@ -31,6 +32,7 @@ export default function ProfileView({
   diary,
   lists,
   fanEdits,
+  watchedCount,
   isOwner,
 }: Props) {
   if (!profile) {
@@ -110,6 +112,12 @@ export default function ProfileView({
                   </li>
                 ))}
               </ul>
+            )}
+            {watchedCount > 0 && (
+              <p className="m-0 text-caption text-moonbeem-ink-subtle">
+                {watchedCount.toLocaleString()}{" "}
+                {watchedCount === 1 ? "film" : "films"} watched
+              </p>
             )}
             {profile.links.length > 0 && (
               <div>

@@ -21,6 +21,7 @@ type AppliedCategory = { attempted: number; inserted: number; skipped: number };
 type ResumeCounts = {
   ratings: AppliedCategory;
   diary: AppliedCategory;
+  watched: AppliedCategory;
   lists: AppliedCategory;
   list_items: AppliedCategory;
 };
@@ -56,6 +57,7 @@ async function resolveImportState(
   };
   const ratings = await privateCount("title_ratings");
   const diary = await privateCount("diary_entries");
+  const watched = await privateCount("watched_titles");
 
   // Private letterboxd list containers (includes the lb://watchlist sentinel);
   // their items are the "List films" staged to publish. Counting by list_id (not
@@ -77,8 +79,8 @@ async function resolveImportState(
     listItems = count ?? 0;
   }
 
-  // Published once nothing remains staged private across the three flip targets.
-  if (ratings === 0 && diary === 0 && lists === 0) {
+  // Published once nothing remains staged private across the flip targets.
+  if (ratings === 0 && diary === 0 && watched === 0 && lists === 0) {
     return { alreadyPublished: true, resumeCounts: null };
   }
   // Resume: these counts ARE what will publish (inserted), nothing is being
@@ -93,6 +95,7 @@ async function resolveImportState(
     resumeCounts: {
       ratings: cat(ratings),
       diary: cat(diary),
+      watched: cat(watched),
       lists: cat(lists),
       list_items: cat(listItems),
     },

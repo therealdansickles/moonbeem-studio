@@ -291,9 +291,10 @@ async function loadExistingUris(
     );
   };
 
-  const [ratings, diary, listItems, lists] = await Promise.all([
+  const [ratings, diary, watched, listItems, lists] = await Promise.all([
     pull("title_ratings"),
     pull("diary_entries"),
+    pull("watched_titles"),
     pull("user_list_items"),
     pull("user_lists"),
   ]);
@@ -323,5 +324,5 @@ async function loadExistingUris(
     );
   }
 
-  return { ratings, diary, watchlist, listItems, lists };
+  return { ratings, diary, watchlist, watched, listItems, lists };
 }

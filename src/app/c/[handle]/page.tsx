@@ -6,6 +6,7 @@ import {
 import { getFanEditsForCreator } from "@/lib/queries/titles";
 import { getPublicDiaryForCreator } from "@/lib/queries/diary";
 import { getPublicListsForCreator } from "@/lib/queries/lists";
+import { getWatchedCountForCreator } from "@/lib/queries/watched";
 import ProfileView from "@/components/profile/ProfileView";
 
 export default async function ProfilePage({
@@ -29,16 +30,18 @@ export default async function ProfilePage({
         diary={[]}
         lists={[]}
         fanEdits={[]}
+        watchedCount={0}
         isOwner={false}
       />
     );
   }
 
-  const [topTitles, fanEdits, diary, lists] = await Promise.all([
+  const [topTitles, fanEdits, diary, lists, watchedCount] = await Promise.all([
     getTopTitlesForUser(profile.user_id),
     getFanEditsForCreator(profile.creator_id),
     getPublicDiaryForCreator(profile.creator_id),
     getPublicListsForCreator(profile.creator_id),
+    getWatchedCountForCreator(profile.creator_id),
   ]);
   const isOwner = currentUser?.userId === profile.user_id;
 
@@ -50,6 +53,7 @@ export default async function ProfilePage({
       diary={diary}
       lists={lists}
       fanEdits={fanEdits}
+      watchedCount={watchedCount}
       isOwner={isOwner}
     />
   );

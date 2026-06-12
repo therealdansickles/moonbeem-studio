@@ -44,6 +44,7 @@ type ImportPreview = {
     diary: CategoryStats;
     reviews: CategoryStats;
     watchlist: CategoryStats;
+    watched: CategoryStats;
     lists: CategoryStats;
   };
   lists: ListPreview[];
@@ -51,7 +52,7 @@ type ImportPreview = {
   unmatched: UnmatchedRef[];
   fuzzy_truncated: number;
   unmatched_truncated: number;
-  skipped: { watched: number; likes: number; comments: number; profile: number };
+  skipped: { likes: number; comments: number; profile: number };
   warnings: Warning[];
 };
 
@@ -70,6 +71,7 @@ type AppliedCategory = { attempted: number; inserted: number; skipped: number };
 type PublishCounts = {
   ratings_published: number;
   diary_published: number;
+  watched_published: number;
   lists_published: number;
   watchlist_merged: number;
   watchlist_skipped: number;
@@ -78,6 +80,7 @@ type PublishCounts = {
 type AppliedCounts = {
   ratings: AppliedCategory;
   diary: AppliedCategory;
+  watched: AppliedCategory;
   lists: AppliedCategory;
   list_items: AppliedCategory;
 };
@@ -87,6 +90,7 @@ const CATEGORY_ORDER: Array<{ key: keyof ImportPreview["categories"]; label: str
   { key: "diary", label: "Diary" },
   { key: "reviews", label: "Reviews" },
   { key: "watchlist", label: "Watchlist" },
+  { key: "watched", label: "Watched" },
   { key: "lists", label: "List films" },
 ];
 
@@ -348,8 +352,8 @@ export default function LetterboxdImport({
                 Choose your export .zip
               </button>
               <p className="mt-3 text-caption text-moonbeem-ink-subtle m-0">
-                Up to 25 MB. We import ratings, diary, reviews, watchlist, and
-                lists. Watched, likes, and comments are skipped.
+                Up to 25 MB. We import ratings, diary, reviews, watchlist,
+                watched, and lists. Likes and comments are skipped.
               </p>
             </div>
             {error && (
@@ -424,7 +428,6 @@ function PreviewView({
   const [showConfirm, setShowConfirm] = useState(false);
   const { skipped } = preview;
   const skippedParts = [
-    skipped.watched ? `${skipped.watched} watched` : null,
     skipped.likes ? `${skipped.likes} liked films` : null,
     skipped.comments ? `${skipped.comments} comments` : null,
     skipped.profile ? `profile` : null,
@@ -638,6 +641,7 @@ function ConfirmModal({
     ["Diary", c.diary.total],
     ["Reviews", c.reviews.total],
     ["Watchlist", c.watchlist.total],
+    ["Watched", c.watched.total],
     [`List films (${listCount} list${listCount === 1 ? "" : "s"})`, c.lists.total],
   ];
   return (
@@ -696,6 +700,7 @@ function AppliedView({
   const rows: Array<[string, AppliedCategory]> = [
     ["Ratings", applied.ratings],
     ["Diary & reviews", applied.diary],
+    ["Watched", applied.watched],
     ["Lists", applied.lists],
     ["List films", applied.list_items],
   ];
@@ -826,6 +831,7 @@ function PublishedView({
     ? [
         ["Ratings", counts.ratings_published],
         ["Diary & reviews", counts.diary_published],
+        ["Watched", counts.watched_published],
         ["Lists", counts.lists_published],
         ["Watchlist films", counts.watchlist_merged],
       ]

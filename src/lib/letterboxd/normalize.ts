@@ -40,6 +40,13 @@ export type WatchlistRecord = FilmRef & {
   addedOn: string | null;
 };
 
+// 2E.1 — a "watched" flag (watched.csv): the film page URI is the dedupe key;
+// markedOn is the CSV "Date" (a marked-on date, not a watch date).
+export type WatchedRecord = FilmRef & {
+  externalUri: string | null;
+  markedOn: string | null;
+};
+
 export type ListItemRecord = FilmRef & {
   externalUri: string | null;
   position: number | null;
@@ -57,8 +64,10 @@ export type NormalizedImport = {
   diary: DiaryRecord[];
   reviews: DiaryRecord[];
   watchlist: WatchlistRecord[];
+  watched: WatchedRecord[];
   lists: ListRecord[];
-  skipped: { watched: number; likes: number; comments: number; profile: number };
+  // 2E.1: watched now imports — only likes/comments/profile stay skipped.
+  skipped: { likes: number; comments: number; profile: number };
   warnings: Warning[];
 };
 
@@ -179,6 +188,29 @@ function normWatchlist(rows: string[][] | null, warnings: Warning[]): WatchlistR
   return out;
 }
 
+// watched.csv: Date, Name, Year, Letterboxd URI (the FILM page — the dedupe
+// key, mirroring ratings/watchlist). No rating / rewatch / review here.
+function normWatched(rows: string[][] | null, warnings: Warning[]): WatchedRecord[] {
+  if (!rows || rows.length < 2) return [];
+  const h = indexHeaders(rows[0]);
+  const out: WatchedRecord[] = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    const name = getCol(row, h, "name");
+    if (!name) {
+      warnings.push({ category: "watched", row: r, message: "missing film name; skipped" });
+      continue;
+    }
+    out.push({
+      name,
+      year: parseYear(getCol(row, h, "year")),
+      externalUri: getCol(row, h, "letterboxd uri"),
+      markedOn: getCol(row, h, "date"),
+    });
+  }
+  return out;
+}
+
 function normList(rl: RawList, warnings: Warning[]): ListRecord {
   let name: string | null = null;
   let externalUri: string | null = null;
@@ -223,9 +255,9 @@ export function normalizeArchive(archive: RawArchive): NormalizedImport {
     diary: normDiaryLike(archive.diary, "diary", warnings),
     reviews: normDiaryLike(archive.reviews, "reviews", warnings),
     watchlist: normWatchlist(archive.watchlist, warnings),
+    watched: normWatched(archive.watched, warnings),
     lists: archive.lists.map((rl) => normList(rl, warnings)),
     skipped: {
-      watched: dataRowCount(archive.watched),
       likes: dataRowCount(archive.likesFilms),
       comments: dataRowCount(archive.comments),
       profile: dataRowCount(archive.profile),
@@ -255,6 +287,7 @@ export function collectFilmRefs(n: NormalizedImport): {
   n.diary.forEach(add);
   n.reviews.forEach(add);
   n.watchlist.forEach(add);
+  n.watched.forEach(add);
   n.lists.forEach((l) => l.items.forEach(add));
   return { refs, keyOf };
 }

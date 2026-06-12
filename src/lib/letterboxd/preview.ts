@@ -64,6 +64,7 @@ export type ImportPreview = {
     diary: CategoryStats;
     reviews: CategoryStats;
     watchlist: CategoryStats;
+    watched: CategoryStats;
     lists: CategoryStats;
   };
   lists: ListPreview[];
@@ -71,7 +72,7 @@ export type ImportPreview = {
   unmatched: UnmatchedRef[];
   fuzzy_truncated: number; // fuzzy pairs beyond the cap, not materialized
   unmatched_truncated: number;
-  skipped: { watched: number; likes: number; comments: number; profile: number };
+  skipped: { likes: number; comments: number; profile: number };
   warnings: Warning[];
 };
 
@@ -79,6 +80,7 @@ export type ExistingUris = {
   ratings: Set<string>;
   diary: Set<string>; // covers diary + reviews (both are diary_entries)
   watchlist: Set<string>;
+  watched: Set<string>;
   listItems: Set<string>;
   lists: Set<string>;
 };
@@ -175,6 +177,13 @@ export function buildPreview(
     resolve,
     sink,
   );
+  const watched = accumulate(
+    n.watched,
+    "watched",
+    existing.watched,
+    resolve,
+    sink,
+  );
 
   // Lists: per-list breakdown + an aggregate "lists" category over all items.
   const listPreviews: ListPreview[] = [];
@@ -219,6 +228,7 @@ export function buildPreview(
       diary,
       reviews,
       watchlist,
+      watched,
       lists: {
         total: lAggTotal,
         matched_exact: lAggExact,
@@ -259,6 +269,13 @@ export type ApplyPayload = {
     review_text: string | null;
     contains_spoilers: boolean;
     rewatch: boolean;
+    external_uri: string | null;
+    raw_title: string;
+    raw_year: number | null;
+  }>;
+  watched: Array<{
+    title_id: string | null;
+    marked_on: string | null;
     external_uri: string | null;
     raw_title: string;
     raw_year: number | null;
@@ -309,6 +326,18 @@ export function buildApplyPayload(
         external_uri: d.externalUri,
         raw_title: d.name,
         raw_year: d.year,
+      })),
+    // Watched flags — marked-watched films. watched_titles.marked_on is NOT
+    // NULL, so drop null-date rows (the CSV always carries a Date). Unmatched
+    // rows import too (title_id null, raw fields preserved).
+    watched: n.watched
+      .filter((w) => Boolean(w.markedOn))
+      .map((w) => ({
+        title_id: tid(w),
+        marked_on: w.markedOn,
+        external_uri: w.externalUri,
+        raw_title: w.name,
+        raw_year: w.year,
       })),
     // The CSV lists + the imported Watchlist (its own private list named
     // "Watchlist", external_uri 'lb://watchlist' — never the native watchlist).
