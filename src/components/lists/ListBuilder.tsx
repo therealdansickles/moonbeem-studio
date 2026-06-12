@@ -15,11 +15,23 @@ const MIN_QUERY_LEN = 2;
 export default function ListBuilder({
   listId,
   initialItems,
+  initialDescription,
+  canEditMeta,
 }: {
   listId: string;
   initialItems: ListItem[];
+  // Description editing is for kind='list' only; the watchlist passes
+  // canEditMeta=false and stays add/remove-only (no rename/description).
+  initialDescription: string | null;
+  canEditMeta: boolean;
 }) {
   const [items, setItems] = useState<ListItem[]>(initialItems);
+  const [description, setDescription] = useState(initialDescription ?? "");
+  const [savedDescription, setSavedDescription] = useState(
+    initialDescription ?? "",
+  );
+  const [descBusy, setDescBusy] = useState(false);
+  const [descStatus, setDescStatus] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -123,8 +135,70 @@ export default function ListBuilder({
     }
   }
 
+  async function saveDescription() {
+    if (descBusy) return;
+    setDescBusy(true);
+    setDescStatus(null);
+    try {
+      const res = await fetch("/api/me/lists", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: listId, description }),
+      });
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setDescStatus(j.error ?? "Couldn't save.");
+      } else {
+        setSavedDescription(description);
+        setDescStatus("Saved");
+      }
+    } catch {
+      setDescStatus("Couldn't save.");
+    } finally {
+      setDescBusy(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
+      {canEditMeta && (
+        <div className="flex flex-col gap-2">
+          <label
+            htmlFor="list-description"
+            className="text-body-sm font-medium text-moonbeem-ink-muted"
+          >
+            Description
+          </label>
+          <textarea
+            id="list-description"
+            value={description}
+            maxLength={2000}
+            rows={3}
+            placeholder="Add a description for this list…"
+            onChange={(e) => {
+              setDescription(e.target.value);
+              setDescStatus(null);
+            }}
+            className="w-full resize-y rounded-md border border-moonbeem-border-strong bg-transparent px-4 py-3 text-body-sm text-moonbeem-ink placeholder:text-moonbeem-ink-subtle focus:border-moonbeem-pink focus:outline-none"
+          />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={saveDescription}
+              disabled={descBusy || description === savedDescription}
+              className="rounded-md bg-moonbeem-pink px-4 py-1.5 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {descBusy ? "Saving…" : "Save description"}
+            </button>
+            {descStatus && (
+              <span className="text-caption text-moonbeem-ink-subtle">
+                {descStatus}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       <input
         type="search"
         value={query}

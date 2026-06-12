@@ -4,6 +4,7 @@
 
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { getCurrentProfile } from "@/lib/dal";
 import { getProfileByHandle } from "@/lib/queries/profiles";
 import { getPublicListDetail } from "@/lib/queries/lists";
 
@@ -18,6 +19,12 @@ export default async function PublicListPage({
 
   const list = await getPublicListDetail(profile.creator_id, id);
   if (!list) notFound();
+
+  // Owner doorway: the signed-in viewer who owns this list gets an "Edit list"
+  // link into the /me builder. Read-only for everyone else (idiom mirrors the
+  // profile page: current user's id === the profile's user_id).
+  const currentUser = await getCurrentProfile();
+  const isOwner = currentUser?.userId === profile.user_id;
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 py-10">
@@ -47,6 +54,14 @@ export default async function PublicListPage({
           {list.item_count} {list.item_count === 1 ? "film" : "films"} · by @
           {profile.handle}
         </p>
+        {isOwner && (
+          <Link
+            href={`/me/lists/${list.id}`}
+            className="w-fit text-body-sm font-medium text-moonbeem-pink hover:opacity-90"
+          >
+            Edit list →
+          </Link>
+        )}
       </div>
 
       {list.items.length === 0 ? (

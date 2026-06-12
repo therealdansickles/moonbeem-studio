@@ -61,7 +61,12 @@ export default async function MeListDetailPage({
             ← Lists
           </Link>
         </div>
-        <ListBuilder listId={list.id} initialItems={list.items} />
+        <ListBuilder
+          listId={list.id}
+          initialItems={list.items}
+          initialDescription={list.description}
+          canEditMeta={!isWatchlist}
+        />
       </div>
     </div>
   );

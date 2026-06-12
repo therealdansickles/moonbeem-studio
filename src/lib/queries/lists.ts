@@ -39,7 +39,7 @@ export type PublicListDetail = {
 };
 
 export type MyListSummary = { id: string; name: string; kind: string; item_count: number };
-export type MyListDetail = { id: string; name: string; kind: string; items: ListItem[] };
+export type MyListDetail = { id: string; name: string; kind: string; description: string | null; items: ListItem[] };
 
 type ItemRow = {
   id: string;
@@ -280,7 +280,7 @@ export async function getMyListDetail(
   const sb = createServiceRoleClient();
   const { data: list } = await sb
     .from("user_lists")
-    .select("id, name, kind, creator_id")
+    .select("id, name, kind, description, creator_id")
     .eq("id", listId)
     .maybeSingle();
   if (!list || (list.creator_id as string) !== creatorId) return null;
@@ -294,6 +294,7 @@ export async function getMyListDetail(
     id: list.id as string,
     name: list.name as string,
     kind: list.kind as string,
+    description: (list.description as string | null) ?? null,
     items: mapped,
   };
 }
