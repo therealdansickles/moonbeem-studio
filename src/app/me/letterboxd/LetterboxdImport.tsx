@@ -451,7 +451,7 @@ function PreviewView({
                         <span>
                           {f.matched_name}
                           {f.matched_year ? ` (${f.matched_year})` : ""}
-                          <span className="ml-2 rounded-full bg-white/10 px-2 py-0.5 text-caption text-moonbeem-ink-subtle">
+                          <span className="ml-2 inline-block whitespace-nowrap rounded-full bg-white/10 px-2 py-0.5 text-caption text-moonbeem-ink-subtle">
                             in our catalog, not yet live
                           </span>
                         </span>
