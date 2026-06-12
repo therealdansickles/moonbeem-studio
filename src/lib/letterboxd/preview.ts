@@ -238,3 +238,103 @@ export function buildPreview(
     warnings: n.warnings,
   };
 }
+
+// 2C apply payload — the rows the apply RPC replays, pinned at preview time and
+// stored on the job (never shipped to the client). Mirrors the RPC's
+// jsonb_to_recordset shapes exactly. apply-all-as-previewed: unmatched rows are
+// included with title_id null (raw_title/raw_year/external_uri carry them).
+export type ApplyPayload = {
+  ratings: Array<{
+    title_id: string | null;
+    rating: number;
+    rated_on: string | null;
+    external_uri: string | null;
+    raw_title: string;
+    raw_year: number | null;
+  }>;
+  diary: Array<{
+    title_id: string | null;
+    rating: number | null;
+    watched_on: string | null;
+    review_text: string | null;
+    contains_spoilers: boolean;
+    rewatch: boolean;
+    external_uri: string | null;
+    raw_title: string;
+    raw_year: number | null;
+  }>;
+  containers: Array<{
+    name: string;
+    external_uri: string | null;
+    items: Array<{
+      title_id: string | null;
+      external_uri: string | null;
+      raw_title: string;
+      raw_year: number | null;
+      position: number;
+    }>;
+  }>;
+};
+
+export function buildApplyPayload(
+  n: NormalizedImport,
+  resolve: (ref: FilmRef) => ResolvedMatch,
+): ApplyPayload {
+  const tid = (ref: FilmRef): string | null => resolve(ref).titleId;
+  return {
+    // title_ratings.rating is NOT NULL — drop rows whose rating didn't validate.
+    ratings: n.ratings
+      .filter((r) => r.rating != null)
+      .map((r) => ({
+        title_id: tid(r),
+        rating: r.rating as number,
+        rated_on: r.ratedOn,
+        external_uri: r.externalUri,
+        raw_title: r.name,
+        raw_year: r.year,
+      })),
+    // diary + reviews both land in diary_entries (deduped on the per-entry
+    // permalink). diary_entries.watched_on is NOT NULL — drop null-watched rows.
+    // contains_spoilers defaults false (Letterboxd's per-review spoiler flag is
+    // not parsed in v1).
+    diary: [...n.diary, ...n.reviews]
+      .filter((d) => Boolean(d.watchedDate))
+      .map((d) => ({
+        title_id: tid(d),
+        rating: d.rating,
+        watched_on: d.watchedDate,
+        review_text: d.reviewText,
+        contains_spoilers: false,
+        rewatch: d.rewatch,
+        external_uri: d.externalUri,
+        raw_title: d.name,
+        raw_year: d.year,
+      })),
+    // The CSV lists + the imported Watchlist (its own private list named
+    // "Watchlist", external_uri 'lb://watchlist' — never the native watchlist).
+    containers: [
+      ...n.lists.map((l) => ({
+        name: l.name ?? "Untitled list",
+        external_uri: l.externalUri,
+        items: l.items.map((it, idx) => ({
+          title_id: tid(it),
+          external_uri: it.externalUri,
+          raw_title: it.name,
+          raw_year: it.year,
+          position: it.position ?? idx + 1,
+        })),
+      })),
+      {
+        name: "Watchlist",
+        external_uri: "lb://watchlist",
+        items: n.watchlist.map((w, idx) => ({
+          title_id: tid(w),
+          external_uri: w.externalUri,
+          raw_title: w.name,
+          raw_year: w.year,
+          position: idx + 1,
+        })),
+      },
+    ],
+  };
+}

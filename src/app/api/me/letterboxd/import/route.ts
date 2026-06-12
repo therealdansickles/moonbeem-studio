@@ -20,6 +20,7 @@ import { normalizeArchive, collectFilmRefs } from "@/lib/letterboxd/normalize";
 import type { FilmRef } from "@/lib/letterboxd/normalize";
 import {
   buildPreview,
+  buildApplyPayload,
   type ExistingUris,
   type ResolvedMatch,
 } from "@/lib/letterboxd/preview";
@@ -240,6 +241,10 @@ async function processImportJob(
 
     const existing = await loadExistingUris(sb, creatorId);
     const preview = buildPreview(normalized, resolve, existing);
+    // 2C: pin the exact rows the apply RPC will replay, written alongside the
+    // display preview. NEVER shipped to the client (the GET route doesn't
+    // select `payload`); apply re-reads it server-side and never re-parses.
+    const payload = buildApplyPayload(normalized, resolve);
 
     const counts = {
       ratings: preview.categories.ratings,
@@ -254,7 +259,7 @@ async function processImportJob(
 
     await sb
       .from("letterboxd_import_jobs")
-      .update({ status: "preview_ready", preview, counts })
+      .update({ status: "preview_ready", preview, counts, payload })
       .eq("id", jobId);
   } catch (e) {
     await sb

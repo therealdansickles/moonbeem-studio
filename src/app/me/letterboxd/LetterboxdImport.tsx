@@ -55,7 +55,22 @@ type ImportPreview = {
   warnings: Warning[];
 };
 
-type Phase = "idle" | "uploading" | "analyzing" | "ready" | "failed";
+type Phase =
+  | "idle"
+  | "uploading"
+  | "analyzing"
+  | "ready"
+  | "applying"
+  | "applied"
+  | "failed";
+
+type AppliedCategory = { attempted: number; inserted: number; skipped: number };
+type AppliedCounts = {
+  ratings: AppliedCategory;
+  diary: AppliedCategory;
+  lists: AppliedCategory;
+  list_items: AppliedCategory;
+};
 
 const CATEGORY_ORDER: Array<{ key: keyof ImportPreview["categories"]; label: string }> = [
   { key: "ratings", label: "Ratings" },
@@ -70,6 +85,8 @@ export default function LetterboxdImport() {
   const [statusText, setStatusText] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [applied, setApplied] = useState<AppliedCounts | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Set on unmount so an in-flight poll fetch that resolves after teardown does
@@ -83,6 +100,8 @@ export default function LetterboxdImport() {
     setStatusText("");
     setError(null);
     setPreview(null);
+    setJobId(null);
+    setApplied(null);
     if (inputRef.current) inputRef.current.value = "";
   }, []);
 
@@ -189,6 +208,7 @@ export default function LetterboxdImport() {
           throw new Error(j.error ?? `import ${importRes.status}`);
         }
         const { job_id } = (await importRes.json()) as { job_id: string };
+        setJobId(job_id);
         setPhase("analyzing");
         setStatusText("Analyzing your export…");
         poll(job_id);
@@ -199,6 +219,33 @@ export default function LetterboxdImport() {
     },
     [poll],
   );
+
+  const onApply = useCallback(async () => {
+    if (!jobId) return;
+    setError(null);
+    setStatusText("Applying your import…");
+    setPhase("applying");
+    try {
+      const res = await fetch("/api/me/letterboxd/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_id: jobId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        applied?: AppliedCounts;
+        error?: string;
+      };
+      if (!res.ok || !data.ok || !data.applied) {
+        throw new Error(data.error ?? `apply ${res.status}`);
+      }
+      setApplied(data.applied);
+      setPhase("applied");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase("failed");
+    }
+  }, [jobId]);
 
   return (
     <div className="min-h-screen px-6 py-12">
@@ -263,7 +310,9 @@ export default function LetterboxdImport() {
           </section>
         )}
 
-        {(phase === "uploading" || phase === "analyzing") && (
+        {(phase === "uploading" ||
+          phase === "analyzing" ||
+          phase === "applying") && (
           <section className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.02] p-6">
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-moonbeem-pink border-t-transparent" />
             <p className="text-body-sm text-moonbeem-ink-muted m-0">
@@ -273,7 +322,11 @@ export default function LetterboxdImport() {
         )}
 
         {phase === "ready" && preview && (
-          <PreviewView preview={preview} onReupload={reset} />
+          <PreviewView preview={preview} onApply={onApply} onReupload={reset} />
+        )}
+
+        {phase === "applied" && applied && (
+          <AppliedView applied={applied} onReupload={reset} />
         )}
       </div>
     </div>
@@ -304,11 +357,14 @@ function StatCard({ label, s }: { label: string; s: CategoryStats }) {
 
 function PreviewView({
   preview,
+  onApply,
   onReupload,
 }: {
   preview: ImportPreview;
+  onApply: () => void;
   onReupload: () => void;
 }) {
+  const [showConfirm, setShowConfirm] = useState(false);
   const { skipped } = preview;
   const skippedParts = [
     skipped.watched ? `${skipped.watched} watched` : null,
@@ -418,9 +474,12 @@ function PreviewView({
       {preview.unmatched.length > 0 && (
         <div className="flex flex-col gap-2">
           <h3 className="text-body-sm font-medium text-moonbeem-ink m-0">
-            Not found on Moonbeem ({preview.unmatched.length}
+            Importing as text — not in our catalog yet ({preview.unmatched.length}
             {preview.unmatched_truncated > 0 ? `+${preview.unmatched_truncated} more` : ""})
           </h3>
+          <p className="text-caption text-moonbeem-ink-subtle m-0">
+            These come along with you and get matched as our catalog grows.
+          </p>
           <div className="overflow-x-auto rounded-md border border-white/10">
             <table className="w-full text-body-sm">
               <thead>
@@ -470,24 +529,172 @@ function PreviewView({
         </details>
       )}
 
-      {/* Apply — DISABLED next-step (Phase 2C). */}
+      {/* Apply (Phase 2C): confirm, then write everything as private. */}
       <div className="flex flex-col gap-2 border-t border-white/10 pt-4">
+        <button
+          type="button"
+          onClick={() => setShowConfirm(true)}
+          className="inline-block w-fit rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90"
+        >
+          Apply import
+        </button>
+        <p className="text-caption text-moonbeem-ink-subtle m-0">
+          Everything imports as private. Nothing appears on your profile until
+          you publish.
+        </p>
+        <button
+          type="button"
+          onClick={onReupload}
+          className="w-fit text-body-sm text-moonbeem-pink hover:opacity-90"
+        >
+          Upload a different file →
+        </button>
+      </div>
+
+      {showConfirm && (
+        <ConfirmModal
+          preview={preview}
+          onCancel={() => setShowConfirm(false)}
+          onConfirm={() => {
+            setShowConfirm(false);
+            onApply();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+function ConfirmModal({
+  preview,
+  onConfirm,
+  onCancel,
+}: {
+  preview: ImportPreview;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const c = preview.categories;
+  const listCount = preview.lists.length;
+  const lines: Array<[string, number]> = [
+    ["Ratings", c.ratings.total],
+    ["Diary", c.diary.total],
+    ["Reviews", c.reviews.total],
+    ["Watchlist", c.watchlist.total],
+    [`List films (${listCount} list${listCount === 1 ? "" : "s"})`, c.lists.total],
+  ];
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="w-full max-w-md rounded-lg border border-white/10 bg-moonbeem-navy p-6 shadow-xl">
+        <h3 className="text-body font-medium text-moonbeem-ink m-0">
+          Import to your library?
+        </h3>
+        <ul className="mt-4 flex flex-col gap-1 text-body-sm text-moonbeem-ink-muted">
+          {lines.map(([label, n]) => (
+            <li key={label} className="flex justify-between gap-4">
+              <span>{label}</span>
+              <span className="tabular-nums text-moonbeem-ink">{n}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-4 text-caption text-moonbeem-ink-subtle">
+          Everything imports as private. Nothing appears on your profile until
+          you publish in the next step.
+        </p>
+        <div className="mt-5 flex items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-body-sm text-moonbeem-ink-subtle hover:text-moonbeem-ink"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90"
+          >
+            Import as private
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AppliedView({
+  applied,
+  onReupload,
+}: {
+  applied: AppliedCounts;
+  onReupload: () => void;
+}) {
+  const rows: Array<[string, AppliedCategory]> = [
+    ["Ratings", applied.ratings],
+    ["Diary & reviews", applied.diary],
+    ["Lists", applied.lists],
+    ["List films", applied.list_items],
+  ];
+  return (
+    <section className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
+          Imported
+        </h2>
+        <p className="text-body-sm text-moonbeem-ink-muted m-0">
+          Everything imported as private. Nothing shows on your profile until you
+          publish — that&apos;s the next step.
+        </p>
+      </div>
+
+      <div className="overflow-x-auto rounded-md border border-white/10">
+        <table className="w-full text-body-sm">
+          <thead>
+            <tr className="text-left text-caption text-moonbeem-ink-subtle">
+              <th className="px-3 py-2 font-normal">Category</th>
+              <th className="px-3 py-2 font-normal">Added</th>
+              <th className="px-3 py-2 font-normal">Already there</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([label, cat]) => (
+              <tr key={label} className="border-t border-white/10">
+                <td className="px-3 py-2 text-moonbeem-ink-muted">{label}</td>
+                <td className="px-3 py-2 tabular-nums text-moonbeem-ink">
+                  {cat.inserted}
+                </td>
+                <td className="px-3 py-2 tabular-nums text-moonbeem-ink-subtle">
+                  {cat.skipped}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex flex-col gap-2 border-t border-white/10 pt-4">
+        <Link
+          href="/me/diary"
+          className="w-fit text-body-sm text-moonbeem-pink hover:opacity-90"
+        >
+          View your diary →
+        </Link>
         <button
           type="button"
           disabled
           aria-disabled="true"
-          title="Applying imports arrives in the next release"
+          title="Publishing arrives in the next release"
           className="inline-flex w-fit cursor-not-allowed items-center gap-2 rounded-md bg-white/10 px-4 py-2 text-body-sm font-semibold text-moonbeem-ink-subtle"
         >
-          Apply import
+          Publish
           <span className="rounded-full bg-white/10 px-2 py-0.5 text-caption">
             next step
           </span>
         </button>
-        <p className="text-caption text-moonbeem-ink-subtle m-0">
-          Applying your import lands in the next release. For now this is a
-          read-only preview.
-        </p>
         <button
           type="button"
           onClick={onReupload}
