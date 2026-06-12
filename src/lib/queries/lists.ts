@@ -1,8 +1,9 @@
 // Phase 1D — list reads. Public reads use the anon SSR client (the user_lists /
 // user_list_items "public read" RLS policies scope anon to visibility='public'
 // lists); owner reads (/me) use the service-role client. Titles are batch-joined
-// via .in(); on the PUBLIC surfaces hidden (is_public=false) titles are filtered
-// out and their items skipped (mirrors the diary hidden-title handling).
+// via .in() and ALWAYS filtered to live (is_public + non-deleted) titles; a
+// non-live or unmatched item renders as raw_title text (never skipped). List
+// counts include EVERY item; poster strips stay live-titles-only.
 
 import { getUser } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
@@ -48,7 +49,6 @@ type ItemRow = {
 async function mapItems(
   supabase: SupabaseClient,
   rows: ItemRow[],
-  publicTitlesOnly: boolean,
 ): Promise<ListItem[]> {
   const titleIds = [
     ...new Set(rows.map((r) => r.title_id).filter((x): x is string => Boolean(x))),
@@ -58,13 +58,15 @@ async function mapItems(
     { slug: string; title: string; poster_url: string | null }
   >();
   if (titleIds.length) {
-    const base = supabase
+    // Always filtered to LIVE titles: a non-live title never contributes its
+    // name/poster/slug. Non-live and title_id-NULL items render as raw_title
+    // text below — never skipped.
+    const { data: titles } = await supabase
       .from("titles")
       .select("id, slug, title, poster_url")
-      .in("id", titleIds);
-    const { data: titles } = await (publicTitlesOnly
-      ? base.eq("is_public", true).is("deleted_at", null)
-      : base);
+      .in("id", titleIds)
+      .eq("is_public", true)
+      .is("deleted_at", null);
     for (const t of titles ?? []) {
       titleById.set(t.id as string, {
         slug: t.slug as string,
@@ -76,8 +78,6 @@ async function mapItems(
   const out: ListItem[] = [];
   for (const r of rows) {
     const t = r.title_id ? titleById.get(r.title_id) : undefined;
-    // On a public surface, an item pointing at a hidden title is skipped.
-    if (publicTitlesOnly && r.title_id && !t) continue;
     out.push({
       id: r.id,
       title_id: r.title_id ?? null,
@@ -146,10 +146,9 @@ export async function getPublicListsForCreator(
     .in("list_id", listIds)
     .order("position", { ascending: true });
 
-  // Resolve ALL referenced titles (visible only) up front, then count visible
-  // items + take the first 4 visible posters per list in position order. Filter
-  // visibility BEFORE capping so a list whose first items are hidden still shows
-  // its later visible posters, and the count matches getPublicListDetail.
+  // Resolve ALL referenced LIVE titles up front (for posters). The count below
+  // includes EVERY item (matching getPublicListDetail's item_count); the poster
+  // strip takes the first 4 live-title posters per list in position order.
   const allTitleIds = [
     ...new Set(
       (items ?? [])
@@ -174,11 +173,8 @@ export async function getPublicListsForCreator(
   for (const it of items ?? []) {
     const lid = it.list_id as string;
     const tid = (it.title_id as string | null) ?? null;
-    // Visible = an unmatched (raw_title) item OR a public, non-deleted title.
-    const visible = tid === null || posterById.has(tid);
-    if (!visible) continue;
     const e = byList.get(lid) ?? { count: 0, posters: [] };
-    e.count += 1;
+    e.count += 1; // count EVERY item (live, non-live, and raw_title-only)
     const poster = tid ? posterById.get(tid) ?? null : null;
     if (poster && e.posters.length < 4) e.posters.push(poster);
     byList.set(lid, e);
@@ -224,7 +220,7 @@ export async function getPublicListDetail(
     .select("id, title_id, raw_title, position")
     .eq("list_id", listId)
     .order("position", { ascending: true });
-  const mapped = await mapItems(supabase, (items ?? []) as ItemRow[], true);
+  const mapped = await mapItems(supabase, (items ?? []) as ItemRow[]);
 
   return {
     id: list.id as string,
@@ -281,7 +277,7 @@ export async function getMyListDetail(
     .select("id, title_id, raw_title, position")
     .eq("list_id", listId)
     .order("position", { ascending: true });
-  const mapped = await mapItems(sb, (items ?? []) as ItemRow[], false);
+  const mapped = await mapItems(sb, (items ?? []) as ItemRow[]);
   return {
     id: list.id as string,
     name: list.name as string,

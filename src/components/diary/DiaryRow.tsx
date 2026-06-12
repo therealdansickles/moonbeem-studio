@@ -54,6 +54,7 @@ export default function DiaryRow({
         ) : (
           <span className="block truncate text-body-sm font-medium text-moonbeem-ink">
             {entry.title_name}
+            {entry.raw_year ? ` (${entry.raw_year})` : ""}
           </span>
         )}
         <div className="mt-1 flex flex-wrap items-center gap-2">

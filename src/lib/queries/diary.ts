@@ -14,6 +14,7 @@ export type DiaryEntry = {
   title_id: string | null;
   title_slug: string | null;
   title_name: string;
+  raw_year: number | null;
   poster_url: string | null;
   watched_on: string;
   rating: number | null;
@@ -27,6 +28,7 @@ type DiaryRow = {
   id: string;
   title_id: string | null;
   raw_title: string | null;
+  raw_year: number | null;
   watched_on: string;
   rating: number | string | null;
   rewatch: boolean | null;
@@ -36,12 +38,11 @@ type DiaryRow = {
 };
 
 const SELECT =
-  "id, title_id, raw_title, watched_on, rating, rewatch, review_text, visibility, created_at";
+  "id, title_id, raw_title, raw_year, watched_on, rating, rewatch, review_text, visibility, created_at";
 
 async function mapRows(
   supabase: SupabaseClient,
   rows: DiaryRow[],
-  publicTitlesOnly: boolean,
 ): Promise<DiaryEntry[]> {
   const titleIds = [
     ...new Set(rows.map((r) => r.title_id).filter((x): x is string => Boolean(x))),
@@ -51,15 +52,16 @@ async function mapRows(
     { slug: string; title: string; poster_url: string | null }
   >();
   if (titleIds.length) {
-    // The public profile must never surface a hidden (is_public=false) title's
-    // name/poster/slug; those rows fall back to a neutral "Untitled".
-    const base = supabase
+    // A non-live title (is_public=false OR soft-deleted) must NEVER surface its
+    // name/poster/slug on ANY surface — owner or public. Such rows (and
+    // title_id-NULL rows) fall back to raw_title (+ raw_year) text, no link, no
+    // poster. So the title join is ALWAYS filtered to live titles.
+    const { data: titles } = await supabase
       .from("titles")
       .select("id, slug, title, poster_url")
-      .in("id", titleIds);
-    const { data: titles } = await (publicTitlesOnly
-      ? base.eq("is_public", true).is("deleted_at", null)
-      : base);
+      .in("id", titleIds)
+      .eq("is_public", true)
+      .is("deleted_at", null);
     for (const t of titles ?? []) {
       titleById.set(t.id as string, {
         slug: t.slug as string,
@@ -76,6 +78,7 @@ async function mapRows(
       title_id: r.title_id ?? null,
       title_slug: t?.slug ?? null,
       title_name: t?.title ?? r.raw_title ?? "Untitled",
+      raw_year: r.raw_year ?? null,
       poster_url: t?.poster_url ?? null,
       watched_on: r.watched_on,
       rating: r.rating != null ? Number(r.rating) : null,
@@ -105,7 +108,7 @@ export async function getPublicDiaryForCreator(
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error || !data || data.length === 0) return [];
-  return mapRows(supabase, data as unknown as DiaryRow[], true);
+  return mapRows(supabase, data as unknown as DiaryRow[]);
 }
 
 // Owner view (/me/diary) — service-role, all visibilities, newest first.
@@ -120,5 +123,5 @@ export async function getMyDiaryEntries(
     .order("watched_on", { ascending: false })
     .order("created_at", { ascending: false });
   if (error || !data || data.length === 0) return [];
-  return mapRows(supabase, data as unknown as DiaryRow[], false);
+  return mapRows(supabase, data as unknown as DiaryRow[]);
 }

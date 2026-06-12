@@ -298,19 +298,23 @@ async function loadExistingUris(
     pull("user_lists"),
   ]);
 
-  // Watchlist dedupe is per the creator's watchlist list specifically.
+  // Watchlist already-imported check spans BOTH the import container
+  // (kind='list', external_uri='lb://watchlist') that the apply writes pre-
+  // publish AND the native kind='watchlist' list that the publish RPC merges it
+  // into. Union both lists' item URIs so a re-upload dedupes correctly in either
+  // state (pre- or post-publish).
   let watchlist = new Set<string>();
-  const { data: wl } = await sb
+  const { data: wlLists } = await sb
     .from("user_lists")
     .select("id")
     .eq("creator_id", creatorId)
-    .eq("kind", "watchlist")
-    .maybeSingle();
-  if (wl?.id) {
+    .or('kind.eq.watchlist,external_uri.eq."lb://watchlist"');
+  const wlListIds = (wlLists ?? []).map((r) => r.id as string);
+  if (wlListIds.length) {
     const { data: wlItems } = await sb
       .from("user_list_items")
       .select("external_uri")
-      .eq("list_id", wl.id as string)
+      .in("list_id", wlListIds)
       .not("external_uri", "is", null);
     watchlist = new Set(
       (wlItems ?? [])

@@ -62,9 +62,19 @@ type Phase =
   | "ready"
   | "applying"
   | "applied"
+  | "publishing"
+  | "published"
   | "failed";
 
 type AppliedCategory = { attempted: number; inserted: number; skipped: number };
+type PublishCounts = {
+  ratings_published: number;
+  diary_published: number;
+  lists_published: number;
+  watchlist_merged: number;
+  watchlist_skipped: number;
+  titles_recomputed: number;
+};
 type AppliedCounts = {
   ratings: AppliedCategory;
   diary: AppliedCategory;
@@ -80,13 +90,29 @@ const CATEGORY_ORDER: Array<{ key: keyof ImportPreview["categories"]; label: str
   { key: "lists", label: "List films" },
 ];
 
-export default function LetterboxdImport() {
-  const [phase, setPhase] = useState<Phase>("idle");
+export default function LetterboxdImport({
+  handle,
+  alreadyPublished,
+  resumeCounts,
+}: {
+  handle: string;
+  alreadyPublished: boolean;
+  // Server-computed from the creator's remaining private letterboxd rows: when a
+  // completed import exists but nothing's published yet, open on the applied view
+  // (Publish enabled) instead of idle, so a returning user can finish the flow.
+  resumeCounts: AppliedCounts | null;
+}) {
+  const [phase, setPhase] = useState<Phase>(
+    alreadyPublished ? "published" : resumeCounts ? "applied" : "idle",
+  );
   const [statusText, setStatusText] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
-  const [applied, setApplied] = useState<AppliedCounts | null>(null);
+  const [applied, setApplied] = useState<AppliedCounts | null>(resumeCounts);
+  const [publishedCounts, setPublishedCounts] = useState<PublishCounts | null>(
+    null,
+  );
   const inputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Set on unmount so an in-flight poll fetch that resolves after teardown does
@@ -247,6 +273,28 @@ export default function LetterboxdImport() {
     }
   }, [jobId]);
 
+  const onPublish = useCallback(async () => {
+    setError(null);
+    setStatusText("Publishing to your profile…");
+    setPhase("publishing");
+    try {
+      const res = await fetch("/api/me/letterboxd/publish", { method: "POST" });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        published?: PublishCounts;
+        error?: string;
+      };
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error ?? `publish ${res.status}`);
+      }
+      setPublishedCounts(data.published ?? null);
+      setPhase("published");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase("failed");
+    }
+  }, []);
+
   return (
     <div className="min-h-screen px-6 py-12">
       <div className="mx-auto flex max-w-2xl flex-col gap-8">
@@ -312,7 +360,8 @@ export default function LetterboxdImport() {
 
         {(phase === "uploading" ||
           phase === "analyzing" ||
-          phase === "applying") && (
+          phase === "applying" ||
+          phase === "publishing") && (
           <section className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.02] p-6">
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-moonbeem-pink border-t-transparent" />
             <p className="text-body-sm text-moonbeem-ink-muted m-0">
@@ -326,7 +375,15 @@ export default function LetterboxdImport() {
         )}
 
         {phase === "applied" && applied && (
-          <AppliedView applied={applied} onReupload={reset} />
+          <AppliedView applied={applied} onPublish={onPublish} onReupload={reset} />
+        )}
+
+        {phase === "published" && (
+          <PublishedView
+            handle={handle}
+            counts={publishedCounts}
+            onReupload={reset}
+          />
         )}
       </div>
     </div>
@@ -628,11 +685,14 @@ function ConfirmModal({
 
 function AppliedView({
   applied,
+  onPublish,
   onReupload,
 }: {
   applied: AppliedCounts;
+  onPublish: () => void;
   onReupload: () => void;
 }) {
+  const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const rows: Array<[string, AppliedCategory]> = [
     ["Ratings", applied.ratings],
     ["Diary & reviews", applied.diary],
@@ -685,22 +745,133 @@ function AppliedView({
         </Link>
         <button
           type="button"
-          disabled
-          aria-disabled="true"
-          title="Publishing arrives in the next release"
-          className="inline-flex w-fit cursor-not-allowed items-center gap-2 rounded-md bg-white/10 px-4 py-2 text-body-sm font-semibold text-moonbeem-ink-subtle"
+          onClick={() => setShowPublishConfirm(true)}
+          className="inline-block w-fit rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90"
         >
-          Publish
-          <span className="rounded-full bg-white/10 px-2 py-0.5 text-caption">
-            next step
-          </span>
+          Publish to your profile
         </button>
+        {showPublishConfirm && (
+          <PublishConfirmModal
+            onCancel={() => setShowPublishConfirm(false)}
+            onConfirm={() => {
+              setShowPublishConfirm(false);
+              onPublish();
+            }}
+          />
+        )}
         <button
           type="button"
           onClick={onReupload}
           className="w-fit text-body-sm text-moonbeem-pink hover:opacity-90"
         >
           Upload a different file →
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function PublishConfirmModal({
+  onConfirm,
+  onCancel,
+}: {
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="w-full max-w-md rounded-lg border border-white/10 bg-moonbeem-navy p-6 shadow-xl">
+        <h3 className="text-body font-medium text-moonbeem-ink m-0">
+          Publish to your profile?
+        </h3>
+        <p className="mt-4 text-body-sm text-moonbeem-ink-muted">
+          Your ratings, diary, and lists go live on your profile. Films not yet
+          in our catalog stay as text and link up as it grows.
+        </p>
+        <div className="mt-5 flex items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-body-sm text-moonbeem-ink-subtle hover:text-moonbeem-ink"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90"
+          >
+            Publish
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PublishedView({
+  handle,
+  counts,
+  onReupload,
+}: {
+  handle: string;
+  counts: PublishCounts | null;
+  onReupload: () => void;
+}) {
+  const rows: Array<[string, number]> = counts
+    ? [
+        ["Ratings", counts.ratings_published],
+        ["Diary & reviews", counts.diary_published],
+        ["Lists", counts.lists_published],
+        ["Watchlist films", counts.watchlist_merged],
+      ]
+    : [];
+  return (
+    <section className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
+          Published
+        </h2>
+        <p className="text-body-sm text-moonbeem-ink-muted m-0">
+          Your ratings, diary, and lists are live on your profile. Films not yet
+          in our catalog show as text and link up as it grows.
+        </p>
+      </div>
+
+      {rows.length > 0 && (
+        <div className="overflow-x-auto rounded-md border border-white/10">
+          <table className="w-full text-body-sm">
+            <tbody>
+              {rows.map(([label, n]) => (
+                <tr key={label} className="border-t border-white/10 first:border-t-0">
+                  <td className="px-3 py-2 text-moonbeem-ink-muted">{label}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-moonbeem-ink">
+                    {n}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2 border-t border-white/10 pt-4">
+        <Link
+          href={`/c/${handle}`}
+          className="inline-block w-fit rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90"
+        >
+          View your profile →
+        </Link>
+        <button
+          type="button"
+          onClick={onReupload}
+          className="w-fit text-body-sm text-moonbeem-pink hover:opacity-90"
+        >
+          Import another file →
         </button>
       </div>
     </section>
