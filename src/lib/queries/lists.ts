@@ -11,6 +11,7 @@ import { getUser } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { chunkedIn } from "@/lib/queries/chunked-in";
 
 export type ListItem = {
   id: string;
@@ -70,11 +71,16 @@ async function mapItems(
     // of is_public/deleted_at (Top 12 precedent). Only the link (title_slug)
     // stays live-only (is_public AND deleted_at IS NULL). A title_id-NULL item
     // renders as raw_title text below — never skipped.
-    const { data: titles } = await supabase
-      .from("titles")
-      .select("id, slug, title, poster_url, is_public, deleted_at")
-      .in("id", titleIds);
-    for (const t of titles ?? []) {
+    // 2D.3: chunked (≤100 ids/call) — a single list can hold hundreds of items
+    // (Dan's watchlist is 203); one .in() over all of them would trip the
+    // URL-length cap (the 2B trap).
+    const titles = await chunkedIn(titleIds, "lists.mapItems", (chunk) =>
+      supabase
+        .from("titles")
+        .select("id, slug, title, poster_url, is_public, deleted_at")
+        .in("id", chunk),
+    );
+    for (const t of titles) {
       titleById.set(t.id as string, {
         slug: t.slug as string,
         title: t.title as string,
@@ -158,48 +164,57 @@ export async function getPublicListsForCreator(
     .in("list_id", listIds)
     .order("position", { ascending: true });
 
-  // Resolve ALL referenced matched titles up front (for posters). 2D.1: no live
-  // filter — a matched title contributes its poster regardless of
-  // is_public/deleted_at (Top 12 precedent). The count below includes EVERY item
-  // (matching getPublicListDetail's item_count); the poster strip takes the
-  // first 4 matched-title posters per list in position order.
-  const allTitleIds = [
-    ...new Set(
-      (items ?? [])
-        .map((i) => i.title_id as string | null)
-        .filter((x): x is string => Boolean(x)),
-    ),
-  ];
+  // Per list: the FULL count (every item) + the first 4 matched (title_id NOT
+  // NULL) items by position. Only those ids — ≤4 per list — feed the poster
+  // lookup, NOT every item's id. 2D.1 regressed this by collecting ALL ids: a
+  // creator's library is hundreds of items (≈670 distinct for the founder), and
+  // one .in() over all of them builds a multi-KB `id=in.(…)` URL that trips the
+  // PostgREST/gateway URL-length cap (the 2B.2 trap) — with the error unchecked
+  // the entire strip silently blanked. Items arrive already ordered by position.
+  const countByList = new Map<string, number>();
+  const posterIdsByList = new Map<string, string[]>();
+  for (const it of items ?? []) {
+    const lid = it.list_id as string;
+    const tid = (it.title_id as string | null) ?? null;
+    countByList.set(lid, (countByList.get(lid) ?? 0) + 1); // EVERY item
+    if (tid) {
+      const arr = posterIdsByList.get(lid) ?? [];
+      if (arr.length < 4) arr.push(tid);
+      posterIdsByList.set(lid, arr);
+    }
+  }
+
+  // ≤4 × (#public lists) ids → a small, bounded .in() (deduped across lists).
+  const posterTitleIds = [...new Set([...posterIdsByList.values()].flat())];
   const posterById = new Map<string, string | null>();
-  if (allTitleIds.length) {
-    const { data: titles } = await supabase
+  if (posterTitleIds.length) {
+    const { data: titles, error } = await supabase
       .from("titles")
       .select("id, poster_url")
-      .in("id", allTitleIds);
+      .in("id", posterTitleIds);
+    // A public profile must NEVER fail over posters: check the error, log it,
+    // and degrade to empty strips. (Contrast the import worker's loud-fail — a
+    // partial title lookup there corrupts the import; here a missing poster is
+    // purely cosmetic, so degrade beats throw.)
+    if (error) console.error("[lists] poster lookup failed:", error.message);
     for (const t of titles ?? []) {
       posterById.set(t.id as string, (t.poster_url as string | null) ?? null);
     }
   }
 
-  const byList = new Map<string, { count: number; posters: string[] }>();
-  for (const it of items ?? []) {
-    const lid = it.list_id as string;
-    const tid = (it.title_id as string | null) ?? null;
-    const e = byList.get(lid) ?? { count: 0, posters: [] };
-    e.count += 1; // count EVERY item (live, non-live, and raw_title-only)
-    const poster = tid ? posterById.get(tid) ?? null : null;
-    if (poster && e.posters.length < 4) e.posters.push(poster);
-    byList.set(lid, e);
-  }
-
   const summaries: PublicListSummary[] = lists.map((l) => {
-    const e = byList.get(l.id as string) ?? { count: 0, posters: [] };
+    const lid = l.id as string;
+    // First-4-matched posters in position order; null posters (the rare
+    // posterless matched title) drop out, so the strip shows ≤4.
+    const posters = (posterIdsByList.get(lid) ?? [])
+      .map((tid) => posterById.get(tid) ?? null)
+      .filter((p): p is string => Boolean(p));
     return {
-      id: l.id as string,
+      id: lid,
       name: l.name as string,
       kind: l.kind as string,
-      item_count: e.count,
-      posters: e.posters,
+      item_count: countByList.get(lid) ?? 0,
+      posters,
     };
   });
 

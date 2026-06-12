@@ -1,0 +1,39 @@
+// Phase 2D.3 — chunked .in() helper.
+//
+// A single .in(col, ids) over a few hundred uuids builds a multi-KB
+// `col=in.(uuid,uuid,…)` query string that exceeds the PostgREST / API-gateway
+// URL-length cap and fails the whole request (the "2B trap" — hit at the import
+// fuzzy lookup and again at the list poster strips). Where a caller genuinely
+// needs EVERY referenced row (a full list, a full diary, the whole active-edit
+// set) it can't semantically bound the id set, so it must chunk: ≤100 ids per
+// call (the 2B.1 import-worker precedent).
+//
+// Callback-shaped so each caller keeps its own filters / order / select. The
+// caller maps over each chunk's rows itself. Per-chunk errors are logged and
+// that chunk degrades to empty — this is for read/display paths where a missing
+// batch is cosmetic, NOT for writers that must loud-fail.
+
+const CHUNK = 100;
+
+export async function chunkedIn<T = Record<string, unknown>>(
+  ids: string[],
+  label: string,
+  run: (
+    chunk: string[],
+  ) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const { data, error } = await run(chunk);
+    if (error) {
+      console.error(
+        `[chunked-in] ${label} chunk ${Math.floor(i / CHUNK)} (${chunk.length} ids) failed:`,
+        error.message,
+      );
+      continue;
+    }
+    if (data) out.push(...data);
+  }
+  return out;
+}

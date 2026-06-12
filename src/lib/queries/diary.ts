@@ -8,6 +8,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { chunkedIn } from "@/lib/queries/chunked-in";
 
 export type DiaryEntry = {
   id: string;
@@ -66,11 +67,16 @@ async function mapRows(
     // (title_slug) stays live-only (is_public AND deleted_at IS NULL), so a
     // non-live matched title shows as name + poster with no /t link. A
     // title_id-NULL row still falls back to raw_title (+ raw_year) text.
-    const { data: titles } = await supabase
-      .from("titles")
-      .select("id, slug, title, poster_url, year, is_public, deleted_at")
-      .in("id", titleIds);
-    for (const t of titles ?? []) {
+    // 2D.3: chunked (≤100 ids/call) — getMyDiaryEntries has no row limit, so a
+    // power user's diary can reference hundreds of distinct titles; one .in()
+    // over all of them would trip the URL-length cap (the 2B trap).
+    const titles = await chunkedIn(titleIds, "diary.mapRows", (chunk) =>
+      supabase
+        .from("titles")
+        .select("id, slug, title, poster_url, year, is_public, deleted_at")
+        .in("id", chunk),
+    );
+    for (const t of titles) {
       titleById.set(t.id as string, {
         slug: t.slug as string,
         title: t.title as string,

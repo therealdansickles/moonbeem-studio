@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { PUBLICLY_READABLE_FAN_EDIT_STATUSES } from "@/lib/fan-edits/status";
+import { chunkedIn } from "@/lib/queries/chunked-in";
 
 export type CastMember = {
   name: string;
@@ -1050,12 +1051,23 @@ async function fetchAlgorithmicTrending(
     .filter((id) => !pinnedIds.has(id));
   if (activeIds.length === 0) return [];
 
-  // 2. All snapshots for the candidate set, oldest first.
-  const { data: allSnaps } = await supabase
-    .from("view_tracking_snapshots")
-    .select("fan_edit_id, view_count, captured_at")
-    .in("fan_edit_id", activeIds)
-    .order("captured_at", { ascending: true });
+  // 2. All snapshots for the candidate set, oldest first. 2D.3: chunked
+  //    (≤100 ids/call) — activeIds is every active fan_edit and grows with the
+  //    catalog; one .in() over all of them trips the URL-length cap (the 2B
+  //    trap, and the error was unchecked so trending silently blanked). Each
+  //    fan_edit's snapshots arrive within ONE chunk, ascending, so the per-fe
+  //    latest/old maps below are unaffected by cross-chunk concatenation.
+  const allSnaps = await chunkedIn<{
+    fan_edit_id: string;
+    view_count: number | null;
+    captured_at: string;
+  }>(activeIds, "trending.snapshots", (chunk) =>
+    supabase
+      .from("view_tracking_snapshots")
+      .select("fan_edit_id, view_count, captured_at")
+      .in("fan_edit_id", chunk)
+      .order("captured_at", { ascending: true }),
+  );
 
   const cutoff24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const latestByFe = new Map<string, { view_count: number; captured_at: string }>();
