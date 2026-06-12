@@ -157,17 +157,28 @@ async function loadTitles(
   if (rows.length === 0) return [];
 
   const ids = rows.map((t) => t.id);
-  // Soft-deleted fan_edits excluded from the rollup.
-  const { data: edits, error: editsErr } = await supabase
-    .from("fan_edits")
-    .select("title_id, view_count")
-    .in("title_id", ids)
-    .is("deleted_at", null);
-  if (editsErr) {
-    throw new Error(`loadTitles fan_edits agg failed: ${editsErr.message}`);
+  // Soft-deleted fan_edits excluded from the rollup. 2D.3.1: chunked
+  // (≤100 ids/call) so the title_id=in.(…) URL stays under the gateway cap as a
+  // partner's attached-title count grows. Error behavior UNCHANGED — any chunk
+  // error still throws loudly (an admin rollup must not silently undercount).
+  const edits: { title_id: string; view_count: number | null }[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data, error: editsErr } = await supabase
+      .from("fan_edits")
+      .select("title_id, view_count")
+      .in("title_id", ids.slice(i, i + 100))
+      .is("deleted_at", null);
+    if (editsErr) {
+      throw new Error(`loadTitles fan_edits agg failed: ${editsErr.message}`);
+    }
+    if (data) {
+      edits.push(
+        ...(data as { title_id: string; view_count: number | null }[]),
+      );
+    }
   }
   const editCount = new Map<string, { c: number; v: number }>();
-  for (const e of edits ?? []) {
+  for (const e of edits) {
     const tid = e.title_id as string;
     const acc = editCount.get(tid) ?? { c: 0, v: 0 };
     acc.c += 1;

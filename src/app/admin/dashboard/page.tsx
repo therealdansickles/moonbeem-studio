@@ -258,11 +258,20 @@ export default async function AdminDashboardPage(props: PageProps) {
     (id) => !handleByCreatorId.has(id) && creatorAggMap.get(id)?.handle === "anon",
   );
   if (missingHandleIds.length > 0) {
-    const { data: more } = await supabase
-      .from("public_creators")
-      .select("id, moonbeem_handle")
-      .in("id", missingHandleIds);
-    for (const c of more ?? []) {
+    // 2D.3.1: chunked (≤100 ids/call) so the id=in.(…) URL stays under the
+    // gateway cap as the active-creator set grows. Error behavior UNCHANGED — a
+    // failed lookup still silently leaves handles as "anon" (display-only).
+    const more: { id: string; moonbeem_handle: string | null }[] = [];
+    for (let i = 0; i < missingHandleIds.length; i += 100) {
+      const { data } = await supabase
+        .from("public_creators")
+        .select("id, moonbeem_handle")
+        .in("id", missingHandleIds.slice(i, i + 100));
+      if (data) {
+        more.push(...(data as { id: string; moonbeem_handle: string | null }[]));
+      }
+    }
+    for (const c of more) {
       const cid = c.id as string;
       const agg = creatorAggMap.get(cid);
       if (agg) agg.handle = (c.moonbeem_handle as string) ?? agg.handle;

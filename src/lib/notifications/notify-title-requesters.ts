@@ -102,36 +102,42 @@ export async function notifyTitleRequesters(
   }
   if (userIds.length === 0) return result;
 
-  // Batch metadata lookups for filter decisions.
-  const [usersRes, prefsRes, priorLogsRes] = await Promise.all([
-    supabase.from("users").select("id, email").in("id", userIds),
-    supabase
-      .from("notification_preferences")
-      .select("user_id, email_on_title_updates")
-      .in("user_id", userIds),
-    supabase
-      .from("notification_log")
-      .select("user_id, content_ids")
-      .eq("title_id", titleId)
-      .in("user_id", userIds)
-      .overlaps("content_ids", contentIds),
-  ]);
-
-  const emailByUser = new Map<string, string | null>(
-    (usersRes.data ?? []).map((u) => [
-      u.id as string,
-      (u.email as string | null) ?? null,
-    ]),
-  );
-  const prefByUser = new Map<string, { enabled: boolean }>(
-    (prefsRes.data ?? []).map((p) => [
-      p.user_id as string,
-      { enabled: p.email_on_title_updates as boolean },
-    ]),
-  );
-  const alreadyNotified = new Set(
-    (priorLogsRes.data ?? []).map((r) => r.user_id as string),
-  );
+  // Batch metadata lookups for filter decisions. 2D.3.1: chunk-and-merge over
+  // userIds (≤100 ids/call) so the in.(…) URLs stay under the gateway cap when a
+  // popular title has many requesters. Failure shape UNCHANGED — each query is
+  // still read as `data ?? []` (a failed batch silently degrades to no-email /
+  // default-pref / not-already-notified), the three still run in parallel per
+  // chunk, and nothing throws.
+  const emailByUser = new Map<string, string | null>();
+  const prefByUser = new Map<string, { enabled: boolean }>();
+  const alreadyNotified = new Set<string>();
+  for (let i = 0; i < userIds.length; i += 100) {
+    const chunk = userIds.slice(i, i + 100);
+    const [usersRes, prefsRes, priorLogsRes] = await Promise.all([
+      supabase.from("users").select("id, email").in("id", chunk),
+      supabase
+        .from("notification_preferences")
+        .select("user_id, email_on_title_updates")
+        .in("user_id", chunk),
+      supabase
+        .from("notification_log")
+        .select("user_id, content_ids")
+        .eq("title_id", titleId)
+        .in("user_id", chunk)
+        .overlaps("content_ids", contentIds),
+    ]);
+    for (const u of usersRes.data ?? []) {
+      emailByUser.set(u.id as string, (u.email as string | null) ?? null);
+    }
+    for (const p of prefsRes.data ?? []) {
+      prefByUser.set(p.user_id as string, {
+        enabled: p.email_on_title_updates as boolean,
+      });
+    }
+    for (const r of priorLogsRes.data ?? []) {
+      alreadyNotified.add(r.user_id as string);
+    }
+  }
 
   // Insert default prefs for users that don't have a row yet. The
   // schema default is email_on_title_updates=true, so missing-prefs
