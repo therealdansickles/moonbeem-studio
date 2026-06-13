@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { PUBLICLY_READABLE_FAN_EDIT_STATUSES } from "@/lib/fan-edits/status";
 import { chunkedIn } from "@/lib/queries/chunked-in";
+import { ACTIVE_CAMPAIGN_STATUSES } from "@/lib/campaigns/status";
 
 export type CastMember = {
   name: string;
@@ -652,7 +653,7 @@ export async function getTitlesWithActiveCampaigns(): Promise<EarnableTitle[]> {
     .select(
       "title_id, campaigns!inner(status, cpm_rate_cents), titles!inner(id, slug, title, poster_url, is_public, is_active)",
     )
-    .in("campaigns.status", ["funded", "live"])
+    .in("campaigns.status", [...ACTIVE_CAMPAIGN_STATUSES])
     .eq("titles.is_public", true)
     .eq("titles.is_active", true);
   if (error || !data) return [];
@@ -717,7 +718,7 @@ export async function isTitleInActiveCampaign(
     .from("campaign_titles")
     .select("campaign_id, campaigns!inner(status)")
     .eq("title_id", titleId)
-    .in("campaigns.status", ["funded", "live"])
+    .in("campaigns.status", [...ACTIVE_CAMPAIGN_STATUSES])
     .limit(1);
   if (error || !data) return false;
   return data.length > 0;

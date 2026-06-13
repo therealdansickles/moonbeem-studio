@@ -426,9 +426,13 @@ export default async function TitlePage({ params }: PageProps) {
                 anon and signed-in viewers; gating is purely on
                 title, not auth. */}
             {hasActiveCampaign ? (
-              <div className="inline-flex items-center gap-2 rounded-full bg-moonbeem-pink/15 px-3 py-1 text-body-sm font-medium text-moonbeem-pink">
+              <Link
+                href={`/t/${title.slug}/campaign`}
+                aria-label="View campaign details and submit your edit"
+                className="inline-flex items-center gap-2 rounded-full bg-moonbeem-pink/15 px-3 py-1 text-body-sm font-medium text-moonbeem-pink transition-colors hover:bg-moonbeem-pink/25"
+              >
                 Active Campaign · Earn from your Edit
-              </div>
+              </Link>
             ) : null}
           </div>
 

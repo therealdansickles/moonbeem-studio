@@ -20,6 +20,13 @@ export const CAMPAIGN_STATUSES = [
 
 export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
 
+// The statuses that make a campaign "active" for a title: funded
+// (escrowed, awaiting first metered run) or live (paying). Single source
+// of truth — consumed by isTitleInActiveCampaign (the title-page pill) and
+// getCampaignForTitlePage (the campaign page) so the active set cannot
+// drift across surfaces.
+export const ACTIVE_CAMPAIGN_STATUSES = ["funded", "live"] as const;
+
 export type CampaignStatusCopy = {
   label: string;
   description: string;
