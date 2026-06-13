@@ -14,6 +14,11 @@ import type { DiaryEntry } from "@/lib/queries/diary";
 import ListCard from "@/components/lists/ListCard";
 import type { PublicListSummary } from "@/lib/queries/lists";
 
+// CF-4: how many fan-edit cards show before the "View all" expansion. The
+// array reaching here is already capped at 24 by getFanEditsForCreator —
+// this is a display-layer preview cap on top of that.
+const FAN_EDITS_PREVIEW_COUNT = 6;
+
 type Props = {
   profile: Profile | null;
   handle: string;
@@ -191,11 +196,32 @@ export default function ProfileView({
               <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-pink uppercase m-0">
                 Fan edits
               </h2>
+              {/* CF-4: preview the first FAN_EDITS_PREVIEW_COUNT, then reveal
+                  the rest via a server-pure <details>/<summary> (no client
+                  island — the shared server card ProfileFanEditCard is never
+                  wrapped). eager stays first-4-only; revealed cards are lazy. */}
               <div className="grid grid-cols-2 items-start gap-3 sm:grid-cols-3 md:gap-4 lg:grid-cols-4">
-                {fanEdits.map((fe, i) => (
+                {fanEdits.slice(0, FAN_EDITS_PREVIEW_COUNT).map((fe, i) => (
                   <ProfileFanEditCard key={fe.id} fanEdit={fe} eager={i < 4} />
                 ))}
               </div>
+              {fanEdits.length > FAN_EDITS_PREVIEW_COUNT && (
+                <details className="group">
+                  <summary className="inline-flex w-fit cursor-pointer list-none text-caption text-moonbeem-ink-subtle transition-colors hover:text-moonbeem-pink">
+                    <span className="group-open:hidden">
+                      View all {fanEdits.length} edits →
+                    </span>
+                    <span className="hidden group-open:inline">
+                      Show fewer ↑
+                    </span>
+                  </summary>
+                  <div className="mt-4 grid grid-cols-2 items-start gap-3 sm:grid-cols-3 md:gap-4 lg:grid-cols-4">
+                    {fanEdits.slice(FAN_EDITS_PREVIEW_COUNT).map((fe) => (
+                      <ProfileFanEditCard key={fe.id} fanEdit={fe} eager={false} />
+                    ))}
+                  </div>
+                </details>
+              )}
             </section>
           )}
 
