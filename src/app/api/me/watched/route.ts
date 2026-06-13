@@ -1,16 +1,11 @@
-// Native title rating write — Phase 1A. Mirrors the shape of
-// /api/me/fan-edits/single but for the title_ratings surface:
+// Native "watched" mark — Phase 2E.2. Mirrors /api/me/ratings verbatim:
 //   - auth: getCurrentProfile (JSON 401, not a redirect)
-//   - rate limit: userWrites (30/min/user)
-//   - capability: rate_title (min tier signed_in)
-//   - creator resolve: the service-role idiom (creators has no anon SELECT);
-//     creatorless users get 400 no_creator (they must claim a handle first)
-//   - native writes always source='native', visibility='public'
-//
-// The title_ratings upsert + half-step validator live in @/lib/ratings/upsert
-// (shared with /api/me/diary); the partial unique (creator_id, title_id)
-// can't bind PostgREST onConflict, so the helper does select-then-update-else-
-// insert with a 23505 race fallback.
+//   - rate limit: userWrites
+//   - capability: mark_watched (min tier signed_in, modeled on rate_title)
+//   - creator resolve: the service-role idiom; creatorless → 400 no_creator
+//   - visible-title gate (loadVisibleTitleById) on POST → 404 unknown_title
+//   - markWatched / unmarkWatched helpers (insert-only / delete-idempotent)
+// POST marks (watched:true), DELETE unmarks (watched:false).
 
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentProfile } from "@/lib/dal";
@@ -18,9 +13,8 @@ import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getUserTier } from "@/lib/gating/get-user-tier";
 import { canPerform } from "@/lib/gating/can-perform";
-import { isHalfStepRating, upsertTitleRating } from "@/lib/ratings/upsert";
 import { loadVisibleTitleById } from "@/lib/title-access";
-import { markWatched } from "@/lib/watched/mark";
+import { markWatched, unmarkWatched } from "@/lib/watched/mark";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -44,76 +38,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "auth_required" }, { status: 401 });
   }
 
-  const rl = await enforce("userWrites", userId, "me/ratings");
+  const rl = await enforce("userWrites", userId, "me/watched");
   if (!rl.ok) return rl.response;
 
   const tier = await getUserTier(userId);
-  const gate = canPerform(tier, "rate_title", 0, isSuperAdmin);
-  if (!gate.allowed) {
-    return NextResponse.json({ error: gate.reason }, { status: 403 });
-  }
-
-  let body: { title_id?: string; rating?: number };
-  try {
-    body = (await request.json()) as { title_id?: string; rating?: number };
-  } catch {
-    return NextResponse.json({ error: "invalid json" }, { status: 400 });
-  }
-
-  const titleId = (body.title_id ?? "").trim();
-  if (!UUID_RE.test(titleId)) {
-    return NextResponse.json({ error: "invalid title_id" }, { status: 400 });
-  }
-  if (!isHalfStepRating(body.rating)) {
-    return NextResponse.json(
-      { error: "invalid rating (0.5–5.0, half-steps)" },
-      { status: 400 },
-    );
-  }
-  const rating = body.rating as number;
-
-  const creatorId = await resolveCreatorId(userId);
-  if (!creatorId) {
-    return NextResponse.json(
-      { error: "no_creator — claim a Moonbeem handle first" },
-      { status: 400 },
-    );
-  }
-
-  const sb = createServiceRoleClient();
-
-  // Existence + visibility — same gate as /api/me/diary: reject a title the
-  // caller can't view (and soft-deleted titles). 404 unknown_title.
-  const title = await loadVisibleTitleById(sb, titleId);
-  if (!title) {
-    return NextResponse.json({ error: "unknown_title" }, { status: 404 });
-  }
-
-  const result = await upsertTitleRating({ creatorId, titleId, rating });
-  if (result) {
-    return NextResponse.json({ error: result.error }, { status: 500 });
-  }
-  // 2E.2: rating a title auto-marks it watched (insert-only). The rating has
-  // already persisted, so a mark failure must NOT fail the request — log and
-  // continue. (DELETE is untouched: removing a rating does NOT unmark.)
-  const mark = await markWatched(creatorId, titleId);
-  if (mark) console.error("[ratings] auto-mark-watched failed:", mark.error);
-  return NextResponse.json({ ok: true, rating });
-}
-
-export async function DELETE(request: NextRequest) {
-  const profile = await getCurrentProfile();
-  const userId = profile?.userId ?? null;
-  const isSuperAdmin = profile?.role === "super_admin";
-  if (!userId) {
-    return NextResponse.json({ error: "auth_required" }, { status: 401 });
-  }
-
-  const rl = await enforce("userWrites", userId, "me/ratings");
-  if (!rl.ok) return rl.response;
-
-  const tier = await getUserTier(userId);
-  const gate = canPerform(tier, "rate_title", 0, isSuperAdmin);
+  const gate = canPerform(tier, "mark_watched", 0, isSuperAdmin);
   if (!gate.allowed) {
     return NextResponse.json({ error: gate.reason }, { status: 403 });
   }
@@ -139,20 +68,62 @@ export async function DELETE(request: NextRequest) {
   }
 
   const sb = createServiceRoleClient();
-  // No source/visibility guard here on purpose: the only UI path to DELETE is
-  // the "Clear" control, which renders solely when a rating is DISPLAYED — and
-  // getMyRatingForTitle now hides unattested imports (source='letterboxd' AND
-  // visibility='private'), so Clear is never offered for one. A deliberate
-  // DELETE of an imported-then-attested row is the user's own native rating,
-  // which is the correct thing to remove.
-  const { error } = await sb
-    .from("title_ratings")
-    .delete()
-    .eq("creator_id", creatorId)
-    .eq("title_id", titleId);
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  // Existence + visibility — same gate as /api/me/ratings: reject a title the
+  // caller can't view (and soft-deleted titles). 404 unknown_title.
+  const title = await loadVisibleTitleById(sb, titleId);
+  if (!title) {
+    return NextResponse.json({ error: "unknown_title" }, { status: 404 });
   }
-  // Idempotent: 200 even if nothing was deleted.
-  return NextResponse.json({ ok: true });
+
+  const result = await markWatched(creatorId, titleId);
+  if (result) {
+    return NextResponse.json({ error: result.error }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true, watched: true });
+}
+
+export async function DELETE(request: NextRequest) {
+  const profile = await getCurrentProfile();
+  const userId = profile?.userId ?? null;
+  const isSuperAdmin = profile?.role === "super_admin";
+  if (!userId) {
+    return NextResponse.json({ error: "auth_required" }, { status: 401 });
+  }
+
+  const rl = await enforce("userWrites", userId, "me/watched");
+  if (!rl.ok) return rl.response;
+
+  const tier = await getUserTier(userId);
+  const gate = canPerform(tier, "mark_watched", 0, isSuperAdmin);
+  if (!gate.allowed) {
+    return NextResponse.json({ error: gate.reason }, { status: 403 });
+  }
+
+  let body: { title_id?: string };
+  try {
+    body = (await request.json()) as { title_id?: string };
+  } catch {
+    return NextResponse.json({ error: "invalid json" }, { status: 400 });
+  }
+
+  const titleId = (body.title_id ?? "").trim();
+  if (!UUID_RE.test(titleId)) {
+    return NextResponse.json({ error: "invalid title_id" }, { status: 400 });
+  }
+
+  const creatorId = await resolveCreatorId(userId);
+  if (!creatorId) {
+    return NextResponse.json(
+      { error: "no_creator — claim a Moonbeem handle first" },
+      { status: 400 },
+    );
+  }
+
+  // Explicit unmark deletes by (creator_id, title_id) regardless of source — an
+  // imported row is removed too. Idempotent: 200 even if nothing was deleted.
+  const result = await unmarkWatched(creatorId, titleId);
+  if (result) {
+    return NextResponse.json({ error: result.error }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true, watched: false });
 }

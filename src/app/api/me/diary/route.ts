@@ -16,6 +16,7 @@ import { getUserTier } from "@/lib/gating/get-user-tier";
 import { canPerform } from "@/lib/gating/can-perform";
 import { isHalfStepRating, upsertTitleRating } from "@/lib/ratings/upsert";
 import { loadVisibleTitleById } from "@/lib/title-access";
+import { markWatched } from "@/lib/watched/mark";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -155,6 +156,12 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  // 2E.2: logging a diary entry auto-marks the film watched (insert-only). The
+  // entry has already persisted, so a mark failure must NOT fail the request —
+  // log and continue. (DELETE is untouched: removing a diary entry does NOT unmark.)
+  const mark = await markWatched(creatorId, titleId);
+  if (mark) console.error("[diary] auto-mark-watched failed:", mark.error);
 
   return NextResponse.json({ ok: true, id: inserted?.id ?? null });
 }

@@ -66,6 +66,14 @@ export const gateMap: Record<Capability, Record<Tier, GateConfig>> = {
     signed_in: { allowed: true },
     verified: { allowed: true },
   },
+  // Phase 2E.2 — native "watched" mark (title-page toggle + rating/diary
+  // auto-mark). Same posture as rate_title: signed-in (any creator) may mark;
+  // anonymous is denied (auth_required).
+  mark_watched: {
+    anonymous: { allowed: false },
+    signed_in: { allowed: true },
+    verified: { allowed: true },
+  },
   download_clip: {
     anonymous: { allowed: false },
     signed_in: { allowed: true, limit: { type: "lifetime", count: 3 } },

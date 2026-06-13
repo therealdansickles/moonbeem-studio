@@ -26,6 +26,7 @@ import TitlePosterShared from "@/components/TitlePosterShared";
 import TitleRatingControl from "@/components/TitleRatingControl";
 import LogControl from "@/components/diary/LogControl";
 import WatchlistToggle from "@/components/lists/WatchlistToggle";
+import WatchedToggle from "@/components/watched/WatchedToggle";
 import AddToListControl from "@/components/lists/AddToListControl";
 import ReviewCard from "@/components/reviews/ReviewCard";
 import { StarRatingDisplay } from "@/components/StarRating";
@@ -35,6 +36,7 @@ import { getCurrentProfile } from "@/lib/dal";
 import { getMyRatingForTitle } from "@/lib/queries/ratings";
 import { getPublicReviewsForTitle } from "@/lib/queries/reviews";
 import { getMyWatchlistStateForTitle } from "@/lib/queries/lists";
+import { getMyWatchedStateForTitle } from "@/lib/queries/watched";
 import { getUserTier } from "@/lib/gating/get-user-tier";
 import { getUsageCount } from "@/lib/gating/usage-counts";
 import { Suspense } from "react";
@@ -162,6 +164,7 @@ export default async function TitlePage({ params }: PageProps) {
     myRating,
     reviews,
     watchlistOn,
+    watchedOn,
   ] = await Promise.all([
     getActiveOffersForTitle(title.id),
     getActiveFanEditsForTitle(title.id),
@@ -172,6 +175,7 @@ export default async function TitlePage({ params }: PageProps) {
     getMyRatingForTitle(title.id),
     getPublicReviewsForTitle(title.id),
     getMyWatchlistStateForTitle(title.id),
+    getMyWatchedStateForTitle(title.id),
   ]);
 
   // Event-only: fetch the title's partner (the league) for the header
@@ -371,6 +375,13 @@ export default async function TitlePage({ params }: PageProps) {
               <LogControl
                 titleId={title.id}
                 titleName={title.title}
+                authState={ratingAuthState}
+                returnTo={`/t/${title.slug}`}
+              />
+              <WatchedToggle
+                key={`watched-${watchedOn}`}
+                titleId={title.id}
+                initialOn={watchedOn}
                 authState={ratingAuthState}
                 returnTo={`/t/${title.slug}`}
               />

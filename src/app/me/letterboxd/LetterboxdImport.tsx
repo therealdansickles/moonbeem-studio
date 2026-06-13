@@ -711,8 +711,9 @@ function AppliedView({
           Imported
         </h2>
         <p className="text-body-sm text-moonbeem-ink-muted m-0">
-          Everything imported as private. Nothing shows on your profile until you
-          publish — that&apos;s the next step.
+          Your ratings, diary, watched films, and lists imported as private.
+          Nothing shows on your profile until you publish — that&apos;s the next
+          step.
         </p>
       </div>
 
@@ -794,8 +795,8 @@ function PublishConfirmModal({
           Publish to your profile?
         </h3>
         <p className="mt-4 text-body-sm text-moonbeem-ink-muted">
-          Your ratings, diary, and lists go live on your profile. Films not yet
-          in our catalog stay as text and link up as it grows.
+          Your ratings, diary, watched films, and lists go live on your profile.
+          Films not yet in our catalog stay as text and link up as it grows.
         </p>
         <div className="mt-5 flex items-center justify-end gap-3">
           <button
@@ -843,8 +844,8 @@ function PublishedView({
           Published
         </h2>
         <p className="text-body-sm text-moonbeem-ink-muted m-0">
-          Your ratings, diary, and lists are live on your profile. Films not yet
-          in our catalog show as text and link up as it grows.
+          Your ratings, diary, watched films, and lists are live on your profile.
+          Films not yet in our catalog show as text and link up as it grows.
         </p>
       </div>
 
