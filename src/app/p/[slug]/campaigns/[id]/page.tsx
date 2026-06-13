@@ -85,6 +85,7 @@ type CampaignRow = {
   id: string;
   partner_id: string;
   name: string;
+  brief: string | null;
   status: string;
   cpm_rate_cents: number;
   budget_pool_cents: number;
@@ -186,7 +187,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
   const campaignRes = await supabase
     .from("campaigns")
     .select(
-      "id, partner_id, name, status, cpm_rate_cents, budget_pool_cents, " +
+      "id, partner_id, name, brief, status, cpm_rate_cents, budget_pool_cents, " +
         "settling_days, moonbeem_fee_pct, starts_at, ends_at, " +
         "funded_at, launched_at, completed_at, created_at",
     )
@@ -536,6 +537,22 @@ export default async function CampaignDetailPage({ params }: PageProps) {
                 : undefined
             }
           />
+        </section>
+
+        {/* Section d2 — creator brief (read-only; set at creation, CF-2) */}
+        <section className="mt-8 rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+          <p className="text-caption uppercase tracking-wide text-moonbeem-ink-muted m-0">
+            Creator brief
+          </p>
+          {campaign.brief ? (
+            <p className="mt-2 text-body-sm text-moonbeem-ink whitespace-pre-line m-0">
+              {campaign.brief}
+            </p>
+          ) : (
+            <p className="mt-2 text-body-sm text-moonbeem-ink-subtle m-0">
+              No brief
+            </p>
+          )}
         </section>
 
         {/* Section e — metering runs */}

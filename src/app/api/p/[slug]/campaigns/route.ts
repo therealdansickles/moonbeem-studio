@@ -154,6 +154,21 @@ export async function POST(
     return NextResponse.json({ error: "invalid_dates" }, { status: 400 });
   }
 
+  // brief — optional free text shown on the public campaign page (CF-2).
+  // Display-only: no money path reads it. Trim; empty → null; cap 2000
+  // (mirrors the campaigns.brief CHECK). Non-string → 400.
+  let brief: string | null = null;
+  if (b.brief !== undefined && b.brief !== null) {
+    if (typeof b.brief !== "string") {
+      return NextResponse.json({ error: "invalid_brief" }, { status: 400 });
+    }
+    const trimmedBrief = b.brief.trim();
+    if (trimmedBrief.length > 2000) {
+      return NextResponse.json({ error: "brief_too_long" }, { status: 400 });
+    }
+    brief = trimmedBrief.length > 0 ? trimmedBrief : null;
+  }
+
   // Per-title ownership check — every id must point at a titles row
   // owned by THIS partner with deleted_at IS NULL. One batched query
   // confirms the whole set; a count mismatch means at least one id
@@ -182,6 +197,7 @@ export async function POST(
     .insert({
       partner_id: partner.id,
       name,
+      brief,
       cpm_rate_cents: cpm,
       budget_pool_cents: budget,
       starts_at: startsAtIso,

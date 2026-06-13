@@ -118,6 +118,7 @@ export default function CampaignWizard({
   const [budgetInput, setBudgetInput] = useState("");
   const [startsAt, setStartsAt] = useState("");
   const [endsAt, setEndsAt] = useState("");
+  const [brief, setBrief] = useState("");
 
   // Mode sentinel: "edit" shows the form, "review" shows the summary
   // + submit. Single-direction progression with a "Back to edit" door
@@ -140,6 +141,9 @@ export default function CampaignWizard({
 
   // Derived state for validation gates.
   const trimmedName = name.trim();
+  // Creator brief — optional free text shown on the public campaign page
+  // (CF-2). Trimmed; empty → null in the payload. Not a validation gate.
+  const trimmedBrief = brief.trim();
   const nameOk = trimmedName.length > 0 && trimmedName.length <= 200;
   const cpmCents = parseDollars(cpmInput);
   const cpmOk = cpmCents !== null && cpmCents >= 1;
@@ -191,6 +195,7 @@ export default function CampaignWizard({
           budget_pool_cents: budgetCents,
           starts_at: startsAt || undefined,
           ends_at: endsAt || undefined,
+          brief: trimmedBrief.length > 0 ? trimmedBrief : null,
         }),
       });
       const json = (await res.json().catch(() => ({}))) as {
@@ -342,6 +347,28 @@ export default function CampaignWizard({
                   );
                 })}
               </div>
+            </section>
+
+            {/* STEP 2.5 — creator brief (optional, display-only) */}
+            <section className="mt-6 flex flex-col gap-2">
+              <label className="text-body-sm font-medium text-moonbeem-ink">
+                Creator brief (optional)
+              </label>
+              <p className="text-caption text-moonbeem-ink-subtle">
+                Shown to creators on the public campaign page. Caption
+                requirements, hashtags, what to highlight.
+              </p>
+              <textarea
+                value={brief}
+                onChange={(e) => setBrief(e.target.value)}
+                maxLength={2000}
+                rows={4}
+                placeholder="Include the film's title in your caption. Use the official clips and stills from the title page."
+                className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink placeholder:text-moonbeem-ink-subtle focus:border-moonbeem-pink focus:outline-none"
+              />
+              <span className="self-end text-caption text-moonbeem-ink-subtle tabular-nums">
+                {brief.length} / 2000
+              </span>
             </section>
 
             {/* STEP 3 — CPM rate */}
@@ -501,6 +528,16 @@ export default function CampaignWizard({
                   startsAt || endsAt
                     ? `${startsAt || "open"} → ${endsAt || "open"}`
                     : "Open-ended"
+                }
+              />
+              <Row
+                label="Brief"
+                value={
+                  trimmedBrief ? (
+                    <span className="whitespace-pre-line">{trimmedBrief}</span>
+                  ) : (
+                    <span className="text-moonbeem-ink-subtle">No brief</span>
+                  )
                 }
               />
             </section>
