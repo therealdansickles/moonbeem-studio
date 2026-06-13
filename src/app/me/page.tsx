@@ -11,6 +11,7 @@ import {
   getPendingFanEditsForUser,
   getRejectedFanEditsForUser,
 } from "@/lib/queries/titles";
+import { getWatchedCountForCreator } from "@/lib/queries/watched";
 import { SignOutButton } from "@/components/SignOutButton";
 import PlatformIcon from "@/components/PlatformIcon";
 import ClaimStubButton from "@/components/me/ClaimStubButton";
@@ -190,6 +191,13 @@ export default async function MePage() {
           .select("id", { count: "exact", head: true })
           .eq("creator_id", creator.id)
       ).count ?? 0
+    : 0;
+
+  // Watched count (public) — drives the "Your watched" section. It links to the
+  // public grid (watched has no /me management page; marks happen on title
+  // pages), so the count mirrors what that grid actually shows.
+  const watchedCount = creator
+    ? await getWatchedCountForCreator(creator.id)
     : 0;
 
   // Stub creators with edits that look like they belong to this user
@@ -599,6 +607,36 @@ export default async function MePage() {
                 className="inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
               >
                 View your diary →
+              </Link>
+            )}
+          </div>
+        </section>
+
+        {/* Your watched — public count + link to the public grid. Watched has
+            no /me management page; marks happen on title pages. */}
+        <section>
+          <h2 className="text-body font-medium text-moonbeem-ink-muted m-0">
+            Your watched{watchedCount > 0 ? ` (${watchedCount})` : ""}
+          </h2>
+          <div className="mt-3 border-t border-white/10 pt-3">
+            {watchedCount === 0 ? (
+              <>
+                <p className="text-body-sm text-moonbeem-ink-muted leading-relaxed m-0">
+                  Mark films watched from their pages. They show on your profile.
+                </p>
+                <Link
+                  href={`/c/${handle}/watched`}
+                  className="mt-3 inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
+                >
+                  View your watched →
+                </Link>
+              </>
+            ) : (
+              <Link
+                href={`/c/${handle}/watched`}
+                className="inline-block text-body-sm text-moonbeem-pink hover:opacity-90"
+              >
+                View your watched →
               </Link>
             )}
           </div>

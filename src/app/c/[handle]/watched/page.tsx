@@ -1,30 +1,24 @@
-// Phase 1D — public list detail (read-only). Resolves the handle to a creator,
-// then the public list. A private / not-this-creator's / missing list is an
-// RLS-empty read → 404. Mirrors the profile page's data idioms (anon SSR).
+// Phase 2E.3 — public watched grid (read-only). Mirrors the list-detail page
+// anatomy: resolve the handle to a creator (anon SSR), 404 a missing/stub/
+// unclaimed handle, then render the creator's public watched films as a poster
+// grid identical to list detail. Empty state renders (never 404s). No dates.
 
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getCurrentProfile } from "@/lib/dal";
 import { getProfileByHandle } from "@/lib/queries/profiles";
-import { getPublicListDetail } from "@/lib/queries/lists";
+import { getPublicWatchedForCreator } from "@/lib/queries/watched";
 
-export default async function PublicListPage({
+export default async function PublicWatchedPage({
   params,
 }: {
-  params: Promise<{ handle: string; id: string }>;
+  params: Promise<{ handle: string }>;
 }) {
-  const { handle, id } = await params;
+  const { handle } = await params;
   const profile = await getProfileByHandle(handle);
   if (!profile || profile.is_stub || !profile.user_id) notFound();
 
-  const list = await getPublicListDetail(profile.creator_id, id);
-  if (!list) notFound();
-
-  // Owner doorway: the signed-in viewer who owns this list gets an "Edit list"
-  // link into the /me builder. Read-only for everyone else (idiom mirrors the
-  // profile page: current user's id === the profile's user_id).
-  const currentUser = await getCurrentProfile();
-  const isOwner = currentUser?.userId === profile.user_id;
+  const items = await getPublicWatchedForCreator(profile.creator_id);
+  const n = items.length;
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 py-10">
@@ -35,42 +29,27 @@ export default async function PublicListPage({
         >
           ← {profile.display_name ?? `@${profile.handle}`}
         </Link>
-        <div className="flex items-center gap-3">
-          <h1 className="m-0 font-wordmark text-heading-lg text-moonbeem-ink">
-            {list.name}
-          </h1>
-          {list.kind === "watchlist" && (
-            <span className="rounded-full border border-moonbeem-pink/30 bg-moonbeem-pink/10 px-2 py-0.5 text-caption text-moonbeem-pink">
-              Watchlist
-            </span>
-          )}
-        </div>
-        {list.description && (
-          <p className="m-0 max-w-prose whitespace-pre-line text-body text-moonbeem-ink">
-            {list.description}
-          </p>
-        )}
+        <h1 className="m-0 font-wordmark text-heading-lg text-moonbeem-ink">
+          Watched
+        </h1>
         <p className="m-0 text-body-sm text-moonbeem-ink-subtle">
-          {list.item_count} {list.item_count === 1 ? "film" : "films"} · by @
-          {profile.handle}
+          {n} {n === 1 ? "film" : "films"} · by @{profile.handle}
         </p>
-        {isOwner && (
-          <Link
-            href={`/me/lists/${list.id}`}
-            className="w-fit text-body-sm font-medium text-moonbeem-pink hover:opacity-90"
-          >
-            Edit list →
-          </Link>
-        )}
       </div>
 
-      {list.items.length === 0 ? (
+      {n === 0 ? (
         <p className="text-body-sm text-moonbeem-ink-subtle">
-          This list is empty.
+          No watched films yet.
         </p>
       ) : (
         <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
-          {list.items.map((item) => {
+          {items.map((item) => {
+            // Unmatched (title_id NULL) rows show raw_title (+ raw_year) text;
+            // matched titles show the canonical name only (2D.1 rule).
+            const label =
+              item.title_id === null && item.raw_year
+                ? `${item.title_name} (${item.raw_year})`
+                : item.title_name;
             const poster = item.poster_url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -81,7 +60,7 @@ export default async function PublicListPage({
               />
             ) : (
               <div className="flex h-full w-full items-center justify-center p-2 text-center text-caption text-moonbeem-ink-subtle">
-                {item.title_name}
+                {label}
               </div>
             );
             const inner = (
@@ -90,7 +69,7 @@ export default async function PublicListPage({
                   {poster}
                 </div>
                 <span className="truncate text-caption text-moonbeem-ink-muted group-hover:text-moonbeem-pink">
-                  {item.title_name}
+                  {label}
                 </span>
               </>
             );

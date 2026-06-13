@@ -114,10 +114,13 @@ export default function ProfileView({
               </ul>
             )}
             {watchedCount > 0 && (
-              <p className="m-0 text-caption text-moonbeem-ink-subtle">
+              <Link
+                href={`/c/${profile.handle}/watched`}
+                className="m-0 inline-block w-fit text-caption text-moonbeem-ink-subtle transition-colors hover:text-moonbeem-pink"
+              >
                 {watchedCount.toLocaleString()}{" "}
-                {watchedCount === 1 ? "film" : "films"} watched
-              </p>
+                {watchedCount === 1 ? "film" : "films"} watched →
+              </Link>
             )}
             {profile.links.length > 0 && (
               <div>
