@@ -58,34 +58,61 @@ export default function ProfileView({
   }
 
   const displayName = profile.display_name ?? profile.handle;
+  const hasAnyContent =
+    topTitles.length > 0 ||
+    fanEdits.length > 0 ||
+    diary.length > 0 ||
+    lists.length > 0;
+
+  // CF-4: owner-only controls — isOwner-gated and visually secondary (quiet
+  // outlined chips), grouped at the top-right of the identity block.
+  const ownerControls = isOwner ? (
+    <div className="flex shrink-0 flex-wrap items-center justify-center gap-2 sm:justify-start">
+      <Link
+        href="/me/edit"
+        className="rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
+      >
+        Edit profile
+      </Link>
+      <Link
+        href={`/c/${handle}/upload`}
+        className="rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
+      >
+        Add fan edit
+      </Link>
+    </div>
+  ) : null;
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-10 px-6 py-10">
-      <header className="relative flex flex-col items-center gap-6 sm:flex-row sm:items-start">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-12 px-6 py-10">
+      {/* HEADER (CF-4) — editorial identity block. Avatar left, identity
+          stack right on sm+. Verified socials are elevated directly under the
+          name as the legitimacy signal, ahead of the bio. */}
+      <header className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
         <AvatarCircle
           avatarUrl={profile.avatar_url}
           displayName={profile.display_name}
           handle={profile.handle}
-          size={96}
+          size={112}
           className="shrink-0"
         />
         <div className="min-w-0 flex-1 text-center sm:text-left">
-          <h1 className="font-wordmark text-heading-lg text-moonbeem-ink m-0 break-words">
-            {displayName}
-          </h1>
-          <p className="m-0 mt-0.5 text-body-sm text-moonbeem-ink-subtle">
-            @{profile.handle}
-          </p>
-          {/* Bio + verified socials + other-links: one governed
-              rhythm. mt-4 separates the group from the name/handle
-              pair; space-y-4 keeps the three items on a uniform
-              16px cadence regardless of which are present. */}
-          <div className="mt-4 space-y-4">
-            {profile.bio && (
-              <p className="text-body text-moonbeem-ink whitespace-pre-line line-clamp-3">
-                {profile.bio}
+          {/* Name / handle + secondary owner controls */}
+          <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <h1 className="font-wordmark text-display-sm text-moonbeem-ink m-0 break-words">
+                {displayName}
+              </h1>
+              <p className="m-0 mt-1 text-body text-moonbeem-ink-subtle">
+                @{profile.handle}
               </p>
-            )}
+            </div>
+            {ownerControls}
+          </div>
+
+          {/* Verified socials (elevated) → bio → watched → other links, on a
+              uniform 16px cadence regardless of which are present. */}
+          <div className="mt-5 space-y-4">
             {profile.verified_socials.length > 0 && (
               <ul className="flex flex-wrap justify-center gap-2 sm:justify-start">
                 {profile.verified_socials.map((s) => (
@@ -94,7 +121,7 @@ export default function ProfileView({
                       href={buildSocialProfileUrl(s.platform, s.handle)}
                       target="_blank"
                       rel="noopener noreferrer nofollow"
-                      className="group inline-flex items-center gap-2 rounded-full border border-moonbeem-pink/30 bg-moonbeem-pink/10 px-3 py-1 text-body-sm text-moonbeem-ink transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
+                      className="group inline-flex items-center gap-2 rounded-full border border-moonbeem-pink/30 bg-moonbeem-pink/10 px-3 py-1.5 text-body-sm text-moonbeem-ink transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
                       title={`Verified on ${PLATFORM_LABEL[s.platform]}`}
                     >
                       <PlatformIcon
@@ -102,16 +129,18 @@ export default function ProfileView({
                         className="h-4 w-4 text-moonbeem-pink"
                       />
                       <span>@{s.handle}</span>
-                      <span
-                        aria-label="Verified"
-                        className="text-emerald-300"
-                      >
+                      <span aria-label="Verified" className="text-emerald-300">
                         ✓
                       </span>
                     </a>
                   </li>
                 ))}
               </ul>
+            )}
+            {profile.bio && (
+              <p className="max-w-2xl text-body text-moonbeem-ink whitespace-pre-line line-clamp-3">
+                {profile.bio}
+              </p>
             )}
             {watchedCount > 0 && (
               <Link
@@ -123,115 +152,95 @@ export default function ProfileView({
               </Link>
             )}
             {profile.links.length > 0 && (
-              <div>
-                <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-ink-subtle uppercase m-0">
-                  Other links
-                </h2>
-                <ul className="mt-2 flex flex-wrap justify-center gap-2 sm:justify-start">
-                  {profile.links.map((link, i) => (
-                    <li key={i}>
-                      <a
-                        href={link.url}
-                        target="_blank"
-                        rel="noopener noreferrer nofollow"
-                        className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-body-sm text-moonbeem-ink transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
-                      >
-                        {link.label} <span aria-hidden>→</span>
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              <ul className="flex flex-wrap justify-center gap-2 sm:justify-start">
+                {profile.links.map((link, i) => (
+                  <li key={i}>
+                    <a
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer nofollow"
+                      className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-body-sm text-moonbeem-ink transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
+                    >
+                      {link.label} <span aria-hidden>→</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         </div>
-        {isOwner && (
-          <Link
-            href="/me/edit"
-            className="self-start rounded-md border border-white/15 bg-white/5 px-4 py-2 text-body-sm text-moonbeem-ink transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
-          >
-            Edit profile
-          </Link>
-        )}
       </header>
 
-      {/* Block 3.1: owner-only Add-fan-edit button. Sits above the
-          Top 12 so it's in the natural reading flow from header →
-          first action. Matches the Edit profile button's visual
-          register — same rounded outlined treatment, no pink fill. */}
-      {isOwner && (
-        <div className="flex justify-center sm:justify-start">
-          <Link
-            href={`/c/${handle}/upload`}
-            className="rounded-md border border-white/15 bg-white/5 px-4 py-2 text-body-sm text-moonbeem-ink transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
-          >
-            Add fan edit
-          </Link>
+      {hasAnyContent ? (
+        <>
+          {/* TOP 12 (CF-4) — the visual hero. Rendered only when the creator
+              has picks; partial fills keep Top12Grid's dashed empty slots. */}
+          {topTitles.length > 0 && (
+            <section className="flex flex-col gap-5">
+              <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-pink uppercase m-0">
+                Top 12
+              </h2>
+              <Top12Grid topTitles={topTitles} isOwner={false} />
+            </section>
+          )}
+
+          {/* FAN EDITS (CF-4) — their Moonbeem-native work, moved UP to sit
+              directly under the Top 12 (was previously the last section). */}
+          {fanEdits.length > 0 && (
+            <section className="flex flex-col gap-5">
+              <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-pink uppercase m-0">
+                Fan edits
+              </h2>
+              <div className="grid grid-cols-2 items-start gap-3 sm:grid-cols-3 md:gap-4 lg:grid-cols-4">
+                {fanEdits.map((fe, i) => (
+                  <ProfileFanEditCard key={fe.id} fanEdit={fe} eager={i < 4} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* TASTE CLUSTER (CF-4) — diary + lists, a quieter grouped band
+              below the work (side-by-side on lg). Subtle (ink-subtle)
+              sub-headers so they read as depth, not headline. DiaryRow and
+              ListCard usage is unchanged — only the grouping/layout differs. */}
+          {(diary.length > 0 || lists.length > 0) && (
+            <section className="grid gap-8 lg:grid-cols-2">
+              {diary.length > 0 && (
+                <div className="flex flex-col gap-4">
+                  <h3 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-ink-subtle uppercase m-0">
+                    Diary
+                  </h3>
+                  <div className="flex flex-col gap-3">
+                    {diary.map((e) => (
+                      <DiaryRow key={e.id} entry={e} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {lists.length > 0 && (
+                <div className="flex flex-col gap-4">
+                  <h3 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-ink-subtle uppercase m-0">
+                    Lists
+                  </h3>
+                  <div className="flex flex-col gap-3">
+                    {lists.map((l) => (
+                      <ListCard key={l.id} handle={handle} list={l} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+        </>
+      ) : (
+        /* COLD/NEW PROFILE (CF-4) — dignified + minimal: a single understated
+           line instead of bare dashed chrome. No owner-coaching CTAs on the
+           public view (the header's owner controls suffice; coaching is /me). */
+        <div className="border-t border-white/10 pt-8">
+          <p className="m-0 text-body text-moonbeem-ink-subtle">
+            This profile is just getting started.
+          </p>
         </div>
-      )}
-
-      <section className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-pink uppercase m-0">
-            Top 12
-          </h2>
-        </div>
-        {/* /c/[handle] is a pure viewing surface — Top 12 management
-            (add, remove, reorder) lives on /me/top-12. The grid always
-            renders read-only here, even for the profile owner. */}
-        <Top12Grid topTitles={topTitles} isOwner={false} />
-      </section>
-
-      {/* Diary — public watch-log entries, newest first. Sits between Top 12
-          and Fan edits; omitted when empty (same discipline as Fan edits). */}
-      {diary.length > 0 && (
-        <section className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-pink uppercase m-0">
-              Diary
-            </h2>
-          </div>
-          <div className="flex flex-col gap-3">
-            {diary.map((e) => (
-              <DiaryRow key={e.id} entry={e} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Lists — public lists (watchlist pinned first). Between Diary and Fan
-          edits; omitted when empty. */}
-      {lists.length > 0 && (
-        <section className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-pink uppercase m-0">
-              Lists
-            </h2>
-          </div>
-          <div className="flex flex-col gap-3">
-            {lists.map((l) => (
-              <ListCard key={l.id} handle={handle} list={l} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Fan edits attributed to this creator. Omitted entirely when
-          empty — strangers viewing the profile don't need the
-          empty-state coaching that /me carries. */}
-      {fanEdits.length > 0 && (
-        <section className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-pink uppercase m-0">
-              Fan edits
-            </h2>
-          </div>
-          <div className="grid grid-cols-2 items-start gap-3 sm:grid-cols-3 md:gap-4 lg:grid-cols-4">
-            {fanEdits.map((fe, i) => (
-              <ProfileFanEditCard key={fe.id} fanEdit={fe} eager={i < 4} />
-            ))}
-          </div>
-        </section>
       )}
     </div>
   );

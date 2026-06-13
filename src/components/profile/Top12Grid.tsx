@@ -141,7 +141,7 @@ export default function Top12Grid({ topTitles, isOwner }: Props) {
   // cell renders ~195px wide — comfortably inside the 160-180px
   // target with poster artwork legible.
   const gridClass =
-    "grid grid-cols-3 md:grid-cols-6 gap-2 md:gap-3";
+    "grid grid-cols-3 md:grid-cols-6 gap-3 md:gap-4";
 
   // View-only path (or owner not in reorder mode): plain grid, server-rendered TitleCards.
   if (!isOwner) {
