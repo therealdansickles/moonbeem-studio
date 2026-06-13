@@ -226,6 +226,12 @@ export async function adminInsertFanEdit(
   // use the URL-parsed handle. On reject: typed failure, no insert. The assert
   // is wrapped so a DB blip becomes a typed 'internal' result — never a throw
   // across the bulk after() boundary.
+  // SEC-2: the eligible post-author (owner OR a verified coauthor) that the
+  // gate matched. Persisted below as creator_handle_displayed so the
+  // approve-time backstop re-checks the SAME handle that cleared the gate.
+  // Stays null for ungated (admin) inserts and platform-level passes, which
+  // fall back to the prior displayed-handle default.
+  let gateMatchedHandle: string | null = null;
   if (input.verificationStatus === "pending" && creatorId) {
     const authorHandle =
       displayedHandle ?? metrics.creator_handle_displayed ?? null;
@@ -235,6 +241,8 @@ export async function adminInsertFanEdit(
         creatorId,
         platform: input.platform,
         authorHandle,
+        // IG surfaces verified coauthors; empty on every other platform.
+        coauthorHandles: metrics.verified_coauthor_handles ?? [],
       });
     } catch (e) {
       return {
@@ -253,6 +261,9 @@ export async function adminInsertFanEdit(
         detail:
           ownership.reason === "handle_mismatch" ? ownership.detail : undefined,
       };
+    }
+    if (ownership.level === "handle" && ownership.matchedHandle) {
+      gateMatchedHandle = ownership.matchedHandle;
     }
   }
 
@@ -296,8 +307,13 @@ export async function adminInsertFanEdit(
   const insertRow = {
     title_id: input.titleId,
     creator_id: creatorId,
+    // SEC-2: prefer the handle the gate matched (owner or verified coauthor)
+    // so the byline + the approve-time backstop reflect the cleared handle.
     creator_handle_displayed:
-      displayedHandle ?? metrics.creator_handle_displayed ?? null,
+      gateMatchedHandle ??
+      displayedHandle ??
+      metrics.creator_handle_displayed ??
+      null,
     platform: input.platform,
     embed_url: input.embedUrl,
     post_id: input.postId,
@@ -323,6 +339,18 @@ export async function adminInsertFanEdit(
     .select("id")
     .maybeSingle();
   if (insertErr || !inserted) {
+    // SEC-2: a 23505 from the (title_id, post_id) partial unique index means
+    // another submitter raced us to the same post — more reachable now that
+    // owner AND verified coauthors can each clear the gate for one post. No
+    // duplicate row is created; return the SAME clean result the app-level
+    // dedup SELECT does, not a raw insert_failed.
+    if (insertErr?.code === "23505") {
+      return {
+        ok: false,
+        kind: "duplicate",
+        reason: "already imported for this title",
+      };
+    }
     return {
       ok: false,
       kind: "insert_failed",

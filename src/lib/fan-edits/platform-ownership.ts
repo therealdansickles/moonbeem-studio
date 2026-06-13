@@ -15,7 +15,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type OwnershipResult =
-  | { ok: true; level: "platform" | "handle" }
+  // SEC-2: matchedHandle is the eligible post-author (owner OR a verified
+  // coauthor) that the submitter's verified social matched, set only on a
+  // handle-level pass. The caller persists it so the approve backstop
+  // re-checks the same handle that cleared the gate.
+  | { ok: true; level: "platform" | "handle"; matchedHandle?: string }
   | { ok: false; reason: "platform_not_verified" }
   | {
       ok: false;
@@ -41,9 +45,17 @@ function normalizeHandle(h: string | null | undefined): string | null {
 export function evaluateSubmissionOwnership(args: {
   platform: string;
   authorHandle: string | null;
+  // SEC-2: usernames of VERIFIED coauthors (instagram coauthor_producers).
+  // Empty/absent on non-IG and on posts with no verified coauthors.
+  coauthorHandles?: string[];
   verifiedSocialsOnPlatform: VerifiedSocial[];
 }): OwnershipResult {
-  const { platform, authorHandle, verifiedSocialsOnPlatform } = args;
+  const {
+    platform,
+    authorHandle,
+    coauthorHandles = [],
+    verifiedSocialsOnPlatform,
+  } = args;
 
   // (1) No verified social on this platform → hard reject.
   if (verifiedSocialsOnPlatform.length === 0) {
@@ -55,26 +67,42 @@ export function evaluateSubmissionOwnership(args: {
     .map((s) => normalizeHandle(s.handle))
     .filter((h): h is string => h !== null);
 
-  const author = normalizeHandle(authorHandle);
+  // SEC-2: the eligible post-author set is the owner/URL handle PLUS any
+  // VERIFIED coauthor. The submitter clears the gate if verified as ANY of
+  // them. Normalize + dedupe (case-insensitive); preserve order so the
+  // owner stays primary (used for the handle_mismatch message).
+  const eligibleAuthors: string[] = [];
+  for (const raw of [authorHandle, ...coauthorHandles]) {
+    const h = normalizeHandle(raw);
+    if (h && !eligibleAuthors.some((e) => e.toLowerCase() === h.toLowerCase())) {
+      eligibleAuthors.push(h);
+    }
+  }
 
-  // (2) Author handle known AND ≥1 verified social carries a handle →
-  // require a case-insensitive match against ANY verified handle.
-  if (author !== null && verifiedHandles.length > 0) {
-    const got = author.toLowerCase();
-    const matched = verifiedHandles.some((h) => h.toLowerCase() === got);
-    if (!matched) {
+  // (2) ≥1 eligible author known AND ≥1 verified social carries a handle →
+  // require a case-insensitive match between SOME eligible author and SOME
+  // verified handle. The matched eligible author is returned so the caller
+  // can persist it (byline + the approve-backstop re-check handle).
+  if (eligibleAuthors.length > 0 && verifiedHandles.length > 0) {
+    const verifiedLower = new Set(verifiedHandles.map((h) => h.toLowerCase()));
+    const matchedHandle = eligibleAuthors.find((a) =>
+      verifiedLower.has(a.toLowerCase()),
+    );
+    if (matchedHandle === undefined) {
       return {
         ok: false,
         reason: "handle_mismatch",
-        detail: { platform, expected: verifiedHandles, got: author },
+        // got = the primary author (owner) for the user-facing message.
+        detail: { platform, expected: verifiedHandles, got: eligibleAuthors[0] },
       };
     }
-    return { ok: true, level: "handle" };
+    return { ok: true, level: "handle", matchedHandle };
   }
 
-  // (3) Author handle unknown (YouTube always; IG fetch-fail; Twitter
-  // /i/status) OR no verified social carries a handle → platform-level
-  // pass (a verified social on this platform exists, proven in step 1).
+  // (3) No author handle known (YouTube always; IG fetch-fail; Twitter
+  // /i/status; no coauthors) OR no verified social carries a handle →
+  // platform-level pass (a verified social on this platform exists, proven
+  // in step 1).
   return { ok: true, level: "platform" };
 }
 
@@ -84,9 +112,15 @@ export function evaluateSubmissionOwnership(args: {
 // pass, never a throw across an after() boundary).
 export async function assertSubmissionOwnership(
   sb: SupabaseClient,
-  args: { creatorId: string; platform: string; authorHandle: string | null },
+  args: {
+    creatorId: string;
+    platform: string;
+    authorHandle: string | null;
+    // SEC-2: VERIFIED coauthor handles surfaced by the mapper (IG only).
+    coauthorHandles?: string[];
+  },
 ): Promise<OwnershipResult> {
-  const { creatorId, platform, authorHandle } = args;
+  const { creatorId, platform, authorHandle, coauthorHandles } = args;
   const { data, error } = await sb
     .from("creator_socials")
     .select("handle")
@@ -99,6 +133,7 @@ export async function assertSubmissionOwnership(
   return evaluateSubmissionOwnership({
     platform,
     authorHandle,
+    coauthorHandles,
     verifiedSocialsOnPlatform: (data ?? []) as VerifiedSocial[],
   });
 }

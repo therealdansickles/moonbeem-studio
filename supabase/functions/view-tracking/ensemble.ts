@@ -64,6 +64,12 @@ export type FetchEngagementResult = {
   // didn't capture a handle). Other platforms return null until we
   // verify their response shapes.
   creator_handle_displayed: string | null;
+  // SEC-2: usernames of VERIFIED coauthors (Instagram coauthor_producers
+  // with is_verified===true). Absent/empty on non-IG and on posts with no
+  // verified coauthors. Surfaced here for dual-copy parity with
+  // src/lib/ensembledata/client.ts; the submit ownership gate (src-side
+  // only) treats owner.username OR any of these as an eligible post author.
+  verified_coauthor_handles?: string[];
   // ISO 8601 timestamp from the source. YouTube populates from
   // snippet.publishedAt via fetchYouTubeMetrics. Other platforms
   // null. upsert.ts backfills fan_edits.posted_at when this is
@@ -222,6 +228,7 @@ export async function fetchEngagementMetrics(args: {
     duration_seconds: metrics.duration_seconds,
     aspect_ratio: metrics.aspect_ratio,
     creator_handle_displayed: metrics.creator_handle_displayed,
+    verified_coauthor_handles: metrics.verified_coauthor_handles,
     // posted_at: null on EnsembleData-backed platforms — YouTube
     // branches through fetchYouTubeMetrics which fills this.
     posted_at: null,
@@ -299,6 +306,8 @@ type Metrics = {
   duration_seconds: number | null;
   aspect_ratio: string | null;
   creator_handle_displayed: string | null;
+  // SEC-2: VERIFIED coauthor usernames (IG only); see FetchEngagementResult.
+  verified_coauthor_handles?: string[];
 };
 
 function toIntOrNull(v: unknown): number | null {
@@ -447,6 +456,21 @@ function mapMetrics(platform: Platform, body: unknown): Metrics {
       const creator_handle = typeof ownerUsername === "string" && ownerUsername
         ? ownerUsername
         : null;
+      // SEC-2: surface VERIFIED coauthors (data.coauthor_producers[] with
+      // is_verified===true) for dual-copy parity with client.ts. Unused by
+      // view-tracking (no gating here); the src-side gate consumes it.
+      const coauthorProducers = get(data, ["coauthor_producers"]);
+      const verified_coauthor_handles = Array.isArray(coauthorProducers)
+        ? coauthorProducers
+            .filter(
+              (c): c is Record<string, unknown> =>
+                !!c &&
+                typeof c === "object" &&
+                (c as Record<string, unknown>).is_verified === true,
+            )
+            .map((c) => c.username)
+            .filter((u): u is string => typeof u === "string" && u.length > 0)
+        : [];
       return {
         view_count: toIntOrNull(get(data, ["video_play_count"])),
         like_count: rawLike !== null && rawLike >= 0 ? rawLike : null,
@@ -458,6 +482,7 @@ function mapMetrics(platform: Platform, body: unknown): Metrics {
         duration_seconds,
         aspect_ratio,
         creator_handle_displayed: creator_handle,
+        verified_coauthor_handles,
       };
     }
     case "youtube":
