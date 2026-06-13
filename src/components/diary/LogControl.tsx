@@ -44,9 +44,23 @@ export default function LogControl({
       <button
         type="button"
         onClick={onClick}
-        className="rounded-md border border-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-pink transition-colors hover:bg-moonbeem-pink hover:text-moonbeem-navy"
+        className="inline-flex items-center gap-1.5 rounded-md border border-white/15 px-3 py-1.5 text-body-sm font-medium text-moonbeem-ink-muted transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
       >
-        Log or review
+        <svg
+          viewBox="0 0 24 24"
+          width={15}
+          height={15}
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+        </svg>
+        Log
       </button>
 
       {showNudge && authState === "no_creator" && (

@@ -68,6 +68,29 @@ function platformLabel(p: string | null): string {
   return "—";
 }
 
+// CF-3 (Part 2): friendly copy for the per-platform gate's reason codes.
+// Raw codes stay internal (logged at the call site); only this text reaches
+// the UI. Collab-agnostic — SEC-2 handles collaborator matching separately.
+function friendlySubmitError(
+  json: {
+    error?: string;
+    detail?: { platform?: string; expected?: string[]; got?: string };
+  },
+  submittedPlatform: string | null,
+): string {
+  const code = json.error;
+  const detail = json.detail;
+  const platform = platformLabel(detail?.platform ?? submittedPlatform ?? null);
+  if (code === "platform_not_verified") {
+    return `You haven't verified a ${platform} account yet. Verify one in your profile to submit edits from ${platform}.`;
+  }
+  if (code === "handle_mismatch" && detail) {
+    const expected = (detail.expected ?? []).map((h) => `@${h}`).join(", ");
+    return `This post is credited to @${detail.got}. You can submit edits from accounts you've verified: ${expected}.`;
+  }
+  return code ?? "submit failed";
+}
+
 export default function SingleUrlSubmitForm({
   pinnedTitle,
   initialTitle,
@@ -210,7 +233,9 @@ export default function SingleUrlSubmitForm({
       });
       const json = await res.json();
       if (!res.ok) {
-        setSubmitError(json.error ?? "submit failed");
+        // Raw reason codes are internal — log them, render friendly copy.
+        console.debug("[fan-edit submit] gate reject", json.error, json.detail);
+        setSubmitError(friendlySubmitError(json, metadata.parsed.platform));
         return;
       }
       setSuccess(successMessage ?? DEFAULT_SUCCESS);

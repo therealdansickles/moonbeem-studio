@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Top12Grid from "@/components/profile/Top12Grid";
 import Link from "next/link";
 import { verifySession } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
@@ -547,28 +548,17 @@ export default async function MePage() {
               </>
             ) : (
               <>
-                <div className="flex flex-wrap gap-2">
-                  {topTitles.map((t) => (
-                    <div
-                      key={t.id}
-                      className="relative aspect-[2/3] w-[60px] shrink-0 overflow-hidden rounded-md bg-moonbeem-navy/40"
-                    >
-                      {t.title.poster_url ? (
-                        <Image
-                          src={t.title.poster_url}
-                          alt={t.title.title}
-                          fill
-                          sizes="60px"
-                          unoptimized
-                          className="object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center p-1 text-center text-caption text-moonbeem-ink-subtle">
-                          {t.title.title}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                {/* CF-3 (Part 5 + iteration): reuse Top12Grid (view-only) for
+                    the /c/[handle] treatment. On lg+ the GRID ONLY breaks out
+                    of /me's max-w-2xl column to ~80rem, centered on the
+                    viewport (capped to 100vw − px-6 so it never causes
+                    horizontal scroll), so the 6+6 posters render at
+                    /c/[handle] scale. position:relative + left-1/2 +
+                    -translate-x-1/2 shifts only the visual box — the section
+                    heading + link stay in the reading column and no other /me
+                    section is affected. Management stays on /me/top-12. */}
+                <div className="lg:relative lg:left-1/2 lg:w-[80rem] lg:max-w-[calc(100vw-3rem)] lg:-translate-x-1/2">
+                  <Top12Grid topTitles={topTitles} isOwner={false} />
                 </div>
                 <Link
                   href="/me/top-12"

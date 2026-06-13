@@ -104,15 +104,16 @@ export default function TitleRatingControl({
 
   return (
     <div className="flex flex-col items-center gap-1 md:items-start">
-      <div className="flex items-center gap-3">
-        <span className="text-body-sm text-moonbeem-ink-subtle">
-          Your rating
-        </span>
+      {/* CF-3: quiet bordered chip to match the unified actions row. The
+          stars ARE the rating control, so no separate label/icon is added
+          (that would duplicate). onChange/clear/optimistic logic unchanged;
+          styling + star size only. */}
+      <div className="inline-flex items-center gap-2 rounded-md border border-white/15 px-3 py-1.5">
         <StarRatingInput
           value={authState === "ready" ? rating : null}
           onChange={onChange}
           disabled={pending}
-          size={24}
+          size={18}
         />
         {authState === "ready" && rating != null && (
           <button

@@ -73,10 +73,10 @@ export default function WatchedToggle({
         onClick={toggle}
         disabled={pending}
         aria-pressed={on}
-        className={`inline-flex items-center gap-2 rounded-md border px-4 py-2 text-body-sm font-semibold transition-colors disabled:opacity-50 ${
+        className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-body-sm font-medium transition-colors disabled:opacity-50 ${
           on
             ? "border-moonbeem-pink bg-moonbeem-pink/10 text-moonbeem-pink"
-            : "border-moonbeem-pink text-moonbeem-pink hover:bg-moonbeem-pink hover:text-moonbeem-navy"
+            : "border-white/15 text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
         }`}
       >
         <svg

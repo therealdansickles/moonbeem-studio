@@ -252,6 +252,9 @@ export default function CampaignWizard({
               <label className="text-body-sm font-medium text-moonbeem-ink">
                 Campaign name
               </label>
+              <p className="text-caption text-moonbeem-ink-subtle">
+                This name is shown to creators on the public campaign page.
+              </p>
               <input
                 ref={nameInputRef}
                 type="text"

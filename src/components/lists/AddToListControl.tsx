@@ -42,8 +42,21 @@ export default function AddToListControl({
       <button
         type="button"
         onClick={onClick}
-        className="rounded-md border border-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-pink transition-colors hover:bg-moonbeem-pink hover:text-moonbeem-navy"
+        className="inline-flex items-center gap-1.5 rounded-md border border-white/15 px-3 py-1.5 text-body-sm font-medium text-moonbeem-ink-muted transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
       >
+        <svg
+          viewBox="0 0 24 24"
+          width={15}
+          height={15}
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M12 5v14M5 12h14" />
+        </svg>
         Add to list
       </button>
 

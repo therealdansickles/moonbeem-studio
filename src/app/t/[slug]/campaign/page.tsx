@@ -37,7 +37,7 @@ const PRIMARY_LINK =
 // Constant across every auth state and across active/ended.
 const STEPS = [
   "Verify a social account. Takes about two minutes.",
-  "Make your edit. Use the clips and stills from the title page.",
+  "Make your edit.",
   "Post it on TikTok, Instagram, X, or YouTube.",
   "Submit your link below. We review every submission, usually within a day. Approved edits start counting views.",
 ];

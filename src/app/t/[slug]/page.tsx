@@ -262,6 +262,18 @@ export default async function TitlePage({ params }: PageProps) {
       </div>
     );
 
+  // Watch Now — the offer button(s). Relocated from About to the title
+  // header as the primary CTA (CF-3, Part 1). Visual move only; OfferButton
+  // and the /go/offer click-logging path are unchanged.
+  const watchNowEl =
+    title.is_active && offers.length > 0 ? (
+      <div className="flex w-full max-w-sm flex-col gap-2">
+        {offers.map((offer) => (
+          <OfferButton key={offer.id} offer={offer} titleId={title.id} />
+        ))}
+      </div>
+    ) : null;
+
   const aboutContent = (
     <div className="flex flex-col items-center gap-8">
       {title.synopsis && (
@@ -270,13 +282,6 @@ export default async function TitlePage({ params }: PageProps) {
         </p>
       )}
       <AboutCredits title={title} />
-      {title.is_active && offers.length > 0 && (
-        <div className="flex flex-col gap-3 w-full max-w-sm">
-          {offers.map((offer) => (
-            <OfferButton key={offer.id} offer={offer} titleId={title.id} />
-          ))}
-        </div>
-      )}
       {fanEdits.length === 0 && (
         <RequestFanEditsCTA
           titleId={title.id}
@@ -317,7 +322,7 @@ export default async function TitlePage({ params }: PageProps) {
         </div>
 
         <div className="w-full md:flex-1 md:min-w-0 flex flex-col items-center gap-8 md:items-stretch">
-          <div className="flex flex-col items-center gap-3 max-w-prose text-center md:items-start md:text-left md:max-w-none">
+          <div className="flex flex-col items-center gap-5 max-w-prose text-center md:items-start md:text-left md:max-w-none">
             {/* Event-only league/partner banner, "up top" above the
                 title — prominent but contained (≤64px tall). Fallback
                 chain: logo image → partner name as text → nothing.
@@ -342,29 +347,73 @@ export default async function TitlePage({ params }: PageProps) {
                   )}
                 </div>
               )}
-            <h1 className="font-wordmark font-bold text-display-md md:text-display-lg text-moonbeem-pink m-0">
-              {title.title}
-            </h1>
-            {metaParts.length > 0 && (
-              <p className="text-body text-moonbeem-ink-muted m-0">
-                {metaParts.join(" · ")}
-              </p>
-            )}
-            {/* Ratings aggregate — denormalized titles.rating_avg/_count,
-                trigger-maintained over PUBLIC title_ratings. Hidden until the
-                first public rating exists (count 0 → nothing). */}
-            {title.rating_count > 0 && (
-              <div className="flex items-center gap-2">
-                <StarRatingDisplay value={Number(title.rating_avg ?? 0)} size={16} />
-                <span className="text-body-sm text-moonbeem-ink-muted">
-                  {Number(title.rating_avg ?? 0).toFixed(1)} · {title.rating_count}
+
+            {/* 1. IDENTITY — title, meta, public rating aggregate, plus the
+                event meta + distributor lines. Kept prominent and grouped. */}
+            <div className="flex flex-col items-center gap-2 md:items-start">
+              <h1 className="font-wordmark font-bold text-display-md md:text-display-lg text-moonbeem-pink m-0">
+                {title.title}
+              </h1>
+              {metaParts.length > 0 && (
+                <p className="text-body text-moonbeem-ink-muted m-0">
+                  {metaParts.join(" · ")}
+                </p>
+              )}
+              {/* Ratings aggregate — denormalized titles.rating_avg/_count,
+                  trigger-maintained over PUBLIC title_ratings. Hidden until
+                  the first public rating exists (count 0 → nothing). */}
+              {title.rating_count > 0 && (
+                <div className="flex items-center gap-2">
+                  <StarRatingDisplay value={Number(title.rating_avg ?? 0)} size={16} />
+                  <span className="text-body-sm text-moonbeem-ink-muted">
+                    {Number(title.rating_avg ?? 0).toFixed(1)} · {title.rating_count}
+                  </span>
+                </div>
+              )}
+              {/* Event-only meta line: date · venue. Renders only what exists
+                  (films have director/year/runtime in metaParts above). */}
+              {title.media_type === "event" &&
+                (eventDateDisplay || title.venue) && (
+                  <p className="text-body text-moonbeem-ink-muted m-0">
+                    {[eventDateDisplay, title.venue].filter(Boolean).join(" · ")}
+                  </p>
+                )}
+              {title.distributor && (
+                <p className="text-body-sm text-moonbeem-ink-subtle m-0">
+                  Distributed by {title.distributor}
+                </p>
+              )}
+            </div>
+
+            {/* 2. PRIMARY CTA — Watch Now, relocated here from About. The
+                page's main filled action, directly under identity. */}
+            {watchNowEl}
+
+            {/* 3. CAMPAIGN CALLOUT — prominent pink-accent block replacing the
+                old inline pill, still linking the campaign page. Secondary to
+                Watch Now: a tinted/bordered accent block, not a competing
+                filled primary. Text-only — no CPM number (that needs a query
+                swap; see the CF-3 Part 1 flag). */}
+            {hasActiveCampaign ? (
+              <Link
+                href={`/t/${title.slug}/campaign`}
+                aria-label="View campaign details and submit your edit"
+                className="block w-full max-w-sm rounded-lg border border-moonbeem-pink/40 bg-moonbeem-pink/10 px-4 py-3 text-left transition-colors hover:border-moonbeem-pink hover:bg-moonbeem-pink/15"
+              >
+                <span className="block text-body font-semibold text-moonbeem-pink">
+                  Earn from your edit →
                 </span>
-              </div>
-            )}
-            {/* Header action cluster — kept as one wrapping row (rating, log,
-                watchlist, add-to-list). On narrow widths it wraps rather than
-                overflowing. */}
-            <div className="flex flex-row flex-wrap items-start justify-center gap-x-4 gap-y-2 md:justify-start">
+                <span className="mt-0.5 block text-body-sm text-moonbeem-ink-muted">
+                  There&apos;s an active campaign rewarding fan edits of this title.
+                </span>
+              </Link>
+            ) : null}
+
+            {/* 4. YOUR ACTIONS — the five library controls unified into one
+                tight, quiet secondary row (rating, log, watched, watchlist,
+                add-to-list). Per-control styling/icons live in the
+                components; their onClick/state/logic are untouched. */}
+            <div className="flex flex-row flex-wrap items-start justify-center gap-2 md:justify-start">
               <TitleRatingControl
                 key={`rating-${myRating.rating ?? "none"}`}
                 titleId={title.id}
@@ -399,41 +448,6 @@ export default async function TitlePage({ params }: PageProps) {
                 returnTo={`/t/${title.slug}`}
               />
             </div>
-            {/* Event-only meta line: date · venue, reusing the film
-                meta styling. Renders only what exists (date and/or
-                venue); the film metaParts above stay empty for events
-                (director/year/runtime null → auto-suppressed). */}
-            {title.media_type === "event" &&
-              (eventDateDisplay || title.venue) && (
-                <p className="text-body text-moonbeem-ink-muted m-0">
-                  {[eventDateDisplay, title.venue]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </p>
-              )}
-            {title.distributor && (
-              <p className="text-body-sm text-moonbeem-ink-subtle m-0">
-                Distributed by {title.distributor}
-              </p>
-            )}
-            {/* Active-campaign pill — page chrome, not tab content.
-                Lives above the tab strip so creators landing on the
-                title page see the cue immediately without clicking
-                into Fan Edits. Server-component territory; the
-                hasActiveCampaign boolean is resolved in this file
-                via isTitleInActiveCampaign (service-role single-
-                title check, deny-all RLS bypass). Rendered for both
-                anon and signed-in viewers; gating is purely on
-                title, not auth. */}
-            {hasActiveCampaign ? (
-              <Link
-                href={`/t/${title.slug}/campaign`}
-                aria-label="View campaign details and submit your edit"
-                className="inline-flex items-center gap-2 rounded-full bg-moonbeem-pink/15 px-3 py-1 text-body-sm font-medium text-moonbeem-pink transition-colors hover:bg-moonbeem-pink/25"
-              >
-                Active Campaign · Earn from your Edit
-              </Link>
-            ) : null}
           </div>
 
           <TitleTabs
