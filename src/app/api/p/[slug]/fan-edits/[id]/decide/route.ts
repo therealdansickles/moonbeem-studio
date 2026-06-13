@@ -41,6 +41,7 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { enforce } from "@/lib/ratelimit";
 import { fulfillTitleRequestsForFanEdit } from "@/lib/title-requests/fulfill-on-fan-edit";
 import { sendFanEditApproved } from "@/lib/email/fan-edit";
+import { assertSubmissionOwnership } from "@/lib/fan-edits/platform-ownership";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -125,7 +126,7 @@ export async function POST(
   const { data: fanEdit, error: readErr } = await supabase
     .from("fan_edits")
     .select(
-      "id, title_id, created_by_user_id, verification_status, titles!inner(partner_id, slug)",
+      "id, title_id, created_by_user_id, verification_status, platform, creator_id, creator_handle_displayed, titles!inner(partner_id, slug)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -166,6 +167,46 @@ export async function POST(
       },
       { status: 409 },
     );
+  }
+
+  // SEC-1 approve-time backstop (mirrors the admin approve route), for the
+  // pending→approved transition ONLY. A partner may always DECLINE a bad
+  // edit; they may NOT APPROVE one that fails the per-platform ownership
+  // gate. Re-derives from STORED fields — fan_edits.platform (always) +
+  // creator_handle_displayed (TikTok/Twitter/IG; null for YouTube →
+  // platform-level). The reject branch below is unchanged. Rows with a
+  // null creator_id (not user submissions) skip the backstop.
+  if (decision === "approved" && fanEdit.creator_id) {
+    let ownership;
+    try {
+      ownership = await assertSubmissionOwnership(supabase, {
+        creatorId: fanEdit.creator_id as string,
+        platform: fanEdit.platform as string,
+        authorHandle:
+          (fanEdit.creator_handle_displayed as string | null) ?? null,
+      });
+    } catch (e) {
+      return NextResponse.json(
+        {
+          error: "ownership_check_error",
+          detail: e instanceof Error ? e.message : String(e),
+        },
+        { status: 500 },
+      );
+    }
+    if (!ownership.ok) {
+      return NextResponse.json(
+        {
+          error: "ownership_failed",
+          reason: ownership.reason,
+          detail:
+            ownership.reason === "handle_mismatch"
+              ? ownership.detail
+              : undefined,
+        },
+        { status: 409 },
+      );
+    }
   }
 
   // Single UPDATE: status flip + audit stamp + rejection_reason if

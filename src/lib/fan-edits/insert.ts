@@ -25,6 +25,10 @@ import { fulfillTitleRequestsForFanEdit } from "@/lib/title-requests/fulfill-on-
 import { proxyThumbnailToR2 } from "./thumbnail-proxy";
 import { getR2PublicUrl } from "@/lib/r2/client";
 import type { Platform } from "./url-parser";
+import {
+  assertSubmissionOwnership,
+  type OwnershipResult,
+} from "./platform-ownership";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -92,7 +96,11 @@ export type AdminFanEditResult =
         | "stub_creator_failed"
         | "metrics_fetch_failed"
         | "insert_failed"
+        | "ownership_failed"
         | "internal";
+      // Populated only for kind === "ownership_failed" with a
+      // handle_mismatch reason: the verified handle(s) vs the submitted one.
+      detail?: { platform: string; expected: string[]; got: string };
     };
 
 export async function adminInsertFanEdit(
@@ -207,6 +215,45 @@ export async function adminInsertFanEdit(
         `metadata unavailable (${metrics.error}) — post may be private, deleted, ` +
         `geo-restricted, URL format mismatch, or EnsembleData transient failure`,
     };
+  }
+
+  // SEC-1 — per-platform submission ownership gate. AUTHORITATIVE chokepoint
+  // for BOTH user submit paths (single + bulk converge here). Scoped to user
+  // submissions (verification_status 'pending'); admin imports
+  // ('auto_verified', often stub creators with no verified socials) are
+  // intentionally NOT gated. Runs AFTER the EnsembleData fetch so Instagram's
+  // author handle (metrics.creator_handle_displayed) is known; TikTok/Twitter
+  // use the URL-parsed handle. On reject: typed failure, no insert. The assert
+  // is wrapped so a DB blip becomes a typed 'internal' result — never a throw
+  // across the bulk after() boundary.
+  if (input.verificationStatus === "pending" && creatorId) {
+    const authorHandle =
+      displayedHandle ?? metrics.creator_handle_displayed ?? null;
+    let ownership: OwnershipResult;
+    try {
+      ownership = await assertSubmissionOwnership(sb, {
+        creatorId,
+        platform: input.platform,
+        authorHandle,
+      });
+    } catch (e) {
+      return {
+        ok: false,
+        kind: "internal",
+        reason: `ownership check failed: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      };
+    }
+    if (!ownership.ok) {
+      return {
+        ok: false,
+        kind: "ownership_failed",
+        reason: ownership.reason,
+        detail:
+          ownership.reason === "handle_mismatch" ? ownership.detail : undefined,
+      };
+    }
   }
 
   // Thumbnail proxy: Block 2.1 added this for the single-URL flow at

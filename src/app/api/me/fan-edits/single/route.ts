@@ -15,6 +15,7 @@ import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { parseFanEditUrl, resolveFanEditUrl } from "@/lib/fan-edits/url-parser";
 import { adminInsertFanEdit } from "@/lib/fan-edits/insert";
+import { assertSubmissionOwnership } from "@/lib/fan-edits/platform-ownership";
 import { getUserTier } from "@/lib/gating/get-user-tier";
 import { canPerform } from "@/lib/gating/can-perform";
 import type { FetchEngagementResult } from "@/lib/ensembledata/client";
@@ -91,6 +92,31 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // SEC-1 fast pre-check: when the author handle is in the URL
+  // (TikTok/Twitter) reject before the insert path with a clean 403. For
+  // IG/YT (handle not in URL) this resolves to a platform-level check; the
+  // authoritative handle check for IG runs in the insert chokepoint once
+  // EnsembleData returns the author handle. Shares the single helper.
+  try {
+    const pre = await assertSubmissionOwnership(sb, {
+      creatorId: ownCreator.id as string,
+      platform: parsed.platform,
+      authorHandle: parsed.handle,
+    });
+    if (!pre.ok) {
+      return NextResponse.json(
+        {
+          error: pre.reason,
+          detail: pre.reason === "handle_mismatch" ? pre.detail : undefined,
+        },
+        { status: 403 },
+      );
+    }
+  } catch {
+    // creator_socials blip at pre-check — fall through; the insert
+    // chokepoint re-runs the check and surfaces any error there.
+  }
+
   const result = await adminInsertFanEdit({
     titleId: body.title_id,
     embedUrl: parsed.normalizedUrl,
@@ -105,10 +131,16 @@ export async function POST(request: NextRequest) {
   });
 
   if (!result.ok) {
-    const status = result.kind === "duplicate" ? 409 : 400;
-    return NextResponse.json({ error: result.reason, kind: result.kind }, {
-      status,
-    });
+    const status =
+      result.kind === "duplicate"
+        ? 409
+        : result.kind === "ownership_failed"
+          ? 403
+          : 400;
+    return NextResponse.json(
+      { error: result.reason, kind: result.kind, detail: result.detail },
+      { status },
+    );
   }
 
   return NextResponse.json({
