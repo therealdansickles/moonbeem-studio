@@ -14,6 +14,7 @@ import {
 import { getWatchedCountForCreator } from "@/lib/queries/watched";
 import { SignOutButton } from "@/components/SignOutButton";
 import PlatformIcon from "@/components/PlatformIcon";
+import { isR2ThumbnailUrl } from "@/lib/fan-edits/thumbnail-url";
 import ClaimStubButton from "@/components/me/ClaimStubButton";
 import PayoutsControls from "@/components/me/PayoutsControls";
 import WelcomeBanner from "@/components/me/WelcomeBanner";
@@ -404,7 +405,7 @@ export default async function MePage() {
                       key={s.id}
                       className="flex items-center gap-3 rounded-md border border-white/10 bg-white/[0.02] p-2"
                     >
-                      {s.thumbnail_url ? (
+                      {isR2ThumbnailUrl(s.thumbnail_url) ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={s.thumbnail_url}
@@ -533,7 +534,7 @@ export default async function MePage() {
                         className="flex flex-col gap-2 rounded-md border border-white/10 bg-white/[0.02] p-3"
                       >
                         <div className="flex items-start gap-3">
-                          {s.thumbnail_url ? (
+                          {isR2ThumbnailUrl(s.thumbnail_url) ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={s.thumbnail_url}

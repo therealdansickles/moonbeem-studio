@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import PlatformIcon from "@/components/PlatformIcon";
+import { isR2ThumbnailUrl } from "@/lib/fan-edits/thumbnail-url";
 import { useFanEditModal } from "@/components/FanEditModalProvider";
 import { formatMetric } from "@/lib/format";
 
@@ -11,6 +12,7 @@ type Row = {
   id: string;
   platform: "tiktok" | "instagram" | "twitter" | "youtube";
   thumbnail_url: string | null;
+  title_poster_url: string | null;
   creator_handle: string | null;
   // Modal-compat fields from the /p/[slug] loader.
   embed_url: string;
@@ -177,18 +179,24 @@ export default function AllEditsTable({ rows, titleSlug, titleName }: Props) {
                     }`}
                     className="relative block h-12 w-12 overflow-hidden rounded-lg bg-moonbeem-navy/40 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
                   >
-                    {r.thumbnail_url
-                      ? (
+                    {(() => {
+                      // Guard: only an R2-hosted thumbnail is trusted;
+                      // null/external/expired urls fall back to the poster.
+                      const src =
+                        (isR2ThumbnailUrl(r.thumbnail_url)
+                          ? r.thumbnail_url
+                          : null) ?? r.title_poster_url;
+                      return src ? (
                         <Image
-                          src={r.thumbnail_url}
+                          src={src}
                           alt=""
                           fill
                           sizes="48px"
                           unoptimized
                           className="object-cover"
                         />
-                      )
-                      : null}
+                      ) : null;
+                    })()}
                   </button>
                 </td>
                 <td className="px-4 py-3 align-middle">

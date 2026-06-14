@@ -191,6 +191,7 @@ type TopPerformer = {
   view_count: number;
   thumbnail_url: string | null;
   creator_id: string | null;
+  title_poster_url: string | null;
   // creator_handle = canonical moonbeem_handle (joined via
   // public_creators). Mapped to creator_moonbeem_handle when the
   // row is fed into the fan-edit modal.
@@ -205,6 +206,16 @@ type TopPerformer = {
   growth_pct_24h: number | null;
 };
 
+// Extracts titles.poster_url from a PostgREST embedded titles relation
+// (object for a to-one FK, but defensively handle the array shape too).
+function posterFromTitlesRel(r: unknown): string | null {
+  const t = (r as { titles?: unknown }).titles;
+  if (Array.isArray(t)) {
+    return (t[0] as { poster_url?: string | null } | undefined)?.poster_url ?? null;
+  }
+  return (t as { poster_url?: string | null } | null)?.poster_url ?? null;
+}
+
 async function loadTopPerformers(
   supabase: ReturnType<typeof createServiceRoleClient>,
   titleIds: string[],
@@ -214,7 +225,7 @@ async function loadTopPerformers(
   const { data: rows } = await supabase
     .from("fan_edits")
     .select(
-      "id, platform, view_count, thumbnail_url, creator_id, embed_url, creator_handle_displayed",
+      "id, platform, view_count, thumbnail_url, creator_id, embed_url, creator_handle_displayed, titles(poster_url)",
     )
     .in("title_id", titleIds)
     .eq("is_active", true)
@@ -247,6 +258,7 @@ async function loadTopPerformers(
       platform: r.platform as SocialPlatform,
       view_count: current,
       thumbnail_url: r.thumbnail_url as string | null,
+      title_poster_url: posterFromTitlesRel(r),
       creator_id: r.creator_id as string | null,
       creator_handle: r.creator_id
         ? handles.get(r.creator_id as string) ?? null
@@ -500,6 +512,7 @@ type AllEditRow = {
   id: string;
   platform: SocialPlatform;
   thumbnail_url: string | null;
+  title_poster_url: string | null;
   creator_handle: string | null;
   // Modal-compat fields, same rationale as TopPerformer.
   embed_url: string;
@@ -517,7 +530,7 @@ async function loadAllEdits(
   const { data: rows } = await supabase
     .from("fan_edits")
     .select(
-      "id, platform, view_count, thumbnail_url, creator_id, embed_url, creator_handle_displayed",
+      "id, platform, view_count, thumbnail_url, creator_id, embed_url, creator_handle_displayed, titles(poster_url)",
     )
     .in("title_id", titleIds)
     .eq("is_active", true)
@@ -547,6 +560,7 @@ async function loadAllEdits(
       id,
       platform: r.platform as SocialPlatform,
       thumbnail_url: r.thumbnail_url as string | null,
+      title_poster_url: posterFromTitlesRel(r),
       creator_handle: r.creator_id
         ? handles.get(r.creator_id as string) ?? null
         : null,

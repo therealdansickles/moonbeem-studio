@@ -13,6 +13,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import PlatformIcon from "@/components/PlatformIcon";
+import { isR2ThumbnailUrl } from "@/lib/fan-edits/thumbnail-url";
 import GrowthBadge from "@/components/p/GrowthBadge";
 import InitialAvatar from "@/components/p/InitialAvatar";
 import { rankTierClass } from "@/components/p/rankTier";
@@ -29,6 +30,7 @@ type Performer = {
   platform: SocialPlatform;
   view_count: number;
   thumbnail_url: string | null;
+  title_poster_url: string | null;
   creator_handle: string | null;
   growth_24h: number | null;
   growth_pct_24h: number | null;
@@ -112,18 +114,24 @@ export default function TopPerformersCardClient({
                 className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-moonbeem-navy/40 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-moonbeem-pink"
                 aria-label={`Open fan edit by @${fe.creator_handle ?? "anon"}`}
               >
-                {fe.thumbnail_url
-                  ? (
+                {(() => {
+                  // Guard: only an R2-hosted thumbnail is trusted; null/
+                  // external/expired urls fall back to the title poster.
+                  const src =
+                    (isR2ThumbnailUrl(fe.thumbnail_url)
+                      ? fe.thumbnail_url
+                      : null) ?? fe.title_poster_url;
+                  return src ? (
                     <Image
-                      src={fe.thumbnail_url}
+                      src={src}
                       alt=""
                       fill
                       sizes="48px"
                       unoptimized
                       className="object-cover"
                     />
-                  )
-                  : null}
+                  ) : null;
+                })()}
               </button>
               {/* Creator avatar — 32px gradient-initial fallback for
                   stub creators. Real avatars land when public_creators

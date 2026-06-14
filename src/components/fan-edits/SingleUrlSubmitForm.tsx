@@ -17,6 +17,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ParsedFanEditUrl } from "@/lib/fan-edits/url-parser";
 import type { FetchEngagementResult } from "@/lib/ensembledata/client";
+import { isR2ThumbnailUrl } from "@/lib/fan-edits/thumbnail-url";
 
 type TitleRef = { id: string; name: string };
 
@@ -304,7 +305,7 @@ export default function SingleUrlSubmitForm({
 
       {metadata && (
         <div className="flex gap-4 rounded-md border border-white/10 bg-white/[0.02] p-4">
-          {metadata.metrics.thumbnail_url ? (
+          {isR2ThumbnailUrl(metadata.metrics.thumbnail_url) ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={metadata.metrics.thumbnail_url}

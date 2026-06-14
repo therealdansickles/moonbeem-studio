@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { FanEditWithTitle } from "@/lib/queries/titles";
 import PlatformIcon from "@/components/PlatformIcon";
+import { isR2ThumbnailUrl } from "@/lib/fan-edits/thumbnail-url";
 
 // Profile-surface fan-edit card. Standalone variant of
 // FanEditThumbnail: links to the title page instead of opening the
@@ -37,7 +38,12 @@ export default function ProfileFanEditCard({ fanEdit, eager }: Props) {
     fanEdit.creator_moonbeem_handle ??
     fanEdit.creator_handle_displayed ??
     "anon";
-  const renderSrc = fanEdit.thumbnail_url ?? fanEdit.title_poster_url ?? null;
+  // Guard: only trust an R2-hosted thumbnail; null/external/expired urls
+  // fall back to the title poster (then the pulse placeholder).
+  const renderSrc =
+    (isR2ThumbnailUrl(fanEdit.thumbnail_url) ? fanEdit.thumbnail_url : null) ??
+    fanEdit.title_poster_url ??
+    null;
   const hasImage = !!renderSrc;
 
   return (

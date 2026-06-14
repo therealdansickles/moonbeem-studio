@@ -20,6 +20,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import { isR2ThumbnailUrl } from "@/lib/fan-edits/thumbnail-url";
 import {
   DndContext,
   PointerSensor,
@@ -373,7 +374,13 @@ export default function TrendingEditsCurator({
 }
 
 function FanEditThumb({ item }: { item: TrendingCurationItem }) {
-  if (!item.thumbnail_url) {
+  // Guard: only trust an R2-hosted thumbnail; null/external/expired urls
+  // fall back to the title poster, then the neutral box.
+  const src =
+    (isR2ThumbnailUrl(item.thumbnail_url) ? item.thumbnail_url : null) ??
+    item.title_poster_url ??
+    null;
+  if (!src) {
     return (
       <div
         className="h-[60px] w-[40px] shrink-0 rounded-sm border border-white/10 bg-white/[0.03]"
@@ -384,7 +391,7 @@ function FanEditThumb({ item }: { item: TrendingCurationItem }) {
   return (
     <div className="h-[60px] w-[40px] shrink-0 overflow-hidden rounded-sm bg-white/[0.03]">
       <Image
-        src={item.thumbnail_url}
+        src={src}
         alt={`${item.title_name} fan edit thumbnail`}
         width={40}
         height={60}

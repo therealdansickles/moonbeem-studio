@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import type { FanEdit } from "@/lib/queries/titles";
 import { vibrate } from "@/lib/haptics";
 import PlatformIcon from "./PlatformIcon";
+import { isR2ThumbnailUrl } from "@/lib/fan-edits/thumbnail-url";
 
 type Props = {
   fanEdit: FanEdit;
@@ -59,7 +60,10 @@ export default function FanEditThumbnail({
   // → animate-pulse gradient (final). Rows marked
   // deleted_from_platform get thumbnail_url=NULL so they land on
   // the title-poster fallback rather than showing a loading shimmer.
-  const renderSrc = fanEdit.thumbnail_url ?? titlePosterUrl ?? null;
+  const renderSrc =
+    (isR2ThumbnailUrl(fanEdit.thumbnail_url) ? fanEdit.thumbnail_url : null) ??
+    titlePosterUrl ??
+    null;
   const hasImage = !!renderSrc;
 
   function handleClick() {

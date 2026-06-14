@@ -7,6 +7,7 @@ import type { FanEditWithTitle } from "@/lib/queries/titles";
 import { useFanEditModal } from "./FanEditModalProvider";
 import { trackFanEditClick } from "@/lib/analytics/track";
 import PlatformIcon from "./PlatformIcon";
+import { isR2ThumbnailUrl } from "@/lib/fan-edits/thumbnail-url";
 
 type Props = {
   fanEdit: FanEditWithTitle;
@@ -82,7 +83,11 @@ export default function FanEditCard({
 
   // Both can be null (a deleted-from-platform fan_edit on a poster-less
   // title), so guard before rendering — <Image src={null}> breaks the rail.
-  const thumbSrc = fanEdit.thumbnail_url ?? fanEdit.title_poster_url;
+  // Only an R2-hosted thumbnail is trusted; null/external/expired urls fall
+  // back to the title poster.
+  const thumbSrc =
+    (isR2ThumbnailUrl(fanEdit.thumbnail_url) ? fanEdit.thumbnail_url : null) ??
+    fanEdit.title_poster_url;
 
   return (
     // Outer wrapper enforces aspect-ratio independently of the
