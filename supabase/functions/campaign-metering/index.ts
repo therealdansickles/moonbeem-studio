@@ -339,18 +339,31 @@ async function pass1InsertDeltas(
   //    eligibility — publicly readable, active, not soft-deleted,
   //    attributed to a creator. The metering job bills the same set
   //    the legacy earnings engine would, modulo campaign attribution.
-  const { data: fanEdits, error: feErr } = await supabase
-    .from("fan_edits")
-    .select("id")
-    .in("title_id", titleIds)
-    .eq("is_active", true)
-    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
-    .is("deleted_at", null)
-    .not("creator_id", "is", null);
-  if (feErr) throw new Error(`Pass1 fan_edits: ${feErr.message}`);
-  const fanEditIds = (fanEdits ?? []).map(
-    (r: { id: string }) => r.id,
-  );
+  // Chunk the title_id .in() at <=100/chunk so the `title_id=in.(...)` URL
+  // can't overflow the PostgREST/gateway cap (an oversized list fails, or worse
+  // silently returns empty -> a campaign never metered). Loud-fail: any chunk
+  // error throws and aborts this campaign's run (caught per-campaign, retried
+  // next tick) -> never degrade to empty. Each fan_edit belongs to exactly one
+  // title (so to one chunk), so concatenating chunk results is duplicate-free
+  // and identical to the prior single query. (Result-set pagination is
+  // intentionally unchanged; titles-per-campaign is tiny in practice.)
+  const FE_TITLE_CHUNK = 100;
+  const fanEditIds: string[] = [];
+  for (let i = 0; i < titleIds.length; i += FE_TITLE_CHUNK) {
+    const titleChunk = titleIds.slice(i, i + FE_TITLE_CHUNK);
+    const { data: feRows, error: feErr } = await supabase
+      .from("fan_edits")
+      .select("id")
+      .in("title_id", titleChunk)
+      .eq("is_active", true)
+      .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
+      .is("deleted_at", null)
+      .not("creator_id", "is", null);
+    if (feErr) throw new Error(`Pass1 fan_edits: ${feErr.message}`);
+    for (const r of (feRows ?? []) as Array<{ id: string }>) {
+      fanEditIds.push(r.id);
+    }
+  }
   if (fanEditIds.length === 0) return 0;
 
   // 3. All snapshots for these fan_edits captured at or after the
@@ -454,7 +467,12 @@ async function fetchSnapshotsForFanEditsSince(
   sinceISO: string,
 ): Promise<Snapshot[]> {
   const out: Snapshot[] = [];
-  const chunkSize = 500;
+  // <=100 ids/chunk keeps the fan_edit_id=in.(...) URL well under the gateway
+  // cap, so an oversized chunk can never overflow and return empty — which the
+  // inner break-on-empty (a legitimate pagination terminator) would otherwise
+  // misread as "done", silently dropping that chunk's snapshots -> unbilled
+  // edits. The inner .range() pagination and the throw-on-error are unchanged.
+  const chunkSize = 100;
   const pageSize = 1000;
   for (let i = 0; i < fanEditIds.length; i += chunkSize) {
     const chunk = fanEditIds.slice(i, i + chunkSize);
@@ -755,7 +773,12 @@ async function fetchFanEditMeta(
   fanEditIds: string[],
 ): Promise<Map<string, FanEditMeta>> {
   const out = new Map<string, FanEditMeta>();
-  const chunkSize = 500;
+  // <=100 ids/chunk: a 500-id id=in.(...) URL (~18.5KB) can overflow the gateway
+  // and return empty instead of erroring, leaving these fan_edits absent from
+  // the map -> downstream they'd be skipped as false "orphan" anomalies (one hop
+  // from bill_settled_delta). 100 ids (~4KB URL) cannot overflow. Throw-on-error
+  // unchanged.
+  const chunkSize = 100;
   for (let i = 0; i < fanEditIds.length; i += chunkSize) {
     const chunk = fanEditIds.slice(i, i + chunkSize);
     const { data, error } = await supabase
