@@ -135,17 +135,52 @@ export default function VideosTab({ clips, tier, clipDownloadUsage }: Props) {
           const duration = formatDuration(clip.duration_seconds);
           const displayLabel =
             clip.label?.trim() || fileNameFromUrl(clip.file_url);
+          // Strict allowlist: only video/mp4 plays inline reliably across
+          // browsers. Other containers (e.g. video/quicktime .mov) paint a
+          // bare native control bar with no frame, so show a download card
+          // instead of a dead <video>. Interim — the .mov→.mp4 re-encode is a
+          // separate banked task.
+          const isInlinePlayable = clip.content_type === "video/mp4";
 
           return (
             <div key={clip.id} className="flex flex-col gap-2">
-              <div className="aspect-video bg-black rounded-md overflow-hidden">
-                <video
-                  controls
-                  preload="metadata"
-                  src={clip.file_url}
-                  className="w-full h-full object-contain"
-                />
-              </div>
+              {isInlinePlayable ? (
+                <div className="aspect-video bg-black rounded-md overflow-hidden">
+                  <video
+                    controls
+                    preload="metadata"
+                    src={clip.file_url}
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+              ) : (
+                <div className="aspect-video bg-black rounded-md overflow-hidden flex flex-col items-center justify-center gap-2 p-4 text-center">
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    className="h-6 w-6 text-moonbeem-ink-subtle"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+                    />
+                  </svg>
+                  <p className="m-0 text-body-sm text-moonbeem-ink-subtle">
+                    Download to view
+                  </p>
+                  <a
+                    href={clip.file_url}
+                    download
+                    className="text-body-sm text-moonbeem-pink transition-opacity hover:opacity-80"
+                  >
+                    Download
+                  </a>
+                </div>
+              )}
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2 min-w-0">
                   <p className="text-body-sm text-moonbeem-ink truncate">
