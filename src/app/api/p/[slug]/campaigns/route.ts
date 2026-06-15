@@ -39,6 +39,13 @@ import { enforce } from "@/lib/ratelimit";
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NAME_MAX_LENGTH = 200;
+// Hard cap on client-supplied title_ids per campaign. Rejects abusive/oversized
+// input at the route boundary BEFORE the ownership .in() query, so an unbounded
+// `id=in.(...)` URL can never be built (100 uuids ~= 3.7KB, well under the
+// gateway cap -> the single .in() stays safe with no chunking). Generous vs any
+// realistic campaign (live max is 1 title/campaign). A cap (reject), NOT
+// chunking: chunking abusive external input would just make the abuse efficient.
+const MAX_TITLES_PER_CAMPAIGN = 100;
 
 export async function POST(
   request: NextRequest,
@@ -109,6 +116,18 @@ export async function POST(
   // De-dupe defensively so a noisy client can't try to bypass the
   // unique (campaign_id, title_id) constraint with repeated ids.
   const uniqueTitleIds = Array.from(new Set(titleIds));
+
+  // Cap the deduped set BEFORE the ownership .in() query at the bottom of this
+  // handler. Without this, an oversized title_ids array builds a multi-KB
+  // `id=in.(...)` URL that overflows the gateway (the .in() trap). Reject
+  // oversized input here rather than letting it fall through to a confusing
+  // 500 / count-mismatch 400. >MAX rejects; ==MAX and below proceed.
+  if (uniqueTitleIds.length > MAX_TITLES_PER_CAMPAIGN) {
+    return NextResponse.json(
+      { error: "too_many_titles", max_titles: MAX_TITLES_PER_CAMPAIGN },
+      { status: 400 },
+    );
+  }
 
   // cpm_rate_cents — integer >= 1. A 0-cent CPM means no payouts,
   // which contradicts having a budget pool; if the partner wants to
