@@ -17,6 +17,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getCurrentProfile, getUser } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { chunkedIn } from "@/lib/queries/chunked-in";
 import GrowthChart from "@/components/p/GrowthChart";
 import AllEditsTable from "@/components/p/AllEditsTable";
 import PartnerRatesCard from "@/components/p/PartnerRatesCard";
@@ -1295,21 +1296,37 @@ export default async function PartnerDashboardPage({
   // "Completed — Rolled over $X.XX" vs "Pool drained" pill copy.
   const rolloverByCampaign = new Map<string, number>();
   if (campaignIds.length > 0) {
-    const [ctRes, pcRes] = await Promise.all([
-      supabase
-        .from("campaign_titles")
-        .select("campaign_id")
-        .in("campaign_id", campaignIds),
-      supabase
-        .from("partner_credits")
-        .select("source_campaign_id, amount_cents")
-        .in("source_campaign_id", campaignIds),
+    // Both reads are partner-scoped DISPLAY (title-count + rollover-credit pill),
+    // never a money write or a dollar figure in the budget math. Chunk BOTH at
+    // <=100 over the shared campaignIds with vanilla chunkedIn (degrade-to-empty
+    // is the correct cosmetic behavior here — a dropped chunk only undercounts a
+    // display, and loud-failing would wrongly break the dashboard). Wrapping both
+    // keeps the block from half-failing with one chunked and one not.
+    const [ctRows, pcRows] = await Promise.all([
+      chunkedIn<{ campaign_id: string }>(
+        campaignIds,
+        "dashboard.campaignTitles",
+        (chunk) =>
+          supabase
+            .from("campaign_titles")
+            .select("campaign_id")
+            .in("campaign_id", chunk),
+      ),
+      chunkedIn<{ source_campaign_id: string; amount_cents: number | null }>(
+        campaignIds,
+        "dashboard.rolloverCredits",
+        (chunk) =>
+          supabase
+            .from("partner_credits")
+            .select("source_campaign_id, amount_cents")
+            .in("source_campaign_id", chunk),
+      ),
     ]);
-    for (const r of ctRes.data ?? []) {
+    for (const r of ctRows) {
       const cid = r.campaign_id as string;
       titleCountByCampaign.set(cid, (titleCountByCampaign.get(cid) ?? 0) + 1);
     }
-    for (const r of pcRes.data ?? []) {
+    for (const r of pcRows) {
       const cid = r.source_campaign_id as string;
       const cents = (r.amount_cents as number | null) ?? 0;
       rolloverByCampaign.set(cid, (rolloverByCampaign.get(cid) ?? 0) + cents);

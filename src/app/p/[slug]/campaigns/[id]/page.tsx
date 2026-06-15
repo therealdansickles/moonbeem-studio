@@ -330,23 +330,37 @@ export default async function CampaignDetailPage({ params }: PageProps) {
       byFanEdit.set(e.fan_edit_id, f);
     }
   }
-  const creatorIds = Array.from(byCreator.keys());
-  const fanEditIds = Array.from(byFanEdit.keys());
+  // Only the top-10 by earnings are rendered (the .slice(0, 10) below), and the
+  // ranking is by in-memory total_cents — independent of these display reads. So
+  // bound the handle/meta lookups to those <=10 ids: no oversized id=in.(...)
+  // URL is ever built (no chunking needed), and the rendered top-10 is
+  // identical — these reads supply only the display handle/thumbnail attached
+  // AFTER ranking. (Same stable sort + source as the render slices below, so
+  // the bounded id set is exactly the rows that render.)
+  const TOP_N = 10;
+  const topCreatorIds = Array.from(byCreator.entries())
+    .sort((a, b) => b[1].sum - a[1].sum)
+    .slice(0, TOP_N)
+    .map(([id]) => id);
+  const topFanEditIds = Array.from(byFanEdit.entries())
+    .sort((a, b) => b[1].sum - a[1].sum)
+    .slice(0, TOP_N)
+    .map(([id]) => id);
 
   const [creatorRowsRes, fanEditRowsRes] = await Promise.all([
-    creatorIds.length > 0
+    topCreatorIds.length > 0
       ? supabase
           .from("public_creators")
           .select("id, moonbeem_handle")
-          .in("id", creatorIds)
+          .in("id", topCreatorIds)
       : Promise.resolve({ data: [] as Array<{ id: string; moonbeem_handle: string }> }),
-    fanEditIds.length > 0
+    topFanEditIds.length > 0
       ? supabase
           .from("fan_edits")
           .select(
             "id, platform, thumbnail_url, creator_handle_displayed, title_id",
           )
-          .in("id", fanEditIds)
+          .in("id", topFanEditIds)
       : Promise.resolve({
           data: [] as Array<{
             id: string;
