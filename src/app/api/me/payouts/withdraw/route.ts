@@ -36,6 +36,7 @@ import { verifySession } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getStripe } from "@/lib/stripe/server";
 import { enforce } from "@/lib/ratelimit";
+import { chunkedInOrThrow } from "@/lib/queries/chunked-in";
 
 const MIN_WITHDRAWAL_CENTS = 1000;
 
@@ -178,31 +179,30 @@ export async function POST() {
   }
 
   // Stripe succeeded — the money has moved to the connected account. Stamp
-  // withdrawn_at on the earnings rows we settled (clamp to the snapshotted
-  // ids — a row that landed between snapshot and now stays unwithdrawn for
-  // the next call). This is a single UPDATE … WHERE id IN (…): all-or-nothing
-  // for the batch.
+  // withdrawn_at on the snapshotted earnings, CHUNKED <=100 with LOUD-FAIL
+  // (chunkedInOrThrow). Rationale: an unbounded `id=in.(...)` UPDATE URL can
+  // overflow the gateway, and a degrade-to-empty chunk helper would SWALLOW a
+  // failed chunk -> fall through to 'completed' -> the unstamped rows stay
+  // withdrawn_at NULL and get RE-PAID on the next withdrawal (double-pay).
+  // chunkedInOrThrow THROWS on any chunk error; on that throw — and on a
+  // partial-settle count mismatch (the confirmation re-read below) — we PARK
+  // in 'needs_reconciliation' (the EXISTING FIX-A branch), never 'completed',
+  // never an uncaught crash. Each chunk's .select("id") yields the exact
+  // stamped count. Earlier chunks that committed stay stamped; the whole
+  // snapshot set is owned by the parked withdrawal for manual reconciliation,
+  // and the step-2 re-entry guard blocks this creator until then.
+  // (FIX B — a structural creator_earnings.withdrawal_id link + an auto
+  // reconciler — is the durable follow-up, not this change.)
   const withdrawnAt = new Date().toISOString();
-  const { error: stampErr } = await supabase
-    .from("creator_earnings")
-    .update({ withdrawn_at: withdrawnAt })
-    .in("id", earningsIdsToSettle);
 
-  if (stampErr) {
-    // DOUBLE-PAY GUARD (FIX A). The transfer SUCCEEDED but we could not stamp
-    // withdrawn_at, so these earnings are still withdrawn_at NULL. We must NOT
-    // mark this 'completed' and must NOT report clean success — either would
-    // let the creator withdraw again and re-pay the same earnings. Park the
-    // row in 'needs_reconciliation' (money moved → record the transfer id;
-    // completed_at stays null because it is NOT complete). The step-2 re-entry
-    // guard blocks this creator's future withdrawals until an admin reconciles
-    // the row by hand. Manual-clear steps: docs/payout-reconciliation.md.
-    // (FIX B — a structural creator_earnings.withdrawal_id link + an auto
-    // reconciler — is the durable follow-up, not this change.)
+  // PARK: the only non-'completed' terminal for a transfer that already moved
+  // money. Mirrors the prior FIX-A branch exactly (status ->
+  // needs_reconciliation, record transfer id, completed_at stays null, 202).
+  const parkForReconciliation = async (reason: string) => {
     console.error(
       `[payouts] RECONCILE-REQUIRED withdrawal=${withdrawalId} transfer=${transfer.id} ` +
-        `stamp failed AFTER successful transfer (money moved, earnings NOT stamped): ${stampErr.message}; ` +
-        `unstamped earnings_ids=[${earningsIdsToSettle.join(",")}]`,
+        `${reason} (money moved AFTER successful transfer): ` +
+        `earnings_ids=[${earningsIdsToSettle.join(",")}]`,
     );
     await supabase
       .from("withdrawals")
@@ -225,9 +225,41 @@ export async function POST() {
       },
       { status: 202 },
     );
+  };
+
+  let stampedIds: string[];
+  try {
+    const stamped = await chunkedInOrThrow<{ id: string }>(
+      earningsIdsToSettle,
+      "withdraw.settle",
+      (chunk) =>
+        supabase
+          .from("creator_earnings")
+          .update({ withdrawn_at: withdrawnAt })
+          .in("id", chunk)
+          .select("id"),
+    );
+    stampedIds = stamped.map((r) => r.id);
+  } catch (stampErr) {
+    // A chunk errored AFTER the transfer. Prior chunks may have stamped; PARK
+    // (never 'completed') — this closes the recon's double-pay window.
+    return parkForReconciliation(
+      `settle chunk failed: ${
+        stampErr instanceof Error ? stampErr.message : "stamp_error"
+      }`,
+    );
   }
 
-  // Stamp succeeded — this is the ONLY path to 'completed'.
+  // Confirmation re-read (recon flag 4): the settle must stamp EXACTLY the
+  // snapshotted set. Fewer stamped (a partial settle with no hard error) must
+  // NOT be marked completed — the unstamped rows would be re-paid next time.
+  if (stampedIds.length !== earningsIdsToSettle.length) {
+    return parkForReconciliation(
+      `partial settle: stamped ${stampedIds.length} of ${earningsIdsToSettle.length}`,
+    );
+  }
+
+  // Stamp confirmed complete — this is the ONLY path to 'completed'.
   await supabase
     .from("withdrawals")
     .update({
@@ -242,6 +274,6 @@ export async function POST() {
     withdrawal_id: withdrawalId,
     amount_cents: totalCents,
     stripe_transfer_id: transfer.id,
-    earnings_rows_settled: earningsIdsToSettle.length,
+    earnings_rows_settled: stampedIds.length,
   });
 }
