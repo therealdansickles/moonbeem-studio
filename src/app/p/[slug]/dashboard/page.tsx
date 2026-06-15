@@ -21,6 +21,7 @@ import { chunkedIn } from "@/lib/queries/chunked-in";
 import GrowthChart from "@/components/p/GrowthChart";
 import AllEditsTable from "@/components/p/AllEditsTable";
 import PartnerRatesCard from "@/components/p/PartnerRatesCard";
+import PartnerClipsCard from "@/components/p/PartnerClipsCard";
 import CampaignsCard from "@/components/p/CampaignsCard";
 import PartnerSubmissionsSection, {
   type PartnerSubmission,
@@ -1262,6 +1263,42 @@ export default async function PartnerDashboardPage({
     rate_cents_per_thousand: rateByTitle.get(t.id as string) ?? null,
   }));
 
+  // Per-title clips for the clip-rename card. DISPLAY read (clips table, not a
+  // money table); chunkedIn degrade-OK — a dropped chunk just hides some clips
+  // from the management list. Each title's clips fall in one chunk (chunked by
+  // title_id), so display_order is preserved within a title.
+  const clipRows = titleIds.length > 0
+    ? await chunkedIn<{
+        id: string;
+        title_id: string;
+        file_url: string | null;
+        label: string | null;
+      }>(titleIds, "dashboard.partnerClips", (chunk) =>
+        supabase
+          .from("clips")
+          .select("id, title_id, file_url, label, display_order")
+          .in("title_id", chunk)
+          .is("deleted_at", null)
+          .order("display_order", { ascending: true }),
+      )
+    : [];
+  const clipsByTitle = new Map<
+    string,
+    Array<{ id: string; file_url: string | null; label: string | null }>
+  >();
+  for (const c of clipRows) {
+    const arr = clipsByTitle.get(c.title_id) ?? [];
+    arr.push({ id: c.id, file_url: c.file_url, label: c.label });
+    clipsByTitle.set(c.title_id, arr);
+  }
+  const partnerClipTitles = titleRows
+    .map((t) => ({
+      title_id: t.id as string,
+      title: t.title as string,
+      clips: clipsByTitle.get(t.id as string) ?? [],
+    }))
+    .filter((t) => t.clips.length > 0);
+
   const monthStart = new Date();
   monthStart.setUTCDate(1);
   monthStart.setUTCHours(0, 0, 0, 0);
@@ -1673,6 +1710,16 @@ export default async function PartnerDashboardPage({
             unique_creators_paid={creatorsThisMonth.size}
           />
         </div>
+
+        {partnerClipTitles.length > 0 && (
+          <div className="mt-10">
+            <PartnerClipsCard
+              partnerSlug={partner.slug as string}
+              isAdmin={isPartnerAdmin}
+              titles={partnerClipTitles}
+            />
+          </div>
+        )}
 
         <div className="mt-10 rounded-2xl border border-white/10 bg-white/[0.02] p-5">
           <div className="flex items-center gap-3">
