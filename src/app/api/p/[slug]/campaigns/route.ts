@@ -132,18 +132,23 @@ export async function POST(
   // cpm_rate_cents — integer >= 1. A 0-cent CPM means no payouts,
   // which contradicts having a budget pool; if the partner wants to
   // pause they pause the campaign (3b/3c lifecycle), not create at 0.
+  // Reject a non-integer outright rather than silently Math.round()-ing it — a
+  // fractional cents value is a malformed client request, not something to mask.
+  // Number.isInteger is false for non-numbers, NaN, Infinity, and fractional
+  // values, so it subsumes the prior finite/number guards; the value is then
+  // used as-is (already a whole-cent integer; the column is integer-typed too).
   const cpmRaw = b.cpm_rate_cents;
-  const cpm = typeof cpmRaw === "number" ? Math.round(cpmRaw) : NaN;
-  if (!Number.isFinite(cpm) || !Number.isInteger(cpm) || cpm < 1) {
+  if (!Number.isInteger(cpmRaw) || (cpmRaw as number) < 1) {
     return NextResponse.json({ error: "invalid_cpm_rate" }, { status: 400 });
   }
+  const cpm = cpmRaw as number;
 
   // budget_pool_cents — integer > 0.
   const budgetRaw = b.budget_pool_cents;
-  const budget = typeof budgetRaw === "number" ? Math.round(budgetRaw) : NaN;
-  if (!Number.isFinite(budget) || !Number.isInteger(budget) || budget <= 0) {
+  if (!Number.isInteger(budgetRaw) || (budgetRaw as number) <= 0) {
     return NextResponse.json({ error: "invalid_budget" }, { status: 400 });
   }
+  const budget = budgetRaw as number;
 
   // starts_at / ends_at — optional. If present, must parse as Date.
   // If both present, ends_at strictly after starts_at.

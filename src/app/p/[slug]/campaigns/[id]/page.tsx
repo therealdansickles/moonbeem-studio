@@ -299,6 +299,23 @@ export default async function CampaignDetailPage({ params }: PageProps) {
     0,
   );
 
+  // Reconciliation tripwire (flag 5): the budget gauge's spent (campaign_ledger
+  // payout SUM) and the per-creator/fan_edit rollup (creator_earnings SUM) are
+  // two independent sources that should agree to the cent. They do today; this
+  // is a log-only canary so a future divergence is caught for investigation.
+  // It does NOT change what renders and does NOT throw.
+  const earningsTotalCents = earnings.reduce(
+    (s, e) => s + (e.earnings_cents ?? 0),
+    0,
+  );
+  if (spentCents !== earningsTotalCents) {
+    console.warn(
+      `[campaign-page] ledger/earnings reconciliation mismatch campaign=${id}: ` +
+        `ledger_payout_spent=${spentCents} creator_earnings_sum=${earningsTotalCents} ` +
+        `(diff=${spentCents - earningsTotalCents})`,
+    );
+  }
+
   // Status copy (honest label + description). Branches on rollover
   // when status='completed'.
   const statusCopy = campaignStatusCopy(campaign.status, {
