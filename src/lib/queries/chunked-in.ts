@@ -37,3 +37,35 @@ export async function chunkedIn<T = Record<string, unknown>>(
   }
   return out;
 }
+
+// Loud-fail sibling — for money WRITERS. A failed chunk MUST stop the
+// operation. Never degrade to empty (that silently drops rows → over/under-
+// credit: e.g. a dropped prior-views batch makes deltaViews = full lifetime
+// views → over-credit; a dropped existing-earnings batch flips claimed flags).
+// Use chunkedIn ONLY for read/display where a missing row is cosmetic.
+//
+// Same ≤100-id chunking and callback shape as chunkedIn, but on ANY chunk error
+// it THROWS (surfacing the underlying message) instead of logging-and-
+// continuing. The throw must be allowed to propagate so the calling write/calc
+// aborts and persists nothing — do NOT wrap a chunkedInOrThrow call in a
+// catch-and-continue.
+export async function chunkedInOrThrow<T = Record<string, unknown>>(
+  ids: string[],
+  label: string,
+  run: (
+    chunk: string[],
+  ) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const { data, error } = await run(chunk);
+    if (error) {
+      throw new Error(
+        `[chunked-in] ${label} chunk ${Math.floor(i / CHUNK)} (${chunk.length} ids) failed: ${error.message}`,
+      );
+    }
+    if (data) out.push(...data);
+  }
+  return out;
+}

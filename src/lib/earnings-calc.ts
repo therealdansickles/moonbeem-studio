@@ -12,6 +12,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { PUBLICLY_READABLE_FAN_EDIT_STATUSES } from "@/lib/fan-edits/status";
+import { chunkedInOrThrow } from "@/lib/queries/chunked-in";
 
 export type Rate = {
   partner_id: string;
@@ -73,17 +74,43 @@ export async function calculateEarningsForRate(
   }
 
   const fanEditIds = fanEdits.map((e) => e.id);
-  const { data: priorRows, error: priorErr } = await supabase
-    .from("creator_earnings")
-    .select("fan_edit_id, calculation_date, views_at_calculation")
-    .in("fan_edit_id", fanEditIds)
-    .lt("calculation_date", today)
-    .order("calculation_date", { ascending: false });
-  if (priorErr) {
-    return { rows_upserted: 0, total_earnings_cents: 0, error: priorErr.message };
+  // Chunked + LOUD-FAIL read of prior-day views. priorRows feeds
+  // deltaViews = currentViews − priorViews; a silently-dropped chunk would
+  // leave priorViews=0 → deltaViews = the full lifetime view_count → massive
+  // over-credit. So a chunk error MUST abort this rate (no upsert), never
+  // degrade to empty. chunkedInOrThrow throws on any chunk error; we convert
+  // that throw into this function's existing {error} return so the caller's
+  // per-rate loop records it and skips the rate — it does NOT fall through to
+  // the delta computation or upsert below.
+  // Each fan_edit_id falls in exactly one chunk and each chunk is ordered
+  // calculation_date DESC, so the first-seen row per edit below is still its
+  // most-recent prior calc — identical result to the old single .in().
+  let priorRows: Array<{
+    fan_edit_id: string;
+    calculation_date: string;
+    views_at_calculation: number | null;
+  }>;
+  try {
+    priorRows = await chunkedInOrThrow(
+      fanEditIds,
+      "earnings-calc.priorViews",
+      (chunk) =>
+        supabase
+          .from("creator_earnings")
+          .select("fan_edit_id, calculation_date, views_at_calculation")
+          .in("fan_edit_id", chunk)
+          .lt("calculation_date", today)
+          .order("calculation_date", { ascending: false }),
+    );
+  } catch (e) {
+    return {
+      rows_upserted: 0,
+      total_earnings_cents: 0,
+      error: e instanceof Error ? e.message : "prior_views_read_failed",
+    };
   }
   const priorByEdit = new Map<string, number>();
-  for (const row of priorRows ?? []) {
+  for (const row of priorRows) {
     const fid = row.fan_edit_id as string;
     if (!priorByEdit.has(fid)) {
       priorByEdit.set(fid, (row.views_at_calculation as number) ?? 0);
@@ -95,12 +122,30 @@ export async function calculateEarningsForRate(
   );
   const stubByCreator = new Map<string, boolean>();
   if (creatorIds.length > 0) {
-    const { data: creators } = await supabase
-      .from("creators")
-      .select("id, is_stub")
-      .in("id", creatorIds);
-    for (const c of creators ?? []) {
-      stubByCreator.set(c.id as string, !!c.is_stub);
+    // Chunked + LOUD-FAIL read of is_stub, which drives the `claimed` flag on
+    // every earnings row (claimed = !(is_stub ?? true)). The old code
+    // destructured only `data` and never checked the error — on a failed or
+    // oversized read, stubByCreator stayed empty and EVERY row was silently
+    // written claimed=false. Now any chunk error throws and aborts the rate
+    // (no upsert); that same throw also supplies the previously-missing error
+    // check, so we never proceed with partial creator data.
+    let creators: Array<{ id: string; is_stub: boolean | null }>;
+    try {
+      creators = await chunkedInOrThrow(
+        creatorIds,
+        "earnings-calc.creatorStub",
+        (chunk) =>
+          supabase.from("creators").select("id, is_stub").in("id", chunk),
+      );
+    } catch (e) {
+      return {
+        rows_upserted: 0,
+        total_earnings_cents: 0,
+        error: e instanceof Error ? e.message : "creator_stub_read_failed",
+      };
+    }
+    for (const c of creators) {
+      stubByCreator.set(c.id, !!c.is_stub);
     }
   }
 
