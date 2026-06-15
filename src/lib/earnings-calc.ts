@@ -156,8 +156,12 @@ export async function calculateEarningsForRate(
     const priorViews = priorByEdit.get(edit.id) ?? 0;
     const currentViews = edit.view_count ?? 0;
     const deltaViews = Math.max(0, currentViews - priorViews);
+    // Integer-first: multiply before dividing by 1000. `deltaViews / 1000` is
+    // binary-inexact (1/1000 has no exact float repr), which can floor 1 cent
+    // low at boundaries; `deltaViews * rate` is an exact integer (<= ~1e11,
+    // far under Number.MAX_SAFE_INTEGER 9.007e15) so the floor is exact.
     const earnings = Math.floor(
-      (deltaViews / 1000) * rate.rate_cents_per_thousand,
+      (deltaViews * rate.rate_cents_per_thousand) / 1000,
     );
     const claimed = !(stubByCreator.get(edit.creator_id) ?? true);
     inserts.push({

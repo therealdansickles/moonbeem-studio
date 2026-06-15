@@ -425,8 +425,12 @@ async function pass1InsertDeltas(
       const deltaViews = prior
         ? Math.max(0, currentViews - priorViews)
         : 0;
+      // Integer-first: multiply before dividing by 1000. `deltaViews / 1000` is
+      // binary-inexact (1/1000 has no exact float repr), which can floor 1 cent
+      // low at boundaries; `deltaViews * cpm_rate_cents` is an exact integer
+      // (<= ~1e11, far under Number.MAX_SAFE_INTEGER 9.007e15) so floor is exact.
       const fullCpm = Math.floor(
-        (deltaViews / 1000) * campaign.cpm_rate_cents,
+        (deltaViews * campaign.cpm_rate_cents) / 1000,
       );
       const settlesAt = new Date(
         new Date(s.captured_at).getTime() + settleMs,
