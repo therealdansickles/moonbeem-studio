@@ -95,11 +95,19 @@ export default function EditProfileForm({
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-8 px-6 py-10">
-      <header className="flex flex-col gap-1">
-        <h1 className="font-wordmark text-heading-lg text-moonbeem-ink m-0">
-          Edit profile
-        </h1>
-        <p className="text-body-sm text-moonbeem-ink-subtle">@{handle}</p>
+      <header className="flex flex-col gap-3">
+        <Link
+          href="/me"
+          className="self-start rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-body-sm text-moonbeem-ink hover:border-moonbeem-pink hover:text-moonbeem-pink"
+        >
+          ← Dashboard
+        </Link>
+        <div className="flex flex-col gap-1">
+          <h1 className="font-wordmark text-heading-lg text-moonbeem-ink m-0">
+            Edit profile
+          </h1>
+          <p className="text-body-sm text-moonbeem-ink-subtle">@{handle}</p>
+        </div>
       </header>
 
       <form onSubmit={onSubmit} className="flex flex-col gap-6">
@@ -167,18 +175,18 @@ export default function EditProfileForm({
             </>
           ) : (
             <>
-              <div className="flex flex-wrap gap-2">
+              <div className="grid w-full max-w-md grid-cols-6 gap-2">
                 {topTitles.map((t) => (
                   <div
                     key={t.title_id}
-                    className="relative aspect-[2/3] w-[52px] shrink-0 overflow-hidden rounded bg-moonbeem-navy/40"
+                    className="relative aspect-[2/3] overflow-hidden rounded bg-moonbeem-navy/40"
                   >
                     {t.poster_url ? (
                       <Image
                         src={t.poster_url}
                         alt={t.title}
                         fill
-                        sizes="52px"
+                        sizes="80px"
                         unoptimized
                         className="object-cover"
                       />
