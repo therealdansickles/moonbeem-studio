@@ -83,6 +83,13 @@ export default function AccountMenu({
           >
             Dashboard
           </Link>
+          <Link
+            href="/me/settings"
+            onClick={() => setOpen(false)}
+            className="block px-4 py-2 text-body-sm text-moonbeem-ink hover:bg-white/5 transition-colors"
+          >
+            Settings
+          </Link>
           <button
             type="button"
             disabled={pending}
