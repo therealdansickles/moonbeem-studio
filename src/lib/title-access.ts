@@ -32,34 +32,20 @@ export async function canViewTitle(
 ): Promise<boolean> {
   if (title.is_public) return true;
 
-  // Hidden title — needs a logged-in caller with the right role.
+  // Hidden (non-public catalog) title — visible to any authenticated
+  // caller; anonymous callers see only public titles.
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return false;
 
-  // Super-admin sees every title regardless of is_public.
-  const { data: profile } = await supabase
-    .from("users")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle();
-  if (profile?.role === "super_admin") return true;
-
-  // Partner-team member sees their partner's titles regardless.
-  if (title.partner_id) {
-    const { data: membership } = await supabase
-      .from("partner_users")
-      .select("id")
-      .eq("partner_id", title.partner_id)
-      .eq("user_id", user.id)
-      .is("deleted_at", null)
-      .maybeSingle();
-    if (membership) return true;
-  }
-
-  return false;
+  // Any authenticated user may view non-public catalog titles. This
+  // subsumes the former super_admin- and partner-team-only branches
+  // (both are signed-in callers, so both still pass) and opens the full
+  // catalog to signed-in users while keeping anonymous to public-only
+  // via the !user guard above.
+  return true;
 }
 
 // Server-side variant for /go/* redirects, which don't have a
