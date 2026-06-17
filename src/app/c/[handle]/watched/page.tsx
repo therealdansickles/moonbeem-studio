@@ -77,6 +77,7 @@ export default async function PublicWatchedPage({
               <Link
                 key={item.id}
                 href={`/t/${item.title_slug}`}
+                prefetch={false}
                 className="group flex flex-col gap-1"
               >
                 {inner}
