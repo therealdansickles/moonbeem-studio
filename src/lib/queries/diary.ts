@@ -44,6 +44,10 @@ const SELECT =
 async function mapRows(
   supabase: SupabaseClient,
   rows: DiaryRow[],
+  // Authenticated viewers can view the whole catalog (Step 1 canViewTitle), so
+  // non-public matched titles become linkable. Default false = anon (public-only
+  // links). The owner /me/diary view calls with the default (unchanged there).
+  viewerCanSeeCatalog = false,
 ): Promise<DiaryEntry[]> {
   const titleIds = [
     ...new Set(rows.map((r) => r.title_id).filter((x): x is string => Boolean(x))),
@@ -90,9 +94,13 @@ async function mapRows(
 
   return rows.map((r) => {
     const t = r.title_id ? titleById.get(r.title_id) : undefined;
-    // Link only when live; a matched-but-non-live title renders as text.
+    // Link when reachable by THIS viewer: public (anyone) or any non-deleted
+    // catalog title when the viewer is signed in (mirrors canViewTitle:
+    // is_public OR authenticated). Otherwise renders as text.
     const titleSlug =
-      t && t.is_public && t.deleted_at == null ? t.slug : null;
+      t && t.deleted_at == null && (t.is_public || viewerCanSeeCatalog)
+        ? t.slug
+        : null;
     return {
       id: r.id,
       title_id: r.title_id ?? null,
@@ -120,6 +128,7 @@ async function mapRows(
 export async function getPublicDiaryForCreator(
   creatorId: string,
   limit = 20,
+  viewerCanSeeCatalog = false,
 ): Promise<DiaryEntry[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -131,7 +140,7 @@ export async function getPublicDiaryForCreator(
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error || !data || data.length === 0) return [];
-  return mapRows(supabase, data as unknown as DiaryRow[]);
+  return mapRows(supabase, data as unknown as DiaryRow[], viewerCanSeeCatalog);
 }
 
 // Owner view (/me/diary) — service-role, all visibilities, newest first.

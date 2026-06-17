@@ -17,13 +17,18 @@ export default async function PublicListPage({
   const profile = await getProfileByHandle(handle);
   if (!profile || profile.is_stub || !profile.user_id) notFound();
 
-  const list = await getPublicListDetail(profile.creator_id, id);
+  // Viewer auth, fetched before the list so posters link to /t/[slug] when
+  // reachable by THIS viewer: public titles for anyone, plus non-public catalog
+  // titles when the viewer is signed in (Step 1). Logged-out viewers keep
+  // public-only links.
+  const currentUser = await getCurrentProfile();
+
+  const list = await getPublicListDetail(profile.creator_id, id, !!currentUser);
   if (!list) notFound();
 
   // Owner doorway: the signed-in viewer who owns this list gets an "Edit list"
   // link into the /me builder. Read-only for everyone else (idiom mirrors the
   // profile page: current user's id === the profile's user_id).
-  const currentUser = await getCurrentProfile();
   const isOwner = currentUser?.userId === profile.user_id;
 
   return (
@@ -98,6 +103,7 @@ export default async function PublicListPage({
               <Link
                 key={item.id}
                 href={`/t/${item.title_slug}`}
+                prefetch={false}
                 className="group flex flex-col gap-1"
               >
                 {inner}

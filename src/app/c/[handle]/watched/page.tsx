@@ -5,6 +5,7 @@
 
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { getUser } from "@/lib/dal";
 import { getProfileByHandle } from "@/lib/queries/profiles";
 import { getPublicWatchedForCreator } from "@/lib/queries/watched";
 
@@ -17,7 +18,12 @@ export default async function PublicWatchedPage({
   const profile = await getProfileByHandle(handle);
   if (!profile || profile.is_stub || !profile.user_id) notFound();
 
-  const items = await getPublicWatchedForCreator(profile.creator_id);
+  // Posters link to /t/[slug] when reachable by THIS viewer: public titles for
+  // anyone, plus non-public catalog titles when the viewer is signed in (they
+  // can view the whole catalog per Step 1). Logged-out viewers keep public-only
+  // links — non-public titles stay non-clickable (they 404 for anon).
+  const viewer = await getUser();
+  const items = await getPublicWatchedForCreator(profile.creator_id, !!viewer);
   const n = items.length;
 
   return (

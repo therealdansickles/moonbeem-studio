@@ -72,6 +72,10 @@ export async function getMyWatchedStateForTitle(
 // the ORDER key only; it is never displayed.
 export async function getPublicWatchedForCreator(
   creatorId: string,
+  // When the VIEWER is authenticated they can view the whole catalog (Step 1
+  // canViewTitle), so non-public matched titles become linkable. Anonymous
+  // viewers (default false) keep public-only links — non-public still 404s.
+  viewerCanSeeCatalog = false,
 ): Promise<WatchedItem[]> {
   const supabase = await createClient();
   const { data: rows } = await supabase
@@ -120,8 +124,14 @@ export async function getPublicWatchedForCreator(
 
   return rows.map((r) => {
     const t = r.title_id ? titleById.get(r.title_id as string) : undefined;
-    // Link only when live; a matched-but-non-live title renders as text + poster.
-    const titleSlug = t && t.is_public && t.deleted_at == null ? t.slug : null;
+    // Link when the title is reachable by THIS viewer: public (anyone) or any
+    // non-deleted catalog title when the viewer is signed in. Mirrors
+    // canViewTitle (is_public OR authenticated). A non-deleted matched title
+    // otherwise renders as text + poster (non-clickable).
+    const titleSlug =
+      t && t.deleted_at == null && (t.is_public || viewerCanSeeCatalog)
+        ? t.slug
+        : null;
     return {
       id: r.id as string,
       title_id: (r.title_id as string | null) ?? null,

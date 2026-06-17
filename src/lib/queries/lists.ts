@@ -52,6 +52,10 @@ type ItemRow = {
 async function mapItems(
   supabase: SupabaseClient,
   rows: ItemRow[],
+  // Authenticated viewers can view the whole catalog (Step 1 canViewTitle), so
+  // non-public matched titles become linkable. Default false = anon (public-only
+  // links). The owner /me builder calls with the default (unchanged there).
+  viewerCanSeeCatalog = false,
 ): Promise<ListItem[]> {
   const titleIds = [
     ...new Set(rows.map((r) => r.title_id).filter((x): x is string => Boolean(x))),
@@ -93,9 +97,13 @@ async function mapItems(
   const out: ListItem[] = [];
   for (const r of rows) {
     const t = r.title_id ? titleById.get(r.title_id) : undefined;
-    // Link only when live; a matched-but-non-live item renders as text + poster.
+    // Link when reachable by THIS viewer: public (anyone) or any non-deleted
+    // catalog title when the viewer is signed in (mirrors canViewTitle:
+    // is_public OR authenticated). Otherwise renders as text + poster.
     const titleSlug =
-      t && t.is_public && t.deleted_at == null ? t.slug : null;
+      t && t.deleted_at == null && (t.is_public || viewerCanSeeCatalog)
+        ? t.slug
+        : null;
     out.push({
       id: r.id,
       title_id: r.title_id ?? null,
@@ -231,6 +239,7 @@ export async function getPublicListsForCreator(
 export async function getPublicListDetail(
   creatorId: string,
   listId: string,
+  viewerCanSeeCatalog = false,
 ): Promise<PublicListDetail | null> {
   const supabase = await createClient();
   const { data: list } = await supabase
@@ -247,7 +256,11 @@ export async function getPublicListDetail(
     .select("id, title_id, raw_title, position")
     .eq("list_id", listId)
     .order("position", { ascending: true });
-  const mapped = await mapItems(supabase, (items ?? []) as ItemRow[]);
+  const mapped = await mapItems(
+    supabase,
+    (items ?? []) as ItemRow[],
+    viewerCanSeeCatalog,
+  );
 
   return {
     id: list.id as string,

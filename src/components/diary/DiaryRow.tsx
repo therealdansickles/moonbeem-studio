@@ -47,6 +47,7 @@ export default function DiaryRow({
         {entry.title_slug ? (
           <Link
             href={`/t/${entry.title_slug}`}
+            prefetch={false}
             className="block truncate text-body-sm font-medium text-moonbeem-ink hover:text-moonbeem-pink"
           >
             {entry.title_name}
@@ -72,6 +73,7 @@ export default function DiaryRow({
           {entry.has_review && entry.title_slug && (
             <Link
               href={`/t/${entry.title_slug}#reviews`}
+              prefetch={false}
               className="rounded-full border border-moonbeem-pink/30 bg-moonbeem-pink/10 px-2 py-0.5 text-caption text-moonbeem-pink hover:bg-moonbeem-pink/20"
             >
               Review

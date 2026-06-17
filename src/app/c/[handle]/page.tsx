@@ -39,7 +39,7 @@ export default async function ProfilePage({
   const [topTitles, fanEdits, diary, lists, watchedCount] = await Promise.all([
     getTopTitlesForUser(profile.user_id),
     getFanEditsForCreator(profile.creator_id),
-    getPublicDiaryForCreator(profile.creator_id),
+    getPublicDiaryForCreator(profile.creator_id, 20, !!currentUser),
     getPublicListsForCreator(profile.creator_id),
     getWatchedCountForCreator(profile.creator_id),
   ]);
