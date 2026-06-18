@@ -8,7 +8,7 @@ import {
 import PlatformIcon from "@/components/PlatformIcon";
 import AvatarCircle from "./AvatarCircle";
 import FollowButton from "./FollowButton";
-import { FOLLOW_STAT_CLASS, followStatText } from "./follow-stat";
+import FollowStatLinks from "./FollowStatLinks";
 import type { FollowState } from "@/lib/follows/server";
 import Top12Grid from "./Top12Grid";
 import ProfileFanEditCard from "./ProfileFanEditCard";
@@ -102,13 +102,16 @@ export default function ProfileView({
   const headerActions = isOwner ? (
     <div className="flex shrink-0 flex-col items-center gap-1.5 sm:items-end">
       {ownerControls}
-      <p className={`m-0 ${FOLLOW_STAT_CLASS}`}>
-        {followStatText(profile.follower_count, profile.following_count)}
-      </p>
+      <FollowStatLinks
+        followers={profile.follower_count}
+        following={profile.following_count}
+        handle={profile.handle}
+      />
     </div>
   ) : (
     <FollowButton
       targetCreatorId={profile.creator_id}
+      handle={profile.handle}
       initialIsFollowing={isFollowing}
       initialFollowerCount={profile.follower_count}
       followingCount={profile.following_count}

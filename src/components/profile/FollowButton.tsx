@@ -25,7 +25,7 @@ import { useRouter } from "next/navigation";
 import GateModal from "@/components/gating/GateModal";
 import { fetchJson, FetchJsonError } from "@/lib/fetch-json";
 import type { FollowState } from "@/lib/follows/server";
-import { FOLLOW_STAT_CLASS, followStatText } from "./follow-stat";
+import FollowStatLinks from "./FollowStatLinks";
 
 type FollowResponse = {
   ok: boolean;
@@ -36,6 +36,7 @@ type FollowResponse = {
 
 export default function FollowButton({
   targetCreatorId,
+  handle,
   initialIsFollowing,
   initialFollowerCount,
   followingCount,
@@ -43,6 +44,7 @@ export default function FollowButton({
   returnTo,
 }: {
   targetCreatorId: string;
+  handle: string;
   initialIsFollowing: boolean;
   initialFollowerCount: number;
   followingCount: number;
@@ -133,10 +135,13 @@ export default function FollowButton({
       >
         {label}
       </button>
-      {/* Stat line — plain text now; Step 4/5 turns these into list links. */}
-      <p className={`m-0 ${FOLLOW_STAT_CLASS}`}>
-        {followStatText(count, followingCount)}
-      </p>
+      {/* Stat line — linkified. `count` is the LIVE optimistic follower count,
+          so the byline updates on follow/unfollow without a refresh. */}
+      <FollowStatLinks
+        followers={count}
+        following={followingCount}
+        handle={handle}
+      />
       {error && (
         <p className="m-0 text-body-sm text-moonbeem-magenta">{error}</p>
       )}

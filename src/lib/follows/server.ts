@@ -17,6 +17,7 @@
 // directly.
 
 import { getUser } from "@/lib/dal";
+import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { resolveCreatorId } from "@/lib/lists/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -179,4 +180,132 @@ export async function getViewerFollowContext(
     .eq("target_creator_id", targetCreatorId)
     .limit(1);
   return { followState: "ready", isFollowing: !!(data && data.length > 0) };
+}
+
+// ============================================================================
+// Step 4/5: public follower / following list reads.
+//
+// PUBLIC reads via the anon SSR client (createClient), matching
+// getProfileByHandle. follows is public-read RLS; public_creators and
+// public_profiles are anon-readable. No service-role needed.
+//
+// `follows` has two FKs to creators, so a PostgREST embed is ambiguous — we do
+// a batched MULTI-STEP read (no embed): (1) page the follows edge ids ordered
+// newest-first, (2) .in() public_creators for handle/user_id/is_stub (the view
+// carries no name/avatar), (3) .in() public_profiles for name/avatar by the
+// non-null user_ids. Stubs (user_id NULL) have no public_profiles row → null
+// name/avatar; they are NOT dropped (AvatarCircle renders initials).
+//
+// THE ORDERING GOTCHA: the .in() reads return rows in arbitrary order. The
+// stitch iterates the step-1 ORDERED id list and looks each up in keyed maps,
+// so the created_at-desc order survives. A naive map over the .in() results
+// would lose it.
+// ============================================================================
+export type CreatorRow = {
+  creatorId: string;
+  handle: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  isStub: boolean;
+};
+
+// Resolve an ORDERED list of creator ids into display rows, preserving order.
+async function hydrateCreatorRows(
+  supabase: SupabaseClient,
+  orderedIds: string[],
+): Promise<CreatorRow[]> {
+  if (orderedIds.length === 0) return [];
+
+  // Step 2 — handle / user_id / is_stub from the anon-readable view.
+  const { data: creators } = await supabase
+    .from("public_creators")
+    .select("id, moonbeem_handle, user_id, is_stub")
+    .in("id", orderedIds);
+  const byId = new Map<
+    string,
+    { handle: string; userId: string | null; isStub: boolean }
+  >();
+  for (const c of creators ?? []) {
+    byId.set(c.id as string, {
+      handle: c.moonbeem_handle as string,
+      userId: (c.user_id as string | null) ?? null,
+      isStub: Boolean(c.is_stub),
+    });
+  }
+
+  // Step 3 — name / avatar from public_profiles, keyed by user_id (claimed
+  // creators only; stubs have no user and stay null).
+  const userIds = Array.from(
+    new Set(
+      Array.from(byId.values())
+        .map((c) => c.userId)
+        .filter((u): u is string => !!u),
+    ),
+  );
+  const profileByUserId = new Map<
+    string,
+    { displayName: string | null; avatarUrl: string | null }
+  >();
+  if (userIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from("public_profiles")
+      .select("id, display_name, avatar_url")
+      .in("id", userIds);
+    for (const p of profiles ?? []) {
+      profileByUserId.set(p.id as string, {
+        displayName: (p.display_name as string | null) ?? null,
+        avatarUrl: (p.avatar_url as string | null) ?? null,
+      });
+    }
+  }
+
+  // Step 4 — stitch in the ORIGINAL ordered-id order (NOT the .in() order).
+  const rows: CreatorRow[] = [];
+  for (const id of orderedIds) {
+    const c = byId.get(id);
+    if (!c) continue; // creator soft-deleted / not in the view → drop silently
+    const prof = c.userId ? profileByUserId.get(c.userId) : undefined;
+    rows.push({
+      creatorId: id,
+      handle: c.handle,
+      displayName: prof?.displayName ?? null,
+      avatarUrl: prof?.avatarUrl ?? null,
+      isStub: c.isStub,
+    });
+  }
+  return rows;
+}
+
+// Followers of X: rows where target_creator_id = X, the FOLLOWER hydrated.
+// Newest-follow-first. Served by idx_follows_target.
+export async function getFollowersOfCreator(
+  creatorId: string,
+  { limit, offset }: { limit: number; offset: number },
+): Promise<CreatorRow[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("follows")
+    .select("follower_creator_id, created_at")
+    .eq("target_creator_id", creatorId)
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1);
+  const orderedIds = (data ?? []).map((r) => r.follower_creator_id as string);
+  return hydrateCreatorRows(supabase, orderedIds);
+}
+
+// Who X follows: rows where follower_creator_id = X, the TARGET hydrated.
+// Newest-follow-first. Served by the follows PK prefix.
+export async function getFollowingOfCreator(
+  creatorId: string,
+  { limit, offset }: { limit: number; offset: number },
+): Promise<CreatorRow[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("follows")
+    .select("target_creator_id, created_at")
+    .eq("follower_creator_id", creatorId)
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1);
+  const orderedIds = (data ?? []).map((r) => r.target_creator_id as string);
+  return hydrateCreatorRows(supabase, orderedIds);
 }
