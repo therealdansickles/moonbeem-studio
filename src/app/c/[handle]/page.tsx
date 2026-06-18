@@ -7,6 +7,7 @@ import { getFanEditsForCreator } from "@/lib/queries/titles";
 import { getPublicDiaryForCreator } from "@/lib/queries/diary";
 import { getPublicListsForCreator } from "@/lib/queries/lists";
 import { getWatchedCountForCreator } from "@/lib/queries/watched";
+import { getViewerFollowContext } from "@/lib/follows/server";
 import ProfileView from "@/components/profile/ProfileView";
 
 export default async function ProfilePage({
@@ -32,17 +33,24 @@ export default async function ProfilePage({
         fanEdits={[]}
         watchedCount={0}
         isOwner={false}
+        followState="anon"
+        isFollowing={false}
       />
     );
   }
 
-  const [topTitles, fanEdits, diary, lists, watchedCount] = await Promise.all([
-    getTopTitlesForUser(profile.user_id),
-    getFanEditsForCreator(profile.creator_id),
-    getPublicDiaryForCreator(profile.creator_id, 20, !!currentUser),
-    getPublicListsForCreator(profile.creator_id),
-    getWatchedCountForCreator(profile.creator_id),
-  ]);
+  // Follow context folds in as one more PARALLEL entry — no serial round trip.
+  // Anon viewers fire zero queries inside it; logged-in viewers cost one
+  // resolveCreatorId (+ one follows probe only when claimed).
+  const [topTitles, fanEdits, diary, lists, watchedCount, followContext] =
+    await Promise.all([
+      getTopTitlesForUser(profile.user_id),
+      getFanEditsForCreator(profile.creator_id),
+      getPublicDiaryForCreator(profile.creator_id, 20, !!currentUser),
+      getPublicListsForCreator(profile.creator_id),
+      getWatchedCountForCreator(profile.creator_id),
+      getViewerFollowContext(currentUser?.userId ?? null, profile.creator_id),
+    ]);
   const isOwner = currentUser?.userId === profile.user_id;
 
   return (
@@ -55,6 +63,8 @@ export default async function ProfilePage({
       fanEdits={fanEdits}
       watchedCount={watchedCount}
       isOwner={isOwner}
+      followState={followContext.followState}
+      isFollowing={followContext.isFollowing}
     />
   );
 }

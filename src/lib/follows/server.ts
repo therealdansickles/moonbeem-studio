@@ -150,3 +150,33 @@ export async function getFollowStatus(
     .limit(1);
   return !!(data && data.length > 0);
 }
+
+// What the Follow button needs to render, resolved server-side in ONE pass so
+// the button is correct on first paint and needs no round trip on click:
+//   "anon"       → viewer logged out (click → sign-in). Fires ZERO queries.
+//   "no_creator" → logged in but no claimed creator (click → /onboarding/handle).
+//                  Fires one resolveCreatorId (returns null); no follows probe.
+//   "ready"      → claimed creator; isFollowing reflects the live edge.
+// Built to drop into the profile page's existing Promise.all (no waterfall).
+export type FollowState = "anon" | "no_creator" | "ready";
+
+export async function getViewerFollowContext(
+  viewerUserId: string | null,
+  targetCreatorId: string,
+): Promise<{ followState: FollowState; isFollowing: boolean }> {
+  if (!viewerUserId) return { followState: "anon", isFollowing: false };
+  const followerCreatorId = await resolveCreatorId(viewerUserId);
+  if (!followerCreatorId) return { followState: "no_creator", isFollowing: false };
+  // Own creator — the page hides the button via isOwner; never self-following.
+  if (followerCreatorId === targetCreatorId) {
+    return { followState: "ready", isFollowing: false };
+  }
+  const sb = createServiceRoleClient();
+  const { data } = await sb
+    .from("follows")
+    .select("target_creator_id")
+    .eq("follower_creator_id", followerCreatorId)
+    .eq("target_creator_id", targetCreatorId)
+    .limit(1);
+  return { followState: "ready", isFollowing: !!(data && data.length > 0) };
+}

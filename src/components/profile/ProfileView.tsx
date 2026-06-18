@@ -7,6 +7,11 @@ import {
 } from "@/lib/socials/profile-url";
 import PlatformIcon from "@/components/PlatformIcon";
 import AvatarCircle from "./AvatarCircle";
+import FollowButton, {
+  FOLLOW_STAT_CLASS,
+  followStatText,
+} from "./FollowButton";
+import type { FollowState } from "@/lib/follows/server";
 import Top12Grid from "./Top12Grid";
 import ProfileFanEditCard from "./ProfileFanEditCard";
 import DiaryRow from "@/components/diary/DiaryRow";
@@ -28,6 +33,8 @@ type Props = {
   fanEdits: FanEditWithTitle[];
   watchedCount: number;
   isOwner: boolean;
+  followState: FollowState;
+  isFollowing: boolean;
 };
 
 export default function ProfileView({
@@ -39,6 +46,8 @@ export default function ProfileView({
   fanEdits,
   watchedCount,
   isOwner,
+  followState,
+  isFollowing,
 }: Props) {
   if (!profile) {
     return (
@@ -88,6 +97,28 @@ export default function ProfileView({
     </div>
   ) : null;
 
+  // Header-right slot: owner sees their controls + a STATIC follower/following
+  // byline (no button — own-profile hiding is decided here, server-side, by not
+  // rendering the FollowButton island at all). Everyone else gets the
+  // interactive FollowButton, which carries its own optimistic stat line.
+  const headerActions = isOwner ? (
+    <div className="flex shrink-0 flex-col items-center gap-1.5 sm:items-end">
+      {ownerControls}
+      <p className={`m-0 ${FOLLOW_STAT_CLASS}`}>
+        {followStatText(profile.follower_count, profile.following_count)}
+      </p>
+    </div>
+  ) : (
+    <FollowButton
+      targetCreatorId={profile.creator_id}
+      initialIsFollowing={isFollowing}
+      initialFollowerCount={profile.follower_count}
+      followingCount={profile.following_count}
+      followState={followState}
+      returnTo={`/c/${profile.handle}`}
+    />
+  );
+
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-12 px-6 py-10">
       {/* HEADER (CF-4) — editorial identity block. Avatar left, identity
@@ -112,7 +143,7 @@ export default function ProfileView({
                 @{profile.handle}
               </p>
             </div>
-            {ownerControls}
+            {headerActions}
           </div>
 
           {/* Verified socials (elevated) → bio → watched → other links, on a

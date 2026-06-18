@@ -26,6 +26,10 @@ export type Profile = {
   // and for users who toggled all of theirs off.
   verified_socials: VerifiedSocial[];
   is_stub: boolean;
+  // Denormalized follow counters (creators.follower_count / following_count,
+  // surfaced through public_creators). Trigger-maintained; never count(*).
+  follower_count: number;
+  following_count: number;
 };
 
 export type TopTitle = {
@@ -107,7 +111,9 @@ export async function getProfileByHandle(
 
   const { data: creator, error: cErr } = await supabase
     .from("public_creators")
-    .select("id, user_id, moonbeem_handle, is_stub")
+    .select(
+      "id, user_id, moonbeem_handle, is_stub, follower_count, following_count",
+    )
     .eq("moonbeem_handle", cleaned)
     .maybeSingle();
   if (cErr || !creator) return null;
@@ -116,6 +122,8 @@ export async function getProfileByHandle(
   const userId = (creator.user_id as string | null) ?? null;
   const moonbeemHandle = creator.moonbeem_handle as string;
   const isStub = Boolean(creator.is_stub);
+  const followerCount = (creator.follower_count as number | null) ?? 0;
+  const followingCount = (creator.following_count as number | null) ?? 0;
 
   if (!userId) {
     return {
@@ -128,6 +136,8 @@ export async function getProfileByHandle(
       links: [],
       verified_socials: [],
       is_stub: isStub,
+      follower_count: followerCount,
+      following_count: followingCount,
     };
   }
 
@@ -150,6 +160,8 @@ export async function getProfileByHandle(
     links: normalizeLinks(user?.links),
     verified_socials: verifiedSocials,
     is_stub: isStub,
+    follower_count: followerCount,
+    following_count: followingCount,
   };
 }
 
