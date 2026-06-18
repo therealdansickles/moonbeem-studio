@@ -27,7 +27,13 @@ export default async function FollowersPage({
   const { handle } = await params;
   const { page: pageParam } = await searchParams;
   const profile = await getProfileByHandle(handle);
-  if (!profile || profile.is_stub || !profile.user_id) notFound();
+  // Only a genuinely missing/deleted handle 404s (getProfileByHandle returns
+  // null when no live creator row matches). A STUB/unclaimed subject renders
+  // 200 WITH the list — a stub seeing their waiting followers is the claim
+  // incentive. Parity with /c/[handle], which shows the unclaimed framing for a
+  // stub. The rows are NEVER gated behind the unclaimed state.
+  if (!profile) notFound();
+  const isUnclaimed = profile.is_stub || !profile.user_id;
 
   const page = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
@@ -60,6 +66,26 @@ export default async function FollowersPage({
           {profile.handle}
         </p>
       </div>
+
+      {/* Unclaimed framing — mirrors the /c/[handle] stub copy (ProfileView's
+          null branch), but ADDITIVE: the follower rows still render beneath it.
+          A stub with followers seeing them is the claim incentive. */}
+      {isUnclaimed && (
+        <div className="rounded-lg border border-moonbeem-pink/30 bg-moonbeem-pink/10 p-4">
+          <p className="m-0 text-body text-moonbeem-ink-muted">
+            This handle isn&apos;t claimed yet.
+          </p>
+          <p className="m-0 mt-1 text-body-sm text-moonbeem-ink-subtle">
+            If you&apos;re @{profile.handle}, sign up to claim it.
+          </p>
+          <Link
+            href="/login"
+            className="mt-4 inline-block rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90"
+          >
+            Sign up
+          </Link>
+        </div>
+      )}
 
       {rows.length === 0 ? (
         <p className="text-body-sm text-moonbeem-ink-subtle">
