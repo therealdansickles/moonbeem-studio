@@ -25,15 +25,7 @@ import { useRouter } from "next/navigation";
 import GateModal from "@/components/gating/GateModal";
 import { fetchJson, FetchJsonError } from "@/lib/fetch-json";
 import type { FollowState } from "@/lib/follows/server";
-
-// Shared so the static owner byline (ProfileView) is byte-identical.
-export const FOLLOW_STAT_CLASS = "text-caption text-moonbeem-ink-subtle";
-
-export function followStatText(followers: number, following: number): string {
-  return `${followers.toLocaleString()} ${
-    followers === 1 ? "follower" : "followers"
-  } · ${following.toLocaleString()} following`;
-}
+import { FOLLOW_STAT_CLASS, followStatText } from "./follow-stat";
 
 type FollowResponse = {
   ok: boolean;

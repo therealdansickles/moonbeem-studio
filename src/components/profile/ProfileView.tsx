@@ -7,10 +7,8 @@ import {
 } from "@/lib/socials/profile-url";
 import PlatformIcon from "@/components/PlatformIcon";
 import AvatarCircle from "./AvatarCircle";
-import FollowButton, {
-  FOLLOW_STAT_CLASS,
-  followStatText,
-} from "./FollowButton";
+import FollowButton from "./FollowButton";
+import { FOLLOW_STAT_CLASS, followStatText } from "./follow-stat";
 import type { FollowState } from "@/lib/follows/server";
 import Top12Grid from "./Top12Grid";
 import ProfileFanEditCard from "./ProfileFanEditCard";
