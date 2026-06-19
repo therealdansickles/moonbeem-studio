@@ -1330,6 +1330,15 @@ function EpisodesEditor({
   );
   const [result, setResult] = useState<EpisodeAddResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [thumbState, setThumbState] = useState<
+    "idle" | "running" | "done" | "error"
+  >("idle");
+  const [thumbResult, setThumbResult] = useState<{
+    enriched: number;
+    failed: number;
+    remaining: number;
+  } | null>(null);
+  const [thumbError, setThumbError] = useState<string | null>(null);
 
   // One non-empty line = one episode. URL first; optional label after the FIRST
   // "|" (pipe — unambiguous, neither URLs nor labels normally contain it).
@@ -1381,6 +1390,40 @@ function EpisodesEditor({
     } catch (err) {
       setState("error");
       setErrorMsg(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // Best-effort cover enrichment: auto-derive IG covers, re-host to R2. Capped +
+  // re-runnable — click again while remaining > 0.
+  async function fetchThumbnails() {
+    if (thumbState === "running") return;
+    setThumbState("running");
+    setThumbError(null);
+    try {
+      const res = await fetch(`/api/titles/${titleId}/episodes/thumbnails`, {
+        method: "POST",
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        enriched?: number;
+        failed?: number;
+        remaining?: number;
+        error?: string;
+      };
+      if (!res.ok || !json.ok) {
+        setThumbState("error");
+        setThumbError(json.error ?? `request failed (${res.status})`);
+        return;
+      }
+      setThumbResult({
+        enriched: json.enriched ?? 0,
+        failed: json.failed ?? 0,
+        remaining: json.remaining ?? 0,
+      });
+      setThumbState("done");
+    } catch (err) {
+      setThumbState("error");
+      setThumbError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -1462,6 +1505,42 @@ function EpisodesEditor({
       {errorMsg && (
         <p className="m-0 mt-2 text-caption text-moonbeem-magenta">{errorMsg}</p>
       )}
+
+      {/* Cover thumbnails — best-effort auto-derive from Instagram, re-hosted to
+          R2. Decoupled from the add above; re-runnable for any remaining. */}
+      <div className="mt-5 border-t border-white/10 pt-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={fetchThumbnails}
+            disabled={thumbState === "running"}
+            className="rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-body-sm text-moonbeem-ink transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {thumbState === "running" ? "Fetching covers…" : "Fetch thumbnails"}
+          </button>
+          <span className="text-caption text-moonbeem-ink-subtle">
+            Auto-derives Instagram covers (re-hosted to R2). Failures keep the
+            numbered tile; re-run for any remaining.
+          </span>
+        </div>
+        {thumbResult && (
+          <p className="m-0 mt-2 text-caption text-emerald-300">
+            Enriched {thumbResult.enriched}
+            {thumbResult.failed > 0
+              ? `, ${thumbResult.failed} failed (kept numbered tile)`
+              : ""}
+            .
+            {thumbResult.remaining > 0
+              ? ` ${thumbResult.remaining} remaining — click again to continue.`
+              : " All covered."}
+          </p>
+        )}
+        {thumbError && (
+          <p className="m-0 mt-2 text-caption text-moonbeem-magenta">
+            {thumbError}
+          </p>
+        )}
+      </div>
     </section>
   );
 }

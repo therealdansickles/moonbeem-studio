@@ -90,3 +90,16 @@ export function buildPartnerLogoKey(slug: string, ext: string): string {
 export function buildPosterKey(titleSlug: string, ext: string): string {
   return `posters/${titleSlug}/${Date.now()}.${safeExt(ext)}`;
 }
+
+// episodes/<titleSlug>/<shortcode>.jpg — a per-episode cover thumbnail re-hosted
+// from Instagram. STABLE key (the IG shortcode is immutable and its cover doesn't
+// change), so a re-host overwrites the same object idempotently — no orphan
+// accumulation. The caller passes an already-validated IG shortcode
+// ([A-Za-z0-9_-], so safe for a key); titleSlug is slug-safe. Always .jpg (the
+// IG media endpoint returns JPEG).
+export function buildEpisodeThumbKey(
+  titleSlug: string,
+  shortcode: string,
+): string {
+  return `episodes/${titleSlug}/${shortcode}.jpg`;
+}
