@@ -43,6 +43,15 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "image.tmdb.org",
       },
+      {
+        // R2 public bucket — durable poster/asset host (R2_PUBLIC_URL's
+        // host; same value stored in titles.poster_url / partners.logo_url,
+        // not a secret). Required so next/image (TitlePosterShared, TitleCard)
+        // can optimize R2-hosted posters; without it the optimizer 400s →
+        // broken placeholder. Exact host, not a wildcard.
+        protocol: "https",
+        hostname: "pub-8dcc0cdf788945bc87b3931edd0bb800.r2.dev",
+      },
     ],
   },
   async redirects() {
