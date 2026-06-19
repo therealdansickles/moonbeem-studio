@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import FanEditsUploadCard from "@/components/admin/FanEditsUploadCard";
 import UploadClient from "./upload/UploadClient";
@@ -1307,6 +1307,165 @@ function PosterEditor({
   );
 }
 
+// Bulk-append Instagram episodes to the Watch tab. Paste one URL per line;
+// optional "| Label" after the URL. The client splits URL/label; the SERVER
+// validates/normalizes the IG URLs, assigns episode numbers (max+1, paste
+// order), and inserts. Append-only (no edit/delete UI by design).
+type EpisodeAddResult = {
+  added: number;
+  skipped: Array<{ line: number; url: string; reason: string }>;
+  errors: Array<{ line: number; url: string; error: string }>;
+};
+
+function EpisodesEditor({
+  titleId,
+  titleSlug,
+}: {
+  titleId: string;
+  titleSlug: string;
+}) {
+  const [text, setText] = useState("");
+  const [state, setState] = useState<"idle" | "submitting" | "done" | "error">(
+    "idle",
+  );
+  const [result, setResult] = useState<EpisodeAddResult | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // One non-empty line = one episode. URL first; optional label after the FIRST
+  // "|" (pipe — unambiguous, neither URLs nor labels normally contain it).
+  const items = useMemo(
+    () =>
+      text
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const idx = line.indexOf("|");
+          const url = (idx === -1 ? line : line.slice(0, idx)).trim();
+          const label = idx === -1 ? undefined : line.slice(idx + 1).trim();
+          return label ? { url, label } : { url };
+        }),
+    [text],
+  );
+
+  async function submit() {
+    if (items.length === 0 || state === "submitting") return;
+    setState("submitting");
+    setErrorMsg(null);
+    setResult(null);
+    try {
+      const res = await fetch(`/api/titles/${titleId}/episodes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        added?: number;
+        skipped?: EpisodeAddResult["skipped"];
+        errors?: EpisodeAddResult["errors"];
+        error?: string;
+      };
+      if (!res.ok || !json.ok) {
+        setState("error");
+        setErrorMsg(json.error ?? `request failed (${res.status})`);
+        return;
+      }
+      setResult({
+        added: json.added ?? 0,
+        skipped: json.skipped ?? [],
+        errors: json.errors ?? [],
+      });
+      setState("done");
+      if ((json.added ?? 0) > 0) setText(""); // clear on a successful add
+    } catch (err) {
+      setState("error");
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return (
+    <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+      <h2 className="m-0 text-body font-medium text-moonbeem-ink">Episodes</h2>
+      <p className="mt-1 text-caption text-moonbeem-ink-subtle">
+        Paste Instagram post/reel URLs, one per line — appended to the{" "}
+        <code className="font-mono">/t/{titleSlug}</code> Watch tab in paste
+        order. Optional label after a <code className="font-mono">|</code> (e.g.{" "}
+        <code className="font-mono">
+          https://instagram.com/reel/XXXX/ | Opening scene
+        </code>
+        ); no label → <span className="font-mono">Episode N</span>.
+      </p>
+
+      <textarea
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          if (state !== "idle") setState("idle");
+        }}
+        rows={8}
+        placeholder={
+          "https://www.instagram.com/reel/XXXXXXXXX/\nhttps://www.instagram.com/p/YYYYYYYYY/ | Behind the scenes"
+        }
+        className="mt-4 w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 font-mono text-caption text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none"
+      />
+      <div className="mt-3 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={submit}
+          disabled={items.length === 0 || state === "submitting"}
+          className="rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {state === "submitting"
+            ? "Adding…"
+            : `Add ${items.length} episode${items.length === 1 ? "" : "s"}`}
+        </button>
+        <span className="text-caption text-moonbeem-ink-subtle">
+          {items.length} line{items.length === 1 ? "" : "s"} parsed
+        </span>
+      </div>
+
+      {result && (
+        <div className="mt-3 flex flex-col gap-1">
+          <p className="m-0 text-caption text-emerald-300">
+            Added {result.added}.
+            {result.skipped.length > 0
+              ? ` Skipped ${result.skipped.length} already present.`
+              : ""}
+          </p>
+          {result.errors.length > 0 && (
+            <div className="text-caption text-moonbeem-magenta">
+              <p className="m-0">
+                {result.errors.length} line
+                {result.errors.length === 1 ? "" : "s"} not added:
+              </p>
+              <ul className="m-0 mt-1 list-disc pl-5">
+                {result.errors.map((e) => (
+                  <li key={e.line}>
+                    Line {e.line}: {e.error}
+                    {e.url ? ` — ${e.url}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {result.added > 0 && (
+            <Link
+              href={`/t/${titleSlug}`}
+              className="m-0 w-fit text-caption text-moonbeem-ink-muted hover:text-moonbeem-pink"
+            >
+              View Watch tab →
+            </Link>
+          )}
+        </div>
+      )}
+      {errorMsg && (
+        <p className="m-0 mt-2 text-caption text-moonbeem-magenta">{errorMsg}</p>
+      )}
+    </section>
+  );
+}
+
 type SettingsState = "idle" | "saving" | "error";
 
 function SettingsTab({
@@ -1463,6 +1622,8 @@ function SettingsTab({
         titleSlug={slug}
         initialPosterUrl={initialPosterUrl}
       />
+
+      <EpisodesEditor titleId={titleId} titleSlug={slug} />
 
       <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
         <h2 className="m-0 text-body font-medium text-moonbeem-ink">
