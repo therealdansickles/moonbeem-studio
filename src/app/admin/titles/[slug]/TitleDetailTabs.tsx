@@ -1016,11 +1016,55 @@ function isValidHttpUrl(s: string): boolean {
   return u.protocol === "http:" || u.protocol === "https:";
 }
 
-// Poster URL editor — URL only (file upload to R2 is a deferred follow-on).
-// Shows the CURRENT poster so a broken/fragile one is visibly broken, a
-// prefilled URL input, and a Save that PATCHes /api/titles/[id]/poster (the
-// super-admin-OR-owning-partner gate). poster_url is the single column every
-// display surface reads (title page + cards).
+// Poster file upload: jpeg/png/webp only (svg/avif excluded server-side too),
+// 5 MB client-side cap (the file PUTs direct to R2 — the server never sees the
+// bytes, so size is enforced here, mirroring the partner-logo pre-PUT check).
+const POSTER_EXT_TO_MIME: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+};
+const POSTER_ACCEPT = "image/jpeg,image/png,image/webp";
+const MAX_POSTER_BYTES = 5 * 1024 * 1024;
+
+function posterExtOf(file: File): string {
+  const m = file.name.match(/\.([a-zA-Z0-9]+)$/);
+  return (m?.[1] ?? "").toLowerCase();
+}
+
+// XHR PUT with progress — the presigned-direct upload (mirrors
+// PartnerLogoUploader). The browser PUTs the file straight to R2.
+function putWithProgress(
+  url: string,
+  file: File,
+  contentType: string,
+  contentDisposition: string,
+  onProgress: (pct: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url, true);
+    xhr.setRequestHeader("Content-Type", contentType);
+    xhr.setRequestHeader("Content-Disposition", contentDisposition);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(`R2 PUT failed: ${xhr.status} ${xhr.statusText}`));
+    };
+    xhr.onerror = () => reject(new Error("R2 PUT network error"));
+    xhr.send(file);
+  });
+}
+
+// Poster editor — upload a file OR paste a URL. Both write poster_url through
+// the SAME authorized PATCH /api/titles/[id]/poster (super-admin OR owning-
+// partner gate). Upload: presign (authorizeTitleMutation) → browser PUT to R2 →
+// PATCH { poster_key } → server resolves the durable R2 public URL. Shows the
+// CURRENT poster (broken → "⚠ failed to load"). poster_url is the single column
+// every display surface reads (title page + cards).
 function PosterEditor({
   titleId,
   titleSlug,
@@ -1037,11 +1081,100 @@ function PosterEditor({
   );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [imgFailed, setImgFailed] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   const trimmed = value.trim();
   const dirty = trimmed !== (saved ?? "");
   const malformed = trimmed.length > 0 && !isValidHttpUrl(trimmed);
-  const canSave = dirty && isValidHttpUrl(trimmed) && state !== "saving";
+  const canSave =
+    dirty && isValidHttpUrl(trimmed) && state !== "saving" && !uploading;
+
+  async function onPickFile(file: File) {
+    if (uploading || state === "saving") return;
+    setErrorMsg(null);
+    setState("idle");
+
+    // Client-side validation (the server can't size-check a direct-to-R2 PUT).
+    const ext = posterExtOf(file);
+    const mime = file.type;
+    const expected = POSTER_EXT_TO_MIME[ext];
+    if (!expected || !POSTER_ACCEPT.split(",").includes(mime)) {
+      setState("error");
+      setErrorMsg("Poster must be a JPG, PNG, or WebP image.");
+      return;
+    }
+    if (mime !== expected) {
+      setState("error");
+      setErrorMsg(
+        `File extension and content don't match (named .${ext} but is ${mime}).`,
+      );
+      return;
+    }
+    if (file.size > MAX_POSTER_BYTES) {
+      setState("error");
+      setErrorMsg(
+        `Image must be under 5 MB. Yours is ${(file.size / 1024 / 1024).toFixed(1)} MB.`,
+      );
+      return;
+    }
+
+    setUploading(true);
+    setProgress(0);
+    try {
+      const presignRes = await fetch(
+        `/api/titles/${titleId}/poster/presign?ext=${encodeURIComponent(ext)}`,
+      );
+      const presign = (await presignRes.json().catch(() => ({}))) as {
+        url?: string;
+        key?: string;
+        contentType?: string;
+        contentDisposition?: string;
+        error?: string;
+      };
+      if (!presignRes.ok || !presign.url || !presign.key) {
+        setState("error");
+        setErrorMsg(presign.error ?? `presign failed (${presignRes.status})`);
+        return;
+      }
+
+      await putWithProgress(
+        presign.url,
+        file,
+        presign.contentType ?? mime,
+        presign.contentDisposition ?? "",
+        setProgress,
+      );
+
+      // Write-back: resolve the R2 key → poster_url via the same authorized
+      // PATCH (R2 is read-after-write consistent, so the public URL renders).
+      const patchRes = await fetch(`/api/titles/${titleId}/poster`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ poster_key: presign.key }),
+      });
+      const patch = (await patchRes.json().catch(() => ({}))) as {
+        ok?: boolean;
+        poster_url?: string;
+        error?: string;
+      };
+      if (!patchRes.ok || !patch.ok || !patch.poster_url) {
+        setState("error");
+        setErrorMsg(patch.error ?? `save failed (${patchRes.status})`);
+        return;
+      }
+      setSaved(patch.poster_url);
+      setValue(patch.poster_url);
+      setImgFailed(false);
+      setState("saved");
+    } catch (err) {
+      setState("error");
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+      setProgress(0);
+    }
+  }
 
   async function save() {
     if (!canSave) return;
@@ -1078,7 +1211,8 @@ function PosterEditor({
       <h2 className="m-0 text-body font-medium text-moonbeem-ink">Poster</h2>
       <p className="mt-1 text-caption text-moonbeem-ink-subtle">
         The image shown on <code className="font-mono">/t/{titleSlug}</code> and
-        on cards across the site. URL only — paste a durable image link.
+        on cards across the site. Upload a file (stored durably on R2) or paste a
+        URL.
       </p>
 
       <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-start">
@@ -1098,7 +1232,43 @@ function PosterEditor({
           )}
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
+          {/* Upload a file (primary — durable R2). */}
+          <div className="flex flex-col gap-1">
+            <label
+              className={`inline-flex w-fit items-center gap-2 rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-body-sm text-moonbeem-ink ${
+                uploading || state === "saving"
+                  ? "cursor-not-allowed opacity-50"
+                  : "cursor-pointer hover:border-moonbeem-pink hover:text-moonbeem-pink"
+              }`}
+            >
+              <input
+                type="file"
+                accept={POSTER_ACCEPT}
+                disabled={uploading || state === "saving"}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void onPickFile(f);
+                  e.target.value = ""; // allow same-file reselect
+                }}
+                className="sr-only"
+              />
+              {uploading ? `Uploading… ${progress}%` : "Upload a file"}
+            </label>
+            <span className="text-caption text-moonbeem-ink-subtle">
+              JPG, PNG, or WebP · ≤ 5&nbsp;MB
+            </span>
+          </div>
+
+          {/* OR paste a URL. */}
+          <div className="flex items-center gap-3">
+            <span className="h-px flex-1 bg-white/10" />
+            <span className="text-caption text-moonbeem-ink-subtle">
+              or paste a URL
+            </span>
+            <span className="h-px flex-1 bg-white/10" />
+          </div>
+
           <input
             type="url"
             value={value}
@@ -1107,7 +1277,8 @@ function PosterEditor({
               if (state !== "idle") setState("idle");
             }}
             placeholder="https://…"
-            className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none"
+            disabled={uploading}
+            className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none disabled:opacity-50"
           />
           {malformed && (
             <p className="m-0 text-caption text-moonbeem-magenta">

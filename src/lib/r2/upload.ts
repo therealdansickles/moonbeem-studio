@@ -80,3 +80,13 @@ export function buildStillKey(
 export function buildPartnerLogoKey(slug: string, ext: string): string {
   return `partners/${slug}/logo-${Date.now()}.${safeExt(ext)}`;
 }
+
+// posters/<titleSlug>/<ms>.<ext>. The Date.now() ms suffix is load-bearing: it
+// mints a NEW public URL on every replace so browsers/CDNs never serve stale
+// bytes from a prior poster — the same cache-bust guard as buildPartnerLogoKey
+// (after the 2026-05-12 stale-image bug), and the whole point of replacing a
+// broken/fragile poster. Orphans at posters/<slug>/* are NOT purged here (a
+// reconciliation cron handles that, matching the logo/clip retention pattern).
+export function buildPosterKey(titleSlug: string, ext: string): string {
+  return `posters/${titleSlug}/${Date.now()}.${safeExt(ext)}`;
+}

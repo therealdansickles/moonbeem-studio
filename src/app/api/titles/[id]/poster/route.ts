@@ -17,6 +17,7 @@ import { getUser } from "@/lib/dal";
 import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { authorizeTitleMutation } from "@/lib/auth/title-mutation";
+import { buildPublicUrl } from "@/lib/r2/upload";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -64,16 +65,29 @@ export async function PATCH(
     return NextResponse.json({ error: authz.reason }, { status });
   }
 
-  let body: { poster_url?: unknown };
+  let body: { poster_url?: unknown; poster_key?: unknown };
   try {
     body = (await request.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
-  const posterUrl =
-    typeof body.poster_url === "string" ? body.poster_url.trim() : "";
-  if (!posterUrl || !isValidHttpUrl(posterUrl)) {
-    return NextResponse.json({ error: "invalid_url" }, { status: 400 });
+
+  // poster_key (from an R2 file upload via the presign route) takes precedence —
+  // resolve it to a public URL server-side (R2_PUBLIC_URL is server-only).
+  // Mirrors the partner-logo logo_key handling (partners/[id]/route.ts). Else
+  // fall back to the paste-a-URL branch with its http(s) validation.
+  const posterKey =
+    typeof body.poster_key === "string" ? body.poster_key.trim() : "";
+  let posterUrl: string;
+  if (posterKey) {
+    posterUrl = buildPublicUrl(posterKey);
+  } else {
+    const pasted =
+      typeof body.poster_url === "string" ? body.poster_url.trim() : "";
+    if (!pasted || !isValidHttpUrl(pasted)) {
+      return NextResponse.json({ error: "invalid_url" }, { status: 400 });
+    }
+    posterUrl = pasted;
   }
 
   // Write via service-role (authorization already enforced in-app). Scope by the
