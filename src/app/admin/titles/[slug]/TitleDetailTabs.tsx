@@ -113,6 +113,7 @@ type Props = {
   partnerName: string | null;
   partnerSlug: string | null;
   hasPartner: boolean;
+  posterUrl: string | null;
   allPartners: PartnerOption[];
   fanEdits: FanEditRow[];
   clips: ClipRow[];
@@ -305,8 +306,10 @@ export default function TitleDetailTabs(props: Props) {
           )}
           {tab === "settings" && (
             <SettingsTab
+              titleId={props.titleId}
               slug={props.titleSlug}
               titleName={props.titleName}
+              initialPosterUrl={props.posterUrl}
               initialIsActive={props.isActive}
               initialIsPublic={props.isPublic}
               initialPartnerId={props.partnerId}
@@ -1003,11 +1006,143 @@ function UploadTab({
   );
 }
 
+function isValidHttpUrl(s: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return false;
+  }
+  return u.protocol === "http:" || u.protocol === "https:";
+}
+
+// Poster URL editor — URL only (file upload to R2 is a deferred follow-on).
+// Shows the CURRENT poster so a broken/fragile one is visibly broken, a
+// prefilled URL input, and a Save that PATCHes /api/titles/[id]/poster (the
+// super-admin-OR-owning-partner gate). poster_url is the single column every
+// display surface reads (title page + cards).
+function PosterEditor({
+  titleId,
+  titleSlug,
+  initialPosterUrl,
+}: {
+  titleId: string;
+  titleSlug: string;
+  initialPosterUrl: string | null;
+}) {
+  const [saved, setSaved] = useState<string | null>(initialPosterUrl);
+  const [value, setValue] = useState(initialPosterUrl ?? "");
+  const [state, setState] = useState<"idle" | "saving" | "error" | "saved">(
+    "idle",
+  );
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [imgFailed, setImgFailed] = useState(false);
+
+  const trimmed = value.trim();
+  const dirty = trimmed !== (saved ?? "");
+  const malformed = trimmed.length > 0 && !isValidHttpUrl(trimmed);
+  const canSave = dirty && isValidHttpUrl(trimmed) && state !== "saving";
+
+  async function save() {
+    if (!canSave) return;
+    setState("saving");
+    setErrorMsg(null);
+    try {
+      const res = await fetch(`/api/titles/${titleId}/poster`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ poster_url: trimmed }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        poster_url?: string;
+        error?: string;
+      };
+      if (!res.ok || !json.ok || !json.poster_url) {
+        setState("error");
+        setErrorMsg(json.error ?? `request failed (${res.status})`);
+        return;
+      }
+      setSaved(json.poster_url);
+      setValue(json.poster_url);
+      setImgFailed(false);
+      setState("saved");
+    } catch (err) {
+      setState("error");
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return (
+    <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+      <h2 className="m-0 text-body font-medium text-moonbeem-ink">Poster</h2>
+      <p className="mt-1 text-caption text-moonbeem-ink-subtle">
+        The image shown on <code className="font-mono">/t/{titleSlug}</code> and
+        on cards across the site. URL only — paste a durable image link.
+      </p>
+
+      <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-start">
+        <div className="relative aspect-[2/3] w-[120px] shrink-0 overflow-hidden rounded-lg border border-white/10 bg-moonbeem-navy/40">
+          {saved && !imgFailed ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={saved}
+              alt="Current poster"
+              className="h-full w-full object-cover"
+              onError={() => setImgFailed(true)}
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center p-2 text-center text-caption text-moonbeem-ink-subtle">
+              {saved ? "⚠ failed to load" : "no poster"}
+            </div>
+          )}
+        </div>
+
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <input
+            type="url"
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              if (state !== "idle") setState("idle");
+            }}
+            placeholder="https://…"
+            className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none"
+          />
+          {malformed && (
+            <p className="m-0 text-caption text-moonbeem-magenta">
+              Enter a valid http(s) URL.
+            </p>
+          )}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={save}
+              disabled={!canSave}
+              className="rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {state === "saving" ? "Saving…" : "Save poster"}
+            </button>
+            {state === "saved" && !dirty && (
+              <span className="text-caption text-emerald-300">Saved ✓</span>
+            )}
+          </div>
+          {errorMsg && (
+            <p className="m-0 text-caption text-moonbeem-magenta">{errorMsg}</p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 type SettingsState = "idle" | "saving" | "error";
 
 function SettingsTab({
+  titleId,
   slug,
   titleName,
+  initialPosterUrl,
   initialIsActive,
   initialIsPublic,
   initialPartnerId,
@@ -1015,8 +1150,10 @@ function SettingsTab({
   initialPartnerSlug,
   allPartners,
 }: {
+  titleId: string;
   slug: string;
   titleName: string;
+  initialPosterUrl: string | null;
   initialIsActive: boolean;
   initialIsPublic: boolean;
   initialPartnerId: string | null;
@@ -1150,6 +1287,12 @@ function SettingsTab({
 
   return (
     <div className="flex flex-col gap-6">
+      <PosterEditor
+        titleId={titleId}
+        titleSlug={slug}
+        initialPosterUrl={initialPosterUrl}
+      />
+
       <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
         <h2 className="m-0 text-body font-medium text-moonbeem-ink">
           Status
