@@ -10,7 +10,7 @@ import {
 } from "@/lib/queries/titles";
 
 type Props = {
-  title: Pick<Title, "cast_members" | "crew">;
+  title: Pick<Title, "cast_members" | "crew" | "starring_csv">;
 };
 
 function PersonRow({ label, names }: { label: string; names: string[] }) {
@@ -41,6 +41,14 @@ export default function AboutCredits({ title }: Props) {
   const composers = getComposers(title.crew);
   const cast = getTopCast(title.cast_members, 5);
 
+  // Fallback cast list from the free-text starring_csv (the metadata editor
+  // writes this for manually-created titles that have no structured
+  // cast_members). Used ONLY when there's no structured cast.
+  const starringNames = (title.starring_csv ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   const anyCrew =
     directors.length +
       writers.length +
@@ -49,7 +57,7 @@ export default function AboutCredits({ title }: Props) {
       composers.length >
     0;
 
-  if (!anyCrew && cast.length === 0) return null;
+  if (!anyCrew && cast.length === 0 && starringNames.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-2 text-body-sm leading-relaxed max-w-prose w-full text-left">
@@ -76,6 +84,13 @@ export default function AboutCredits({ title }: Props) {
         names={composers}
       />
       <PersonRow label="Cast" names={cast} />
+      {/* Fallback: plain "Starring" line from starring_csv when there's no
+          structured cast_members. Real cast always wins (gated on cast empty). */}
+      {cast.length === 0 && starringNames.length > 0 && (
+        <p className="text-body text-moonbeem-ink-muted m-0">
+          Starring {starringNames.join(", ")}
+        </p>
+      )}
     </div>
   );
 }
