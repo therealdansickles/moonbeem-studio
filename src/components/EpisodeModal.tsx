@@ -58,7 +58,7 @@ export default function EpisodeModal({
             exit={{ opacity: 0, scale: 0.98 }}
             transition={{ duration: 0.22, ease: "easeOut" }}
             onClick={stop}
-            className="relative z-10 flex h-full w-full flex-col bg-moonbeem-black md:h-auto md:max-h-[90vh] md:w-auto md:max-w-[440px] md:overflow-hidden md:rounded-2xl md:border md:border-white/10 md:shadow-2xl md:shadow-black/60"
+            className="relative z-10 flex h-full w-full flex-col bg-moonbeem-black md:h-auto md:max-h-[90vh] md:w-auto md:max-w-[600px] md:overflow-hidden md:rounded-2xl md:border md:border-white/10 md:shadow-2xl md:shadow-black/60"
           >
             <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
               <span className="truncate text-body-sm font-medium text-moonbeem-ink">
@@ -74,7 +74,7 @@ export default function EpisodeModal({
               </button>
             </div>
             <div className="flex flex-1 items-start justify-center overflow-y-auto bg-moonbeem-navy/20 p-3">
-              <div className="w-full max-w-[400px]">
+              <div className="w-full max-w-[540px]">
                 <InstagramEmbed
                   url={episode.embed_url}
                   width="100%"
