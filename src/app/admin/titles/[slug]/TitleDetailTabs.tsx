@@ -103,6 +103,14 @@ export type AnalyticsData = {
   fanEditsComparison: AnalyticsFanEditRow[];
 };
 
+export type TitleMetadata = {
+  synopsis: string | null;
+  year: number | null;
+  runtime_min: number | null;
+  director: string | null;
+  starring_csv: string | null;
+};
+
 type Props = {
   titleId: string;
   titleSlug: string;
@@ -114,6 +122,7 @@ type Props = {
   partnerSlug: string | null;
   hasPartner: boolean;
   posterUrl: string | null;
+  metadata: TitleMetadata;
   allPartners: PartnerOption[];
   fanEdits: FanEditRow[];
   clips: ClipRow[];
@@ -310,6 +319,7 @@ export default function TitleDetailTabs(props: Props) {
               slug={props.titleSlug}
               titleName={props.titleName}
               initialPosterUrl={props.posterUrl}
+              initialMetadata={props.metadata}
               initialIsActive={props.isActive}
               initialIsPublic={props.isPublic}
               initialPartnerId={props.partnerId}
@@ -1545,6 +1555,229 @@ function EpisodesEditor({
   );
 }
 
+// Metadata editor — the 5 rendered About-tab fields. Partial PATCH: each Save
+// sends only the changed fields. tagline/overview/genres are intentionally
+// absent (dead columns). starring_csv is a comma-separated name list.
+function DetailsEditor({
+  titleId,
+  titleSlug,
+  initialMetadata,
+}: {
+  titleId: string;
+  titleSlug: string;
+  initialMetadata: TitleMetadata;
+}) {
+  // Saved = the last server-confirmed values; form = the editable strings.
+  const [saved, setSaved] = useState<TitleMetadata>(initialMetadata);
+  const [synopsis, setSynopsis] = useState(initialMetadata.synopsis ?? "");
+  const [year, setYear] = useState(
+    initialMetadata.year != null ? String(initialMetadata.year) : "",
+  );
+  const [runtime, setRuntime] = useState(
+    initialMetadata.runtime_min != null
+      ? String(initialMetadata.runtime_min)
+      : "",
+  );
+  const [director, setDirector] = useState(initialMetadata.director ?? "");
+  const [starring, setStarring] = useState(initialMetadata.starring_csv ?? "");
+  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">(
+    "idle",
+  );
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Build the partial body of ONLY changed fields (PATCH semantics). Empty
+  // string → null (clears the field). year/runtime sent as the trimmed string;
+  // the route validates + coerces.
+  function changedFields(): Record<string, string | number | null> | "invalid" {
+    const out: Record<string, string | number | null> = {};
+    const synN = synopsis.trim() || null;
+    if (synN !== (saved.synopsis ?? null)) out.synopsis = synN;
+    const dirN = director.trim() || null;
+    if (dirN !== (saved.director ?? null)) out.director = dirN;
+    const starN = starring.trim() || null;
+    if (starN !== (saved.starring_csv ?? null)) out.starring_csv = starN;
+
+    const yTrim = year.trim();
+    const yVal = yTrim === "" ? null : Number(yTrim);
+    if (yTrim !== "" && !Number.isInteger(yVal)) return "invalid";
+    if ((yVal ?? null) !== (saved.year ?? null)) out.year = yVal;
+
+    const rTrim = runtime.trim();
+    const rVal = rTrim === "" ? null : Number(rTrim);
+    if (rTrim !== "" && !Number.isInteger(rVal)) return "invalid";
+    if ((rVal ?? null) !== (saved.runtime_min ?? null)) out.runtime_min = rVal;
+
+    return out;
+  }
+
+  const dirty = (() => {
+    const c = changedFields();
+    return c === "invalid" ? true : Object.keys(c).length > 0;
+  })();
+
+  async function save() {
+    const fields = changedFields();
+    if (fields === "invalid") {
+      setState("error");
+      setErrorMsg("Year and runtime must be whole numbers.");
+      return;
+    }
+    if (Object.keys(fields).length === 0) return;
+    setState("saving");
+    setErrorMsg(null);
+    try {
+      const res = await fetch(`/api/titles/${titleId}/metadata`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        title?: TitleMetadata;
+        error?: string;
+      };
+      if (!res.ok || !json.ok || !json.title) {
+        setState("error");
+        setErrorMsg(json.error ?? `request failed (${res.status})`);
+        return;
+      }
+      // Settle to server truth (it returns the full row after the partial write).
+      const t = json.title;
+      setSaved({
+        synopsis: t.synopsis,
+        year: t.year,
+        runtime_min: t.runtime_min,
+        director: t.director,
+        starring_csv: t.starring_csv,
+      });
+      setSynopsis(t.synopsis ?? "");
+      setYear(t.year != null ? String(t.year) : "");
+      setRuntime(t.runtime_min != null ? String(t.runtime_min) : "");
+      setDirector(t.director ?? "");
+      setStarring(t.starring_csv ?? "");
+      setState("saved");
+    } catch (err) {
+      setState("error");
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  const inputCls =
+    "w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none";
+  const labelCls = "text-caption text-moonbeem-ink-subtle";
+  const onAnyChange = () => {
+    if (state !== "idle") setState("idle");
+  };
+
+  return (
+    <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+      <h2 className="m-0 text-body font-medium text-moonbeem-ink">Details</h2>
+      <p className="mt-1 text-caption text-moonbeem-ink-subtle">
+        Core metadata shown on the{" "}
+        <code className="font-mono">/t/{titleSlug}</code> About tab. Edit any
+        field and Save — only changed fields are written.
+      </p>
+
+      <div className="mt-5 flex flex-col gap-4">
+        <label className="flex flex-col gap-1">
+          <span className={labelCls}>Synopsis</span>
+          <textarea
+            value={synopsis}
+            onChange={(e) => {
+              setSynopsis(e.target.value);
+              onAnyChange();
+            }}
+            rows={4}
+            placeholder="The About-tab description paragraph."
+            className={inputCls}
+          />
+        </label>
+
+        <div className="grid grid-cols-2 gap-4">
+          <label className="flex flex-col gap-1">
+            <span className={labelCls}>Year</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              value={year}
+              onChange={(e) => {
+                setYear(e.target.value);
+                onAnyChange();
+              }}
+              placeholder="2026"
+              className={inputCls}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className={labelCls}>Runtime (minutes)</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              value={runtime}
+              onChange={(e) => {
+                setRuntime(e.target.value);
+                onAnyChange();
+              }}
+              placeholder="12"
+              className={inputCls}
+            />
+          </label>
+        </div>
+
+        <label className="flex flex-col gap-1">
+          <span className={labelCls}>Director</span>
+          <input
+            type="text"
+            value={director}
+            onChange={(e) => {
+              setDirector(e.target.value);
+              onAnyChange();
+            }}
+            placeholder="Jane Doe"
+            className={inputCls}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className={labelCls}>
+            Starring{" "}
+            <span className="text-moonbeem-ink-subtle">
+              (comma-separated: Name, Name, Name)
+            </span>
+          </span>
+          <input
+            type="text"
+            value={starring}
+            onChange={(e) => {
+              setStarring(e.target.value);
+              onAnyChange();
+            }}
+            placeholder="Actor One, Actor Two"
+            className={inputCls}
+          />
+        </label>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={save}
+            disabled={!dirty || state === "saving"}
+            className="rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {state === "saving" ? "Saving…" : "Save details"}
+          </button>
+          {state === "saved" && !dirty && (
+            <span className="text-caption text-emerald-300">Saved ✓</span>
+          )}
+        </div>
+        {errorMsg && (
+          <p className="m-0 text-caption text-moonbeem-magenta">{errorMsg}</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 type SettingsState = "idle" | "saving" | "error";
 
 function SettingsTab({
@@ -1552,6 +1785,7 @@ function SettingsTab({
   slug,
   titleName,
   initialPosterUrl,
+  initialMetadata,
   initialIsActive,
   initialIsPublic,
   initialPartnerId,
@@ -1563,6 +1797,7 @@ function SettingsTab({
   slug: string;
   titleName: string;
   initialPosterUrl: string | null;
+  initialMetadata: TitleMetadata;
   initialIsActive: boolean;
   initialIsPublic: boolean;
   initialPartnerId: string | null;
@@ -1703,6 +1938,12 @@ function SettingsTab({
       />
 
       <EpisodesEditor titleId={titleId} titleSlug={slug} />
+
+      <DetailsEditor
+        titleId={titleId}
+        titleSlug={slug}
+        initialMetadata={initialMetadata}
+      />
 
       <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
         <h2 className="m-0 text-body font-medium text-moonbeem-ink">

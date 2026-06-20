@@ -78,7 +78,7 @@ export default async function AdminTitleDetailPage({
   const { data: title, error: titleErr } = await supabase
     .from("titles")
     .select(
-      "id, slug, title, is_active, is_public, partner_id, poster_url, deleted_at, partners:partner_id(name, slug)",
+      "id, slug, title, is_active, is_public, partner_id, poster_url, synopsis, year, runtime_min, director, starring_csv, deleted_at, partners:partner_id(name, slug)",
     )
     .eq("slug", slug)
     .maybeSingle();
@@ -95,6 +95,11 @@ export default async function AdminTitleDetailPage({
     is_public: boolean;
     partner_id: string | null;
     poster_url: string | null;
+    synopsis: string | null;
+    year: number | null;
+    runtime_min: number | null;
+    director: string | null;
+    starring_csv: string | null;
     deleted_at: string | null;
     partners: { name: string; slug: string } | null;
   };
@@ -249,6 +254,13 @@ export default async function AdminTitleDetailPage({
       partnerSlug={t.partners?.slug ?? null}
       hasPartner={!!t.partner_id}
       posterUrl={t.poster_url}
+      metadata={{
+        synopsis: t.synopsis,
+        year: t.year,
+        runtime_min: t.runtime_min,
+        director: t.director,
+        starring_csv: t.starring_csv,
+      }}
       allPartners={allPartners}
       fanEdits={fanEdits}
       clips={clips}
