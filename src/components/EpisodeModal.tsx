@@ -75,12 +75,17 @@ export default function EpisodeModal({
             </div>
             <div className="flex flex-1 items-start justify-center overflow-y-auto bg-moonbeem-navy/20 p-3">
               <div className="w-full max-w-[540px]">
-                <InstagramEmbed
-                  url={episode.embed_url}
-                  width="100%"
-                  retryDelay={1000}
-                  placeholderDisabled
-                />
+                {/* embed_url is now string | null (mux rows store NULL). Guard so
+                    instagram rows render exactly as before; the mux player branch
+                    is added in a later step. */}
+                {episode.embed_url ? (
+                  <InstagramEmbed
+                    url={episode.embed_url}
+                    width="100%"
+                    retryDelay={1000}
+                    placeholderDisabled
+                  />
+                ) : null}
               </div>
             </div>
           </motion.div>

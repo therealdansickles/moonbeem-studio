@@ -284,8 +284,12 @@ export type TitleEpisode = {
   title_id: string;
   episode_number: number;
   label: string | null;
-  embed_url: string;
-  source: string;
+  // Nullable: mux rows store NULL embed_url (source_shape CHECK), instagram rows set it.
+  embed_url: string | null;
+  source: "instagram" | "mux";
+  // Set only on mux rows (the DRM playback id); NULL on instagram rows.
+  mux_playback_id: string | null;
+  requires_drm: boolean;
   access: string;
   cover_image_url: string | null;
   is_published: boolean;
@@ -303,7 +307,7 @@ export async function getTitleEpisodes(
   const { data, error } = await supabase
     .from("title_episodes")
     .select(
-      "id, title_id, episode_number, label, embed_url, source, access, cover_image_url, is_published",
+      "id, title_id, episode_number, label, embed_url, source, mux_playback_id, requires_drm, access, cover_image_url, is_published",
     )
     .eq("title_id", titleId)
     .eq("is_published", true)
