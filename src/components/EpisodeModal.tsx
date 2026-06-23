@@ -1,15 +1,30 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import dynamic from "next/dynamic";
 import { InstagramEmbed } from "react-social-media-embed";
 import type { TitleEpisode } from "@/lib/queries/titles";
+import PlayerLoading from "@/components/PlayerLoading";
 
-// Standalone episode player. Reuses the Instagram embed render path from
-// FanEditModal's EmbedFor (case "instagram") — fed ONLY an IG URL, with
-// NO fan_edits coupling and NO analytics (no fan_edit_events writes). The
-// embed is Instagram's public embed.js (tokenless). Single-episode for
-// v1; prev/next is banked. FanEditModal is left entirely untouched.
+// Mux player is a client-only web component — load it lazily and never on the
+// server. Its own chunk-load shows the same placeholder.
+const MuxPlayer = dynamic(() => import("@mux/mux-player-react"), {
+  ssr: false,
+  loading: () => <PlayerLoading />,
+});
+
+// Standalone episode player. Two render paths, branched on episode.source:
+//   - instagram: tokenless public IG embed (unchanged from before).
+//   - mux: DRM playback. On open we mint a fresh, short-lived playback + DRM
+//     license token (POST /api/episodes/[id]/playback-token) and feed it to
+//     MuxPlayer. Fetch-on-open is the correct DRM model — each view gets its own
+//     license. FanEditModal is left entirely untouched.
+type TokenState =
+  | { status: "loading" }
+  | { status: "ready"; playbackId: string; playbackToken: string; drmToken: string }
+  | { status: "error" };
+
 export default function EpisodeModal({
   episode,
   onClose,
@@ -30,6 +45,43 @@ export default function EpisodeModal({
       document.removeEventListener("keydown", onKey);
     };
   }, [episode, onClose]);
+
+  // Mux token: fetch-on-open. Re-runs when the open episode changes (or the
+  // modal closes -> episode null). The AbortController + aborted-guard ensure a
+  // late response from a previously-open episode never applies to the current one.
+  const [tokenState, setTokenState] = useState<TokenState>({ status: "loading" });
+  useEffect(() => {
+    if (!episode || episode.source !== "mux" || !episode.mux_playback_id) return;
+    const controller = new AbortController();
+    setTokenState({ status: "loading" });
+    (async () => {
+      try {
+        const res = await fetch(`/api/episodes/${episode.id}/playback-token`, {
+          method: "POST",
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          setTokenState({ status: "error" });
+          return;
+        }
+        const data = (await res.json()) as {
+          playbackId: string;
+          playbackToken: string;
+          drmToken: string;
+        };
+        setTokenState({
+          status: "ready",
+          playbackId: data.playbackId,
+          playbackToken: data.playbackToken,
+          drmToken: data.drmToken,
+        });
+      } catch {
+        if (controller.signal.aborted) return; // closed/changed — ignore
+        setTokenState({ status: "error" });
+      }
+    })();
+    return () => controller.abort();
+  }, [episode]);
 
   const stop = useCallback((e: React.MouseEvent) => e.stopPropagation(), []);
 
@@ -75,10 +127,27 @@ export default function EpisodeModal({
             </div>
             <div className="flex flex-1 items-start justify-center overflow-y-auto bg-moonbeem-navy/20 p-3">
               <div className="w-full max-w-[540px]">
-                {/* embed_url is now string | null (mux rows store NULL). Guard so
-                    instagram rows render exactly as before; the mux player branch
-                    is added in a later step. */}
-                {episode.embed_url ? (
+                {episode.source === "mux" ? (
+                  // MUX branch: fetch-on-open token -> DRM player.
+                  tokenState.status === "ready" ? (
+                    <MuxPlayer
+                      playbackId={tokenState.playbackId}
+                      tokens={{
+                        playback: tokenState.playbackToken,
+                        drm: tokenState.drmToken,
+                      }}
+                      streamType="on-demand"
+                      style={{ width: "100%", maxHeight: "80vh" }}
+                    />
+                  ) : tokenState.status === "error" ? (
+                    <div className="flex min-h-[320px] w-full items-center justify-center px-4 text-center text-body-sm text-moonbeem-ink-subtle">
+                      This episode can&apos;t be played right now.
+                    </div>
+                  ) : (
+                    <PlayerLoading />
+                  )
+                ) : episode.embed_url ? (
+                  // INSTAGRAM branch — unchanged: tokenless public embed.
                   <InstagramEmbed
                     url={episode.embed_url}
                     width="100%"
