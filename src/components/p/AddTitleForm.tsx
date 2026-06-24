@@ -8,6 +8,7 @@
 // and the route re-verifies membership server-side regardless. Client island —
 // the rest of the partner dashboard is server-rendered.
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -50,7 +51,9 @@ export default function AddTitleForm({ partnerSlug }: { partnerSlug: string }) {
   const [synopsis, setSynopsis] = useState("");
   const [phase, setPhase] = useState<"idle" | "saving">("idle");
   const [error, setError] = useState<string | null>(null);
-  const [created, setCreated] = useState<{ title: string } | null>(null);
+  const [created, setCreated] = useState<{ title: string; id: string } | null>(
+    null,
+  );
 
   const busy = phase === "saving";
 
@@ -73,14 +76,14 @@ export default function AddTitleForm({ partnerSlug }: { partnerSlug: string }) {
       });
       const json = (await res.json().catch(() => ({}))) as {
         error?: string;
-        title?: { title: string; slug: string };
+        title?: { id: string; title: string; slug: string };
       };
       if (!res.ok || !json.title) {
         setError(friendlyError(json.error, res.status));
         setPhase("idle");
         return;
       }
-      setCreated({ title: json.title.title });
+      setCreated({ title: json.title.title, id: json.title.id });
       setTitle("");
       setYear("");
       setRuntime("");
@@ -124,9 +127,12 @@ export default function AddTitleForm({ partnerSlug }: { partnerSlug: string }) {
         <p className="mt-4 text-body-sm text-moonbeem-ink m-0">
           Created <span className="font-medium">“{created.title}”</span> as a
           private draft.{" "}
-          <span className="text-moonbeem-ink-subtle">
-            You'll upload its video and publish it in a following step.
-          </span>
+          <Link
+            href={`/p/${partnerSlug}/titles/${created.id}`}
+            className="font-medium text-moonbeem-pink hover:underline"
+          >
+            Upload a video →
+          </Link>
         </p>
       )}
 
