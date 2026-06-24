@@ -54,6 +54,7 @@ function publishError(code: string | undefined, status: number): string {
 export default function TitleUploadPanel({
   titleId,
   filmTitle,
+  isPublic,
   isPartnerAdmin,
   episodes,
 }: {
@@ -72,6 +73,11 @@ export default function TitleUploadPanel({
   const [slowEncode, setSlowEncode] = useState(false);
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // "Make title public" — separate, deliberate go-live (Commit C).
+  const [titlePublic, setTitlePublic] = useState(isPublic);
+  const [confirmPublic, setConfirmPublic] = useState(false);
+  const [makingPublic, setMakingPublic] = useState(false);
+  const [publicError, setPublicError] = useState<string | null>(null);
 
   // Poll the status route while the asset encodes (processing -> ready/errored).
   useEffect(() => {
@@ -160,6 +166,35 @@ export default function TitleUploadPanel({
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setPublishingId(null);
+    }
+  }
+
+  async function makeTitlePublic() {
+    setMakingPublic(true);
+    setPublicError(null);
+    try {
+      const r = await fetch(`/api/titles/${titleId}/publish`, {
+        method: "POST",
+      });
+      const j = (await r.json().catch(() => ({}))) as { error?: string };
+      if (!r.ok) {
+        setPublicError(
+          j.error === "no_published_asset"
+            ? "Publish at least one video before making the title public."
+            : j.error === "title_not_active"
+              ? "This title isn't active, so it can't be made public."
+              : (j.error ?? `Couldn't make the title public (${r.status}).`),
+        );
+        setMakingPublic(false);
+        return;
+      }
+      setTitlePublic(true);
+      setConfirmPublic(false);
+      setMakingPublic(false);
+      router.refresh();
+    } catch (e) {
+      setPublicError(e instanceof Error ? e.message : String(e));
+      setMakingPublic(false);
     }
   }
 
@@ -333,6 +368,69 @@ export default function TitleUploadPanel({
 
         {error && phase !== "errored" && (
           <p className="mt-3 text-caption text-moonbeem-magenta m-0">{error}</p>
+        )}
+      </div>
+
+      {/* Make title public — a SEPARATE, deliberate go-live, intentionally
+          decoupled from asset-publish so listing the film is one explicit
+          decision (the route also guards: needs >=1 published asset). */}
+      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+        <p className="text-caption uppercase tracking-wide text-moonbeem-ink-muted m-0">
+          Visibility
+        </p>
+        {titlePublic ? (
+          <p className="mt-3 text-body-sm text-moonbeem-ink m-0">
+            <span className="text-moonbeem-lime">Public</span> — listed in the
+            catalog and viewable by anyone.
+          </p>
+        ) : (
+          <div className="mt-3 flex flex-col gap-3">
+            <p className="text-body-sm text-moonbeem-ink m-0">
+              Private draft — only your team can see this title.
+            </p>
+            {!confirmPublic ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmPublic(true);
+                  setPublicError(null);
+                }}
+                className="w-fit rounded-md border border-moonbeem-pink px-3 py-1.5 text-caption font-semibold text-moonbeem-pink transition-colors hover:bg-moonbeem-pink/10"
+              >
+                Make title public
+              </button>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <p className="text-caption text-moonbeem-ink-subtle m-0">
+                  This lists “{filmTitle}” in the public catalog and makes its
+                  page viewable by anyone. It needs at least one published video.
+                </p>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={makeTitlePublic}
+                    disabled={makingPublic}
+                    className="rounded-md bg-moonbeem-pink px-4 py-2 text-caption font-semibold text-moonbeem-navy hover:opacity-90 disabled:opacity-40"
+                  >
+                    {makingPublic ? "Publishing…" : "Yes, make it public"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmPublic(false)}
+                    disabled={makingPublic}
+                    className="text-caption text-moonbeem-ink-subtle hover:text-moonbeem-ink"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            {publicError && (
+              <p className="text-caption text-moonbeem-magenta m-0">
+                {publicError}
+              </p>
+            )}
+          </div>
         )}
       </div>
     </div>
