@@ -444,8 +444,12 @@ async function loadDailyGrowth(
     day: string;
     views: number;
     edit_count: number;
+    likes: number;
+    shares: number;
     views_delta: number | null;
     edit_count_delta: number | null;
+    likes_delta: number | null;
+    shares_delta: number | null;
   }>
 > {
   if (fanEditIds.length === 0 || titleIds.length === 0) return [];
@@ -453,7 +457,7 @@ async function loadDailyGrowth(
   const [{ data: snaps }, { data: edits }] = await Promise.all([
     supabase
       .from("view_tracking_snapshots")
-      .select("fan_edit_id, view_count, captured_at")
+      .select("fan_edit_id, view_count, like_count, share_count, captured_at")
       .in("fan_edit_id", fanEditIds)
       .order("captured_at", { ascending: true }),
     supabase
@@ -466,20 +470,39 @@ async function loadDailyGrowth(
       .is("deleted_at", null),
   ]);
 
-  const perEditPerDay = new Map<string, Map<string, number>>();
+  // Per-(fan_edit, day) MAX for each cumulative metric. The snapshot fetch is
+  // bounded by fanEditIds (built from loadAllEdits -> publicly-readable +
+  // deleted_at IS NULL), so soft-deleted edits never enter ANY series — the
+  // likes/shares maps inherit the exact same soft-delete exclusion as views.
+  const viewsPerEditPerDay = new Map<string, Map<string, number>>();
+  const likesPerEditPerDay = new Map<string, Map<string, number>>();
+  const sharesPerEditPerDay = new Map<string, Map<string, number>>();
   const allDays = new Set<string>();
+  const bumpMax = (
+    m: Map<string, Map<string, number>>,
+    fid: string,
+    day: string,
+    val: number,
+  ) => {
+    let editMap = m.get(fid);
+    if (!editMap) {
+      editMap = new Map();
+      m.set(fid, editMap);
+    }
+    if (val > (editMap.get(day) ?? 0)) editMap.set(day, val);
+  };
   for (const s of snaps ?? []) {
     const fid = s.fan_edit_id as string;
     const day = (s.captured_at as string).slice(0, 10);
-    const v = (s.view_count as number | null) ?? 0;
     allDays.add(day);
-    let editMap = perEditPerDay.get(fid);
-    if (!editMap) {
-      editMap = new Map();
-      perEditPerDay.set(fid, editMap);
-    }
-    const existing = editMap.get(day) ?? 0;
-    if (v > existing) editMap.set(day, v);
+    bumpMax(viewsPerEditPerDay, fid, day, (s.view_count as number | null) ?? 0);
+    bumpMax(likesPerEditPerDay, fid, day, (s.like_count as number | null) ?? 0);
+    bumpMax(
+      sharesPerEditPerDay,
+      fid,
+      day,
+      (s.share_count as number | null) ?? 0,
+    );
   }
 
   if (allDays.size === 0) return [];
@@ -502,16 +525,33 @@ async function loadDailyGrowth(
     .map((e) => (e.created_at as string).slice(0, 10))
     .sort();
 
-  const editLatest = new Map<string, number>();
+  // Forward-fill the latest-known value per edit for each metric, so a day with
+  // no fresh snapshot for an edit carries its prior value instead of dipping.
+  const viewsLatest = new Map<string, number>();
+  const likesLatest = new Map<string, number>();
+  const sharesLatest = new Map<string, number>();
+  const sumDay = (
+    perEditPerDay: Map<string, Map<string, number>>,
+    latest: Map<string, number>,
+    d: string,
+  ): number => {
+    for (const [fid, dayMap] of perEditPerDay) {
+      if (dayMap.has(d)) latest.set(fid, dayMap.get(d)!);
+    }
+    let total = 0;
+    for (const v of latest.values()) total += v;
+    return total;
+  };
+
   let editCursor = 0;
   let prevViews = 0;
   let prevEditCount = 0;
+  let prevLikes = 0;
+  let prevShares = 0;
   return days.map((d, i) => {
-    for (const [fid, dayMap] of perEditPerDay) {
-      if (dayMap.has(d)) editLatest.set(fid, dayMap.get(d)!);
-    }
-    let totalViews = 0;
-    for (const v of editLatest.values()) totalViews += v;
+    const totalViews = sumDay(viewsPerEditPerDay, viewsLatest, d);
+    const totalLikes = sumDay(likesPerEditPerDay, likesLatest, d);
+    const totalShares = sumDay(sharesPerEditPerDay, sharesLatest, d);
     while (
       editCursor < editCreatedDays.length &&
       editCreatedDays[editCursor] <= d
@@ -522,14 +562,22 @@ async function loadDailyGrowth(
     // tooltip renders an em-dash instead of misleading +N values.
     const views_delta = i === 0 ? null : totalViews - prevViews;
     const edit_count_delta = i === 0 ? null : editCursor - prevEditCount;
+    const likes_delta = i === 0 ? null : totalLikes - prevLikes;
+    const shares_delta = i === 0 ? null : totalShares - prevShares;
     prevViews = totalViews;
     prevEditCount = editCursor;
+    prevLikes = totalLikes;
+    prevShares = totalShares;
     return {
       day: d,
       views: totalViews,
       edit_count: editCursor,
+      likes: totalLikes,
+      shares: totalShares,
       views_delta,
       edit_count_delta,
+      likes_delta,
+      shares_delta,
     };
   });
 }
