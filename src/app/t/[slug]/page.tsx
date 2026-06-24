@@ -15,6 +15,7 @@ import {
 import { getPartnerById } from "@/lib/queries/partners";
 import TitleTabs from "@/components/TitleTabs";
 import EpisodeList from "@/components/EpisodeList";
+import HeroPlayer from "@/components/HeroPlayer";
 import FanEditsTab from "@/components/FanEditsTab";
 import VideosTab from "@/components/VideosTab";
 import StillsTab from "@/components/StillsTab";
@@ -453,7 +454,20 @@ export default async function TitlePage({ params }: PageProps) {
           <TitleTabs
             aboutContent={aboutContent}
             watchContent={
-              episodes.length > 0 ? <EpisodeList episodes={episodes} /> : undefined
+              // A single-asset FEATURE (media_type='movie' + exactly one
+              // episode) renders a hero single-player; everything else keeps the
+              // episode list BYTE-IDENTICAL. `=== 1` (not `>= 1`) so a multi-asset
+              // movie falls back to the list (hides no asset) and a 1-episode
+              // series (media_type='tv') is never mistaken for a feature.
+              title.media_type === "movie" && episodes.length === 1 ? (
+                <HeroPlayer
+                  episode={episodes[0]}
+                  posterUrl={title.poster_url}
+                  title={title.title}
+                />
+              ) : episodes.length > 0 ? (
+                <EpisodeList episodes={episodes} />
+              ) : undefined
             }
             fanEditsContent={
               <>
