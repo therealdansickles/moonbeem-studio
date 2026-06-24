@@ -1498,6 +1498,9 @@ export default async function PartnerDashboardPage({
     : `${titleRows.length} titles`;
   const primarySlug = (titleRows[0]?.slug as string | undefined) ?? "";
   const primaryName = (titleRows[0]?.title as string | undefined) ?? "";
+  // Singular/plural fragment shared by every lifetime tile caption (views +
+  // likes/comments/shares) so they phrase identically across title counts.
+  const titleScope = titleRows.length === 1 ? "the title's" : "all";
 
   return (
     <div className="min-h-screen px-4 py-6 md:px-6 md:py-12">
@@ -1549,7 +1552,7 @@ export default async function PartnerDashboardPage({
             <HeroTile
               value={formatMetric(metrics.total_views)}
               label="Total platform views"
-              sub={`lifetime views across ${titleRows.length === 1 ? "the title's" : "all"} fan edits`}
+              sub={`lifetime views across ${titleScope} fan edits`}
             />
             <HeroTile
               value={metrics.unique_creators.toLocaleString()}
@@ -1577,17 +1580,17 @@ export default async function PartnerDashboardPage({
             <HeroTile
               value={formatMetric(metrics.total_likes)}
               label="Likes"
-              sub="lifetime likes across the title's fan edits"
+              sub={`lifetime likes across ${titleScope} fan edits`}
             />
             <HeroTile
               value={formatMetric(metrics.total_comments)}
               label="Comments"
-              sub="lifetime comments across the title's fan edits"
+              sub={`lifetime comments across ${titleScope} fan edits`}
             />
             <HeroTile
               value={formatMetric(metrics.total_shares)}
               label="Shares"
-              sub="lifetime shares across the title's fan edits"
+              sub={`lifetime shares across ${titleScope} fan edits`}
             />
           </div>
         </div>
