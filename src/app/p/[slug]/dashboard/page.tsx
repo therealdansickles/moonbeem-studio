@@ -1501,6 +1501,9 @@ export default async function PartnerDashboardPage({
   // Singular/plural fragment shared by every lifetime tile caption (views +
   // likes/comments/shares) so they phrase identically across title counts.
   const titleScope = titleRows.length === 1 ? "the title's" : "all";
+  // Human period phrase for the windowed-tile captions — reuses the exact
+  // selector label (windowLabel(win)) lowercased: "last 7 days", "all time", …
+  const periodPhrase = windowLabel(win).toLowerCase();
 
   return (
     <div className="min-h-screen px-4 py-6 md:px-6 md:py-12">
@@ -1629,32 +1632,37 @@ export default async function PartnerDashboardPage({
           </span>
         </div>
 
-        <section className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
-          <HeroNumber
-            value={analytics.events.toLocaleString()}
-            label="Engagement events"
-            description="player interactions on your edits, this window"
-            responsive
-          />
-          <HeroNumber
-            value={analytics.uniqueSignedInUsers.toLocaleString()}
-            label="Signed-in users"
-            description="distinct logged-in viewers who interacted, this window"
-            responsive
-          />
-          <HeroNumber
-            value={analytics.goClicks.toLocaleString()}
-            label="/go/ clicks (humans)"
-            description="non-bot outbound /go/ link clicks, this window"
-            responsive
-          />
-          <HeroNumber
-            value={analytics.openRequests.toLocaleString()}
-            label="Open title requests"
-            description="unfulfilled viewer requests for more edits (current)"
-            responsive
-          />
-        </section>
+        <div className="mt-6 flex flex-col gap-3">
+          <p className="text-caption uppercase tracking-wide text-moonbeem-ink-muted m-0">
+            Recent activity
+          </p>
+          <section className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
+            <HeroNumber
+              value={analytics.events.toLocaleString()}
+              label="Engagement events"
+              description={`player interactions on your edits, ${periodPhrase}`}
+              responsive
+            />
+            <HeroNumber
+              value={analytics.uniqueSignedInUsers.toLocaleString()}
+              label="Signed-in users"
+              description={`distinct logged-in viewers who interacted, ${periodPhrase}`}
+              responsive
+            />
+            <HeroNumber
+              value={analytics.goClicks.toLocaleString()}
+              label="/go/ clicks (humans)"
+              description={`non-bot outbound /go/ link clicks, ${periodPhrase}`}
+              responsive
+            />
+            <HeroNumber
+              value={analytics.openRequests.toLocaleString()}
+              label="Open title requests"
+              description="unfulfilled viewer requests for more edits (current)"
+              responsive
+            />
+          </section>
+        </div>
 
         <section className="mt-10 flex flex-col gap-3">
           <h2 className="text-heading-lg md:text-display-sm m-0">Engagement over time</h2>
