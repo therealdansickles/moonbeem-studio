@@ -66,12 +66,12 @@ export async function POST(
     return NextResponse.json({ error: "not_authorized" }, { status: 403 });
   }
 
-  // GEO SEAM (present, not enforcing). Read the Vercel edge country header and
-  // defer to isTerritoryAllowed, which currently returns true unconditionally.
-  // The upload-flow unit will populate per-title territory data + fill in that
-  // helper's body ONLY — it must never touch this route. A false result -> 451.
+  // GEO GATE: read the Vercel edge country header and defer to isTerritoryAllowed,
+  // which reads the title's per-title territory rights (default-deny on unset).
+  // The check lives ENTIRELY in the helper body — this route only reads the header,
+  // awaits the helper, and maps a false result -> 451 (branches unchanged).
   const country = request.headers.get("x-vercel-ip-country");
-  if (!isTerritoryAllowed(country, { id: episode.title_id })) {
+  if (!(await isTerritoryAllowed(country, { id: episode.title_id }))) {
     return NextResponse.json({ error: "territory_restricted" }, { status: 451 });
   }
 
