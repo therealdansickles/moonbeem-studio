@@ -28,8 +28,14 @@ export default function HeroPlayer({
   const [playing, setPlaying] = useState(false);
 
   if (playing) {
+    // Lock the player to the SAME fixed 16:9 box the still occupied: the outer
+    // frame stays aspect-video (no size change on swap), and the mux-player fills
+    // it (h-full + max-h-none override its inline max-height) instead of imposing
+    // its own default aspect on mount — so still -> player has NO resize jump; the
+    // video letterboxes inside the stable frame. Scoped to HeroPlayer: the shared
+    // MuxEpisodePlayer island and the modal's sizing are untouched.
     return (
-      <div className="w-full overflow-hidden rounded-2xl border border-white/10 bg-black">
+      <div className="aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black [&_mux-player]:h-full [&_mux-player]:!max-h-none">
         <MuxEpisodePlayer episode={episode} />
       </div>
     );
