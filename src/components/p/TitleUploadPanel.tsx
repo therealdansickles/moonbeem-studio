@@ -15,9 +15,16 @@
 // with the FILM TITLE as the label, stashes the jobId, returns the one-time Mux
 // upload URL. Relative POST keeps Origin = current host for the cross-origin PUT.
 
-import MuxUploader from "@mux/mux-uploader-react";
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+
+// MuxUploader is a web component (registers a custom element, touches
+// customElements/HTMLElement) — load it client-only via dynamic ssr:false,
+// exactly as EpisodeModal loads MuxPlayer. Avoids the web-component SSR break.
+const MuxUploader = dynamic(() => import("@mux/mux-uploader-react"), {
+  ssr: false,
+});
 
 type Episode = {
   id: string;
