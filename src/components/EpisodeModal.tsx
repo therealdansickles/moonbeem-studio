@@ -1,30 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import dynamic from "next/dynamic";
 import { InstagramEmbed } from "react-social-media-embed";
 import type { TitleEpisode } from "@/lib/queries/titles";
-import PlayerLoading from "@/components/PlayerLoading";
-
-// Mux player is a client-only web component — load it lazily and never on the
-// server. Its own chunk-load shows the same placeholder.
-const MuxPlayer = dynamic(() => import("@mux/mux-player-react"), {
-  ssr: false,
-  loading: () => <PlayerLoading />,
-});
+import MuxEpisodePlayer from "@/components/MuxEpisodePlayer";
 
 // Standalone episode player. Two render paths, branched on episode.source:
 //   - instagram: tokenless public IG embed (unchanged from before).
-//   - mux: DRM playback. On open we mint a fresh, short-lived playback + DRM
-//     license token (POST /api/episodes/[id]/playback-token) and feed it to
-//     MuxPlayer. Fetch-on-open is the correct DRM model — each view gets its own
-//     license. FanEditModal is left entirely untouched.
-type TokenState =
-  | { status: "loading" }
-  | { status: "ready"; playbackId: string; playbackToken: string; drmToken: string }
-  | { status: "error" };
-
+//   - mux: DRM playback via the shared <MuxEpisodePlayer> island (fetch-on-open
+//     token -> MuxPlayer). The mux player + token flow were EXTRACTED into
+//     MuxEpisodePlayer so the feature hero reuses the exact same path; the modal
+//     chrome (scroll-lock, Escape, overlay, close) is unchanged. FanEditModal is
+//     left entirely untouched.
 export default function EpisodeModal({
   episode,
   onClose,
@@ -45,43 +33,6 @@ export default function EpisodeModal({
       document.removeEventListener("keydown", onKey);
     };
   }, [episode, onClose]);
-
-  // Mux token: fetch-on-open. Re-runs when the open episode changes (or the
-  // modal closes -> episode null). The AbortController + aborted-guard ensure a
-  // late response from a previously-open episode never applies to the current one.
-  const [tokenState, setTokenState] = useState<TokenState>({ status: "loading" });
-  useEffect(() => {
-    if (!episode || episode.source !== "mux" || !episode.mux_playback_id) return;
-    const controller = new AbortController();
-    setTokenState({ status: "loading" });
-    (async () => {
-      try {
-        const res = await fetch(`/api/episodes/${episode.id}/playback-token`, {
-          method: "POST",
-          signal: controller.signal,
-        });
-        if (!res.ok) {
-          setTokenState({ status: "error" });
-          return;
-        }
-        const data = (await res.json()) as {
-          playbackId: string;
-          playbackToken: string;
-          drmToken: string;
-        };
-        setTokenState({
-          status: "ready",
-          playbackId: data.playbackId,
-          playbackToken: data.playbackToken,
-          drmToken: data.drmToken,
-        });
-      } catch {
-        if (controller.signal.aborted) return; // closed/changed — ignore
-        setTokenState({ status: "error" });
-      }
-    })();
-    return () => controller.abort();
-  }, [episode]);
 
   const stop = useCallback((e: React.MouseEvent) => e.stopPropagation(), []);
 
@@ -128,24 +79,8 @@ export default function EpisodeModal({
             <div className="flex flex-1 items-start justify-center overflow-y-auto bg-moonbeem-navy/20 p-3">
               <div className="w-full max-w-[540px]">
                 {episode.source === "mux" ? (
-                  // MUX branch: fetch-on-open token -> DRM player.
-                  tokenState.status === "ready" ? (
-                    <MuxPlayer
-                      playbackId={tokenState.playbackId}
-                      tokens={{
-                        playback: tokenState.playbackToken,
-                        drm: tokenState.drmToken,
-                      }}
-                      streamType="on-demand"
-                      style={{ width: "100%", maxHeight: "80vh" }}
-                    />
-                  ) : tokenState.status === "error" ? (
-                    <div className="flex min-h-[320px] w-full items-center justify-center px-4 text-center text-body-sm text-moonbeem-ink-subtle">
-                      This episode can&apos;t be played right now.
-                    </div>
-                  ) : (
-                    <PlayerLoading />
-                  )
+                  // MUX branch: the shared DRM player island (token fetch-on-mount).
+                  <MuxEpisodePlayer episode={episode} />
                 ) : episode.embed_url ? (
                   // INSTAGRAM branch — unchanged: tokenless public embed.
                   <InstagramEmbed
