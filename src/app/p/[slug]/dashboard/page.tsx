@@ -1002,6 +1002,12 @@ function PerTitleRollup({
   );
 }
 
+// A median dwell needs a minimum sample to mean anything — at small n the
+// "median" is just one or two events (a 7d window of n=1 is a single close, not
+// a median). Below this threshold the tile shows "—" instead of a misleadingly
+// precise number.
+const MIN_DWELL_N = 10;
+
 // Format a dwell duration for the "Median time on edit" tile. Sub-minute uses
 // one-decimal seconds ("2.6s") — honest at this scale, where the typical median
 // is a few seconds; a minute or more renders "1m 4s". null (no events in the
@@ -1150,13 +1156,14 @@ async function loadPartnerAnalytics(
   // Median modal-open DWELL (ms) over the windowed event set. duration_ms is
   // carried ONLY by modal_close events; the MEAN is outlier-poisoned (a single
   // hours-long backgrounded tab drags it to tens of seconds), so we surface the
-  // MEDIAN — a few seconds, typical. n=0 -> null -> rendered as an em-dash.
+  // MEDIAN — a few seconds, typical. Below MIN_DWELL_N qualifying events the
+  // sample is too thin for a real median, so we render "—" (subsumes n=0).
   const dwellMsSorted = events
     .filter((e) => e.event_type === "modal_close" && e.duration_ms != null)
     .map((e) => e.duration_ms as number)
     .sort((a, b) => a - b);
   const medianDwellMs =
-    dwellMsSorted.length === 0
+    dwellMsSorted.length < MIN_DWELL_N
       ? null
       : dwellMsSorted.length % 2 === 1
         ? dwellMsSorted[(dwellMsSorted.length - 1) / 2]
