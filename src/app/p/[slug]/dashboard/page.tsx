@@ -1540,26 +1540,56 @@ export default async function PartnerDashboardPage({
           </p>
         </div>
 
-        <div className="mt-6 md:mt-10 grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
-          <HeroTile
-            value={formatMetric(metrics.total_views)}
-            label="Total platform views"
-            sub={`lifetime views across ${titleRows.length === 1 ? "the title's" : "all"} fan edits`}
-          />
-          <HeroTile
-            value={metrics.unique_creators.toLocaleString()}
-            label="Unique fan creators"
-          />
-          <HeroTile
-            value={formatMetric(metrics.modal_opens)}
-            label="Moonbeem plays"
-            sub="opens in Moonbeem's player"
-          />
-          <HeroTile
-            value={metrics.ticket_clicks.toLocaleString()}
-            label="Ticket click-throughs"
-            sub="outbound to listings"
-          />
+        {/* Lifetime hero tiles, grouped: Reach (4) + Engagement (3). */}
+        <div className="mt-6 md:mt-10 flex flex-col gap-3">
+          <p className="text-caption uppercase tracking-wide text-moonbeem-ink-muted m-0">
+            Reach
+          </p>
+          <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
+            <HeroTile
+              value={formatMetric(metrics.total_views)}
+              label="Total platform views"
+              sub={`lifetime views across ${titleRows.length === 1 ? "the title's" : "all"} fan edits`}
+            />
+            <HeroTile
+              value={metrics.unique_creators.toLocaleString()}
+              label="Unique fan creators"
+              sub="distinct creators who made edits"
+            />
+            <HeroTile
+              value={formatMetric(metrics.modal_opens)}
+              label="Moonbeem plays"
+              sub="opens in Moonbeem's player"
+            />
+            <HeroTile
+              value={metrics.ticket_clicks.toLocaleString()}
+              label="Ticket click-throughs"
+              sub="outbound to listings"
+            />
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-col gap-3">
+          <p className="text-caption uppercase tracking-wide text-moonbeem-ink-muted m-0">
+            Engagement
+          </p>
+          <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-3">
+            <HeroTile
+              value={formatMetric(metrics.total_likes)}
+              label="Likes"
+              sub="lifetime likes across the title's fan edits"
+            />
+            <HeroTile
+              value={formatMetric(metrics.total_comments)}
+              label="Comments"
+              sub="lifetime comments across the title's fan edits"
+            />
+            <HeroTile
+              value={formatMetric(metrics.total_shares)}
+              label="Shares"
+              sub="lifetime shares across the title's fan edits"
+            />
+          </div>
         </div>
 
         {/* Window-scoped analytical section — Visx primitives layered
