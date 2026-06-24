@@ -61,6 +61,23 @@ export async function POST(
     return NextResponse.json({ error: "no_published_asset" }, { status: 409 });
   }
 
+  // SAFETY (symmetric to no_published_asset): a title may only go public once its
+  // playback TERRITORY rights are declared — worldwide, or a non-empty allow-list.
+  // Otherwise the default-deny territory helper would make it publicly LISTED but
+  // UNPLAYABLE. This is the forcing function that makes the partner declare rights
+  // (or explicitly pick worldwide) before go-live. Runs before the is_public write.
+  const { data: terr } = await supabase
+    .from("titles")
+    .select("territory_worldwide, allowed_territories")
+    .eq("id", id)
+    .maybeSingle();
+  const hasTerritories =
+    terr?.territory_worldwide === true ||
+    ((terr?.allowed_territories as string[] | null)?.length ?? 0) > 0;
+  if (!hasTerritories) {
+    return NextResponse.json({ error: "no_territories_set" }, { status: 409 });
+  }
+
   // WRITE: idempotent flip, select-confirm. The public_requires_active CHECK
   // (is_public => is_active) surfaces as 23514 for an inactive title.
   const { data: updated, error: updErr } = await supabase
