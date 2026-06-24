@@ -20,8 +20,12 @@ type Datum = {
   day: string;
   views: number;
   edit_count: number;
+  likes: number;
+  shares: number;
   views_delta: number | null;
   edit_count_delta: number | null;
+  likes_delta: number | null;
+  shares_delta: number | null;
 };
 
 type Props = {
@@ -61,6 +65,14 @@ function ChartTooltip(props: {
         <span className="text-body-sm font-semibold text-moonbeem-ink tabular-nums">
           {datum.views.toLocaleString()} views
           <DeltaPill delta={datum.views_delta} />
+        </span>
+        <span className="text-caption text-amber-300 tabular-nums">
+          {datum.likes.toLocaleString()} likes
+          <DeltaPill delta={datum.likes_delta} subtle />
+        </span>
+        <span className="text-caption text-sky-300 tabular-nums">
+          {datum.shares.toLocaleString()} shares
+          <DeltaPill delta={datum.shares_delta} subtle />
         </span>
         <span className="text-caption text-teal-300 tabular-nums">
           {datum.edit_count.toLocaleString()}{" "}
@@ -232,6 +244,37 @@ export default function GrowthChart({ data }: Props) {
               animationDuration={550}
               animationEasing="ease-out"
             />
+            {/* Likes: subordinate solid line on the LEFT (views) axis. Amber
+                reads clearly against the violet→pink views line; at ~14% of the
+                views scale it shows a real curve without competing for the
+                hero's prominence. */}
+            <Line
+              yAxisId="views"
+              type="monotone"
+              dataKey="likes"
+              stroke="#f59e0b"
+              strokeWidth={1.75}
+              dot={false}
+              activeDot={{ r: 4, fill: "#f59e0b", stroke: "#b45309" }}
+              animationDuration={550}
+              animationEasing="ease-out"
+            />
+            {/* Shares: also on the LEFT (views) axis. shares (~34K) and
+                edit_count (~91) are ~374x apart, so sharing the edits axis would
+                flatten edit_count; on the views axis shares is a low line (~1%)
+                whose exact value + climb read in the tooltip. Sky keeps it
+                distinct from likes (amber) and edit_count (teal). */}
+            <Line
+              yAxisId="views"
+              type="monotone"
+              dataKey="shares"
+              stroke="#38bdf8"
+              strokeWidth={1.5}
+              dot={false}
+              activeDot={{ r: 4, fill: "#38bdf8", stroke: "#0369a1" }}
+              animationDuration={550}
+              animationEasing="ease-out"
+            />
             {/* Cumulative edit-count: visually subordinate (thinner
                 stroke, no fill, dashed) so the views line stays the
                 visual primary. Teal contrasts with the violet→pink
@@ -251,6 +294,28 @@ export default function GrowthChart({ data }: Props) {
           </ComposedChart>
         </ResponsiveContainer>
       </div>
+
+      {/* Compact legend — four series now share the chart, so a color key
+          disambiguates them at a glance (the tooltip carries exact values
+          + deltas on hover). */}
+      <div className="mt-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+        <LegendItem color="#ec4899" label="Views" />
+        <LegendItem color="#f59e0b" label="Likes" />
+        <LegendItem color="#38bdf8" label="Shares" />
+        <LegendItem color="#14b8a6" label="Edits" />
+      </div>
     </div>
+  );
+}
+
+function LegendItem({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-caption text-moonbeem-ink-subtle">
+      <span
+        className="inline-block h-0.5 w-3.5 rounded-full"
+        style={{ backgroundColor: color }}
+      />
+      {label}
+    </span>
   );
 }
