@@ -76,6 +76,9 @@ type HeroMetrics = {
   unique_creators: number;
   modal_opens: number;
   ticket_clicks: number;
+  total_likes: number;
+  total_comments: number;
+  total_shares: number;
 };
 
 async function loadHeroMetrics(
@@ -88,6 +91,9 @@ async function loadHeroMetrics(
       unique_creators: 0,
       modal_opens: 0,
       ticket_clicks: 0,
+      total_likes: 0,
+      total_comments: 0,
+      total_shares: 0,
     };
   }
 
@@ -100,7 +106,7 @@ async function loadHeroMetrics(
   // loadAllEdits below.
   const { data: fanEdits } = await supabase
     .from("fan_edits")
-    .select("id, view_count, creator_id")
+    .select("id, view_count, creator_id, like_count, comment_count, share_count")
     .in("title_id", titleIds)
     .eq("is_active", true)
     // publicly readable edits only (see audit 2026-05-16)
@@ -110,6 +116,21 @@ async function loadHeroMetrics(
   const fanEditRows = fanEdits ?? [];
   const totalViews = fanEditRows.reduce(
     (sum, fe) => sum + ((fe.view_count as number | null) ?? 0),
+    0,
+  );
+  // Likes/comments/shares summed over the SAME fanEditRows as totalViews — the
+  // identical scope (title_id ∈ titleIds, is_active, publicly-readable status,
+  // not soft-deleted), so they can never diverge from the views number.
+  const totalLikes = fanEditRows.reduce(
+    (sum, fe) => sum + ((fe.like_count as number | null) ?? 0),
+    0,
+  );
+  const totalComments = fanEditRows.reduce(
+    (sum, fe) => sum + ((fe.comment_count as number | null) ?? 0),
+    0,
+  );
+  const totalShares = fanEditRows.reduce(
+    (sum, fe) => sum + ((fe.share_count as number | null) ?? 0),
     0,
   );
   const uniqueCreators = new Set(
@@ -140,6 +161,9 @@ async function loadHeroMetrics(
     unique_creators: uniqueCreators,
     modal_opens: modalOpensRes.count ?? 0,
     ticket_clicks: ticketClicksRes.count ?? 0,
+    total_likes: totalLikes,
+    total_comments: totalComments,
+    total_shares: totalShares,
   };
 }
 
