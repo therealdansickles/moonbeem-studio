@@ -22,6 +22,7 @@ import GrowthChart from "@/components/p/GrowthChart";
 import AllEditsTable from "@/components/p/AllEditsTable";
 import PartnerRatesCard from "@/components/p/PartnerRatesCard";
 import PartnerClipsCard from "@/components/p/PartnerClipsCard";
+import AddTitleForm from "@/components/p/AddTitleForm";
 import CampaignsCard from "@/components/p/CampaignsCard";
 import PartnerSubmissionsSection, {
   type PartnerSubmission,
@@ -1826,6 +1827,12 @@ export default async function PartnerDashboardPage({
           />
           <TopCreatorsCard creators={topCreators} />
         </div>
+
+        {isPartnerAdmin && (
+          <div className="mt-10">
+            <AddTitleForm partnerSlug={partner.slug as string} />
+          </div>
+        )}
 
         {titleRows.filter((t) => t.is_active).length > 1 && (
           <section className="mt-10 flex flex-col gap-3">
