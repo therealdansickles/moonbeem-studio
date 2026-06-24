@@ -1884,7 +1884,7 @@ export default async function PartnerDashboardPage({
               Growth
             </span>
             <span className="text-caption text-moonbeem-ink-subtle">
-              views tracked since May 5 · daily
+              engagement tracked since May 5 · daily
             </span>
           </div>
           <div className="mt-4">
@@ -1892,13 +1892,13 @@ export default async function PartnerDashboardPage({
           </div>
           {trackingStartDay && (
             <p className="mt-3 text-caption text-moonbeem-ink-subtle">
-              View tracking began{" "}
+              Tracking began{" "}
               {new Date(trackingStartDay + "T00:00:00Z").toLocaleDateString(
                 undefined,
                 { year: "numeric", month: "long", day: "numeric" },
               )}
-              ; the chart counts views measured since tracking began,
-              so its total runs lower than the lifetime figure above.
+              ; the chart counts activity measured since then, so totals
+              run lower than the lifetime figures above.
             </p>
           )}
         </div>
