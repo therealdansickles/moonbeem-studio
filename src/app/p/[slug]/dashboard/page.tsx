@@ -1002,11 +1002,24 @@ function PerTitleRollup({
   );
 }
 
+// Format a dwell duration for the "Median time on edit" tile. Sub-minute uses
+// one-decimal seconds ("2.6s") — honest at this scale, where the typical median
+// is a few seconds; a minute or more renders "1m 4s". null (no events in the
+// window) renders an em-dash, never NaN.
+function formatDwell(ms: number | null): string {
+  if (ms == null) return "—";
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const whole = Math.round(seconds);
+  return `${Math.floor(whole / 60)}m ${whole % 60}s`;
+}
+
 type PartnerAnalytics = {
   events: number;
   uniqueSignedInUsers: number;
   goClicks: number;
   openRequests: number;
+  medianDwellMs: number | null;
   activeTitlesCount: number;
   totalSocialViews: number;
   timeSeries: { date: string; value: number }[];
@@ -1035,6 +1048,7 @@ async function loadPartnerAnalytics(
     uniqueSignedInUsers: 0,
     goClicks: 0,
     openRequests: 0,
+    medianDwellMs: null,
     activeTitlesCount: 0,
     totalSocialViews: 0,
     timeSeries: bucketTimeSeries([], win),
@@ -1097,6 +1111,7 @@ async function loadPartnerAnalytics(
   const events: Array<{
     fan_edit_id: string;
     event_type: string;
+    duration_ms: number | null;
     user_id: string | null;
     created_at: string;
     country_code: string | null;
@@ -1107,7 +1122,7 @@ async function loadPartnerAnalytics(
     let q = supabase
       .from("fan_edit_events")
       .select(
-        "fan_edit_id, event_type, user_id, created_at, country_code, region_code, city",
+        "fan_edit_id, event_type, duration_ms, user_id, created_at, country_code, region_code, city",
       )
       .in("fan_edit_id", fanEditIds);
     if (cutoff) q = q.gte("created_at", cutoff);
@@ -1115,6 +1130,7 @@ async function loadPartnerAnalytics(
     return (r.data ?? []) as Array<{
       fan_edit_id: string;
       event_type: string;
+      duration_ms: number | null;
       user_id: string | null;
       created_at: string;
       country_code: string | null;
@@ -1130,6 +1146,23 @@ async function loadPartnerAnalytics(
   const uniqueSignedInUsers = new Set(
     events.map((e) => e.user_id).filter((id): id is string => Boolean(id)),
   ).size;
+
+  // Median modal-open DWELL (ms) over the windowed event set. duration_ms is
+  // carried ONLY by modal_close events; the MEAN is outlier-poisoned (a single
+  // hours-long backgrounded tab drags it to tens of seconds), so we surface the
+  // MEDIAN — a few seconds, typical. n=0 -> null -> rendered as an em-dash.
+  const dwellMsSorted = events
+    .filter((e) => e.event_type === "modal_close" && e.duration_ms != null)
+    .map((e) => e.duration_ms as number)
+    .sort((a, b) => a - b);
+  const medianDwellMs =
+    dwellMsSorted.length === 0
+      ? null
+      : dwellMsSorted.length % 2 === 1
+        ? dwellMsSorted[(dwellMsSorted.length - 1) / 2]
+        : (dwellMsSorted[dwellMsSorted.length / 2 - 1] +
+            dwellMsSorted[dwellMsSorted.length / 2]) /
+          2;
 
   const timeSeries = bucketTimeSeries(
     events.map((e) => e.created_at),
@@ -1214,6 +1247,7 @@ async function loadPartnerAnalytics(
   return {
     events: events.length,
     uniqueSignedInUsers,
+    medianDwellMs,
     goClicks: clicks.length,
     openRequests: openRequests.length,
     activeTitlesCount: activeTitleIds.length,
@@ -1684,11 +1718,17 @@ export default async function PartnerDashboardPage({
           <p className="text-caption uppercase tracking-wide text-moonbeem-ink-muted m-0">
             Recent activity
           </p>
-          <section className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
+          <section className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5 md:gap-4">
             <HeroNumber
               value={analytics.events.toLocaleString()}
               label="Engagement events"
               description={`player interactions on your edits, ${periodPhrase}`}
+              responsive
+            />
+            <HeroNumber
+              value={formatDwell(analytics.medianDwellMs)}
+              label="Median time on edit"
+              description={`median time a viewer keeps an edit open, ${periodPhrase}`}
               responsive
             />
             <HeroNumber
