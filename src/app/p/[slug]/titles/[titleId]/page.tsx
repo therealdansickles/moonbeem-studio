@@ -59,7 +59,9 @@ export default async function PartnerTitlePage({ params }: PageProps) {
   // Title must belong to THIS partner (else notFound — no enumeration).
   const { data: title } = await supabase
     .from("titles")
-    .select("id, slug, title, media_type, is_public, partner_id")
+    .select(
+      "id, slug, title, media_type, is_public, partner_id, allowed_territories, territory_worldwide",
+    )
     .eq("id", titleId)
     .maybeSingle();
   if (!title || title.partner_id !== partner.id) notFound();
@@ -103,6 +105,10 @@ export default async function PartnerTitlePage({ params }: PageProps) {
               source: e.source as string,
               is_published: e.is_published as boolean,
             }))}
+            territoryWorldwide={(title.territory_worldwide as boolean) ?? false}
+            allowedTerritories={
+              (title.allowed_territories as string[] | null) ?? []
+            }
           />
         </div>
       </div>

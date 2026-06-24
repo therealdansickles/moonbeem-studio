@@ -18,6 +18,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import TerritorySelector from "@/components/p/TerritorySelector";
 
 // MuxUploader is a web component (registers a custom element, touches
 // customElements/HTMLElement) — load it client-only via dynamic ssr:false,
@@ -64,6 +65,8 @@ export default function TitleUploadPanel({
   isPublic,
   isPartnerAdmin,
   episodes,
+  territoryWorldwide,
+  allowedTerritories,
 }: {
   titleId: string;
   titleSlug: string;
@@ -71,6 +74,8 @@ export default function TitleUploadPanel({
   isPublic: boolean;
   isPartnerAdmin: boolean;
   episodes: Episode[];
+  territoryWorldwide: boolean;
+  allowedTerritories: string[];
 }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>("idle");
@@ -188,9 +193,11 @@ export default function TitleUploadPanel({
         setPublicError(
           j.error === "no_published_asset"
             ? "Publish at least one video before making the title public."
-            : j.error === "title_not_active"
-              ? "This title isn't active, so it can't be made public."
-              : (j.error ?? `Couldn't make the title public (${r.status}).`),
+            : j.error === "no_territories_set"
+              ? "Set this title's territories above before making it public."
+              : j.error === "title_not_active"
+                ? "This title isn't active, so it can't be made public."
+                : (j.error ?? `Couldn't make the title public (${r.status}).`),
         );
         setMakingPublic(false);
         return;
@@ -378,9 +385,18 @@ export default function TitleUploadPanel({
         )}
       </div>
 
+      {/* Territories — declare WHERE the film is licensed to play. Sits before
+          Visibility because the publish route's no_territories_set guard requires
+          it (and the playback helper default-denies an unset title). */}
+      <TerritorySelector
+        titleId={titleId}
+        initialWorldwide={territoryWorldwide}
+        initialAllowed={allowedTerritories}
+      />
+
       {/* Make title public — a SEPARATE, deliberate go-live, intentionally
           decoupled from asset-publish so listing the film is one explicit
-          decision (the route also guards: needs >=1 published asset). */}
+          decision (the route also guards: needs >=1 published asset + territories). */}
       <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
         <p className="text-caption uppercase tracking-wide text-moonbeem-ink-muted m-0">
           Visibility
