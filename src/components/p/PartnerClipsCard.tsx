@@ -66,6 +66,11 @@ export default function PartnerClipsCard({
   isAdmin,
   titles,
 }: Props) {
+  // Single-title partners (e.g. 1-2 Special) default their one group OPEN so the
+  // clips show without an extra click; multi-title partners default all groups
+  // COLLAPSED — a tidy list of expandable title headers. ClipGroup seeds its own
+  // open state from this.
+  const defaultOpen = titles.length === 1;
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
       <div className="flex items-center gap-3">
@@ -77,25 +82,16 @@ export default function PartnerClipsCard({
         </span>
       </div>
 
-      <div className="mt-6 flex flex-col gap-6">
+      <div className="mt-6 flex flex-col gap-3">
         {titles.map((t) => (
-          <div key={t.title_id}>
-            <div className="truncate text-body-sm font-medium text-moonbeem-ink">
-              {t.title}
-            </div>
-            <div className="mt-3 flex flex-col gap-3">
-              {t.clips.map((c) => (
-                <ClipRow
-                  key={c.id}
-                  partnerSlug={partnerSlug}
-                  isAdmin={isAdmin}
-                  clipId={c.id}
-                  fileUrl={c.file_url}
-                  initialLabel={c.label}
-                />
-              ))}
-            </div>
-          </div>
+          <ClipGroup
+            key={t.title_id}
+            title={t.title}
+            clips={t.clips}
+            partnerSlug={partnerSlug}
+            isAdmin={isAdmin}
+            defaultOpen={defaultOpen}
+          />
         ))}
       </div>
 
@@ -106,6 +102,91 @@ export default function PartnerClipsCard({
         </p>
       )}
     </div>
+  );
+}
+
+const PAGE_SIZE = 10;
+
+// One collapsible per-title group. Collapse is CONTROLLED (useState seeded from
+// defaultOpen, synced via onToggle) and pagination is local state — both keyed by
+// the stable key={title_id} at the call site, so a rename's router.refresh()
+// (which re-renders with fresh props but does NOT unmount this component)
+// preserves both the open state and the current page. Slice-only pagination
+// (clips.slice) is intentional: off-page ClipRows unmount and an unsaved edit
+// reverts — a minor, self-signaling edge (the Save button shows unsaved state).
+function ClipGroup({
+  title,
+  clips,
+  partnerSlug,
+  isAdmin,
+  defaultOpen,
+}: {
+  title: string;
+  clips: ClipLite[];
+  partnerSlug: string;
+  isAdmin: boolean;
+  defaultOpen: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const [page, setPage] = useState(0);
+
+  const total = clips.length;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // Clamp in case the clip count shrinks under us (e.g. a deletion elsewhere).
+  const safePage = Math.min(page, pageCount - 1);
+  const start = safePage * PAGE_SIZE;
+  const visible = clips.slice(start, start + PAGE_SIZE);
+
+  return (
+    <details
+      open={open}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+      className="rounded-2xl border border-white/10 bg-white/[0.02] p-5"
+    >
+      <summary className="cursor-pointer text-body-sm font-medium text-moonbeem-ink">
+        {title}{" "}
+        <span className="font-normal text-moonbeem-ink-subtle">({total})</span>
+      </summary>
+
+      <div className="mt-4 flex flex-col gap-3">
+        {visible.map((c) => (
+          <ClipRow
+            key={c.id}
+            partnerSlug={partnerSlug}
+            isAdmin={isAdmin}
+            clipId={c.id}
+            fileUrl={c.file_url}
+            initialLabel={c.label}
+          />
+        ))}
+      </div>
+
+      {total > PAGE_SIZE && (
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <span className="text-caption text-moonbeem-ink-subtle tabular-nums">
+            Showing {start + 1}–{Math.min(start + PAGE_SIZE, total)} of {total}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPage(safePage - 1)}
+              disabled={safePage === 0}
+              className="rounded-md border border-white/10 px-3 py-1.5 text-caption text-moonbeem-ink-muted transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              Prev
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage(safePage + 1)}
+              disabled={safePage >= pageCount - 1}
+              className="rounded-md border border-white/10 px-3 py-1.5 text-caption text-moonbeem-ink-muted transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+    </details>
   );
 }
 
