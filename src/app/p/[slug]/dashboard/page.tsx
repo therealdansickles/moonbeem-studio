@@ -1630,21 +1630,25 @@ export default async function PartnerDashboardPage({
           <HeroNumber
             value={analytics.events.toLocaleString()}
             label="Engagement events"
+            description="player interactions on your edits, this window"
             responsive
           />
           <HeroNumber
             value={analytics.uniqueSignedInUsers.toLocaleString()}
             label="Signed-in users"
+            description="distinct logged-in viewers who interacted, this window"
             responsive
           />
           <HeroNumber
             value={analytics.goClicks.toLocaleString()}
             label="/go/ clicks (humans)"
+            description="non-bot outbound /go/ link clicks, this window"
             responsive
           />
           <HeroNumber
             value={analytics.openRequests.toLocaleString()}
             label="Open title requests"
+            description="unfulfilled viewer requests for more edits (current)"
             responsive
           />
         </section>

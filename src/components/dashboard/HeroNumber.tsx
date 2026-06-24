@@ -22,6 +22,12 @@ type Props = {
    * Default false to preserve existing admin-dashboard appearance.
    */
   responsive?: boolean;
+  /**
+   * Optional one-line description rendered as a caption under the value
+   * (same styling as HeroTile's sub). Default undefined renders nothing,
+   * keeping existing call sites (admin dashboard, title detail) byte-identical.
+   */
+  description?: string;
 };
 
 export default function HeroNumber({
@@ -31,6 +37,7 @@ export default function HeroNumber({
   trend = "neutral",
   size = "lg",
   responsive = false,
+  description,
 }: Props) {
   const sizeClass = responsive
     ? size === "xl"
@@ -60,6 +67,9 @@ export default function HeroNumber({
         <p className={`text-body-sm m-0 tabular-nums ${trendClass}`}>
           {delta}
         </p>
+      )}
+      {description && (
+        <p className="text-caption text-moonbeem-ink-subtle m-0">{description}</p>
       )}
     </div>
   );
