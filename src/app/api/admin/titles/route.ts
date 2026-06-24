@@ -37,8 +37,8 @@ import { revalidatePath } from "next/cache";
 import { requireSuperAdmin } from "@/lib/dal";
 import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildPublicUrl } from "@/lib/r2/upload";
+import { baseTitleSlug, resolveUniqueSlug } from "@/lib/titles/slug";
 import { nextFeaturedOrder } from "@/lib/featured-order";
 import { nextMarqueeOrder } from "@/lib/marquee-order";
 
@@ -68,38 +68,6 @@ type Body = {
   is_public?: boolean;
   is_featured?: boolean;
 };
-
-// "Last Tango in Park City" + 2026 → "last-tango-in-park-city-2026".
-// Same kebab discipline as the partner slug suggester.
-function baseTitleSlug(title: string, year: number | null): string {
-  const base = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-{2,}/g, "-");
-  return year ? `${base}-${year}` : base;
-}
-
-// Find a free slug by appending -2, -3, … against the whole titles
-// table (idx_titles_slug makes the exact-match lookup cheap). The
-// manual scheme is structurally distinct from the TMDB stub scheme
-// (tmdb-{m|t}-{id}), so collisions are rare, but we check regardless.
-async function resolveUniqueSlug(
-  supabase: SupabaseClient,
-  base: string,
-): Promise<string> {
-  for (let i = 1; i <= 50; i++) {
-    const candidate = i === 1 ? base : `${base}-${i}`;
-    const { data, error } = await supabase
-      .from("titles")
-      .select("id")
-      .eq("slug", candidate)
-      .maybeSingle();
-    if (error) throw new Error(`slug check: ${error.message}`);
-    if (!data) return candidate;
-  }
-  throw new Error("slug_unresolvable");
-}
 
 export async function POST(request: NextRequest) {
   const session = await requireSuperAdmin();
