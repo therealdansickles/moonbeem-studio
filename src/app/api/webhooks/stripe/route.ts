@@ -47,6 +47,9 @@ import type Stripe from "stripe";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getStripe } from "@/lib/stripe/server";
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function POST(request: NextRequest) {
   const signature = request.headers.get("stripe-signature");
   // Two Stripe endpoints point at THIS same URL, each with its own signing
@@ -164,6 +167,67 @@ export async function POST(request: NextRequest) {
     }
 
     case "checkout.session.completed": {
+      // Viewer-IN (transactions sub-unit 2): a rental Checkout was paid.
+      // Discriminated by moonbeem_kind='rental' metadata. Grant the entitlement
+      // idempotently — a replayed event returns 'already_granted', still 200; a
+      // genuine (non-conflict) insert failure returns 500 so Stripe retries.
+      // Campaign-funding sessions (moonbeem_campaign_funding_id, no
+      // moonbeem_kind) fall through UNCHANGED to the partner-IN branch below.
+      // Scoped in its own block so `session` doesn't collide with the partner-IN
+      // `session` const, keeping that branch byte-for-byte unchanged.
+      {
+        const session = event.data.object as Stripe.Checkout.Session;
+        if (session.metadata?.moonbeem_kind === "rental") {
+          const md = session.metadata;
+          const userId = md.moonbeem_user_id ?? "";
+          const titleId = md.moonbeem_title_id ?? "";
+          const priceCents = Number(md.moonbeem_price_cents);
+          // Validate before granting. A malformed rental event can never
+          // succeed on retry → log loudly + ack 200 (don't make Stripe retry a
+          // poisoned event forever).
+          if (
+            !UUID_RE.test(userId) ||
+            !UUID_RE.test(titleId) ||
+            !Number.isInteger(priceCents) ||
+            priceCents < 0 ||
+            !Number.isSafeInteger(priceCents)
+          ) {
+            console.error(
+              `[stripe-webhook] rental session malformed metadata; session=${session.id} user=${userId} title=${titleId} price=${md.moonbeem_price_cents}`,
+            );
+            break;
+          }
+          const piId =
+            typeof session.payment_intent === "string"
+              ? session.payment_intent
+              : (session.payment_intent?.id ?? null);
+          const { data: grantResult, error: grantErr } = await supabase.rpc(
+            "grant_rental_entitlement",
+            {
+              p_session_id: session.id,
+              p_user_id: userId,
+              p_title_id: titleId,
+              p_price_cents: priceCents,
+              p_payment_intent_id: piId,
+            },
+          );
+          if (grantErr) {
+            // The ON CONFLICT no-op never errors; an error here is a genuine
+            // failure (FK violation, DB down). The customer paid → 500 so Stripe
+            // retries until the grant lands.
+            console.error(
+              `[stripe-webhook] grant_rental_entitlement failed; session=${session.id}: ${grantErr.message}`,
+            );
+            return NextResponse.json({ error: "grant_failed" }, { status: 500 });
+          }
+          // 'granted' (new) or 'already_granted' (idempotent replay) — ack 200.
+          console.log(
+            `[stripe-webhook] grant_rental_entitlement ${grantResult} session=${session.id} user=${userId} title=${titleId}`,
+          );
+          break;
+        }
+      }
+
       // Partner-IN: a campaign-funding Checkout session was paid.
       // Read the funding row id from session metadata (round-tripped
       // at session-create time by /api/p/[slug]/campaigns/[id]/fund),
