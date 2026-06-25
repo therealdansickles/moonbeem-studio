@@ -60,7 +60,7 @@ export default async function PartnerTitlePage({ params }: PageProps) {
   const { data: title } = await supabase
     .from("titles")
     .select(
-      "id, slug, title, poster_url, media_type, is_public, partner_id, allowed_territories, territory_worldwide",
+      "id, slug, title, poster_url, media_type, is_public, partner_id, allowed_territories, territory_worldwide, transact_enabled, transact_price_cents",
     )
     .eq("id", titleId)
     .maybeSingle();
@@ -72,6 +72,21 @@ export default async function PartnerTitlePage({ params }: PageProps) {
     .select("id, episode_number, label, source, is_published")
     .eq("title_id", titleId)
     .order("episode_number", { ascending: true });
+
+  // External rental/purchase price (iTunes/Amazon etc.) — guidance only for the
+  // pricing card, never enforced. price_usd is NULL across rows today, so this
+  // is usually absent; wired for when external prices get scraped in.
+  const { data: extOffer } = await supabase
+    .from("title_offers")
+    .select("price_usd")
+    .eq("title_id", titleId)
+    .eq("is_active", true)
+    .not("price_usd", "is", null)
+    .in("offer_type", ["rent", "buy"])
+    .order("price_usd", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  const externalPriceUsd = (extOffer?.price_usd as number | null) ?? null;
 
   return (
     <div className="min-h-screen px-4 py-6 md:px-6 md:py-12">
@@ -110,6 +125,11 @@ export default async function PartnerTitlePage({ params }: PageProps) {
             allowedTerritories={
               (title.allowed_territories as string[] | null) ?? []
             }
+            transactEnabled={(title.transact_enabled as boolean) ?? false}
+            transactPriceCents={
+              (title.transact_price_cents as number | null) ?? null
+            }
+            externalPriceUsd={externalPriceUsd}
           />
         </div>
       </div>

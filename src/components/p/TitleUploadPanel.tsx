@@ -20,6 +20,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import TerritorySelector from "@/components/p/TerritorySelector";
 import PosterEditor from "@/components/PosterEditor";
+import RentalPricingCard from "@/components/p/RentalPricingCard";
 
 // MuxUploader is a web component (registers a custom element, touches
 // customElements/HTMLElement) — load it client-only via dynamic ssr:false,
@@ -69,6 +70,9 @@ export default function TitleUploadPanel({
   episodes,
   territoryWorldwide,
   allowedTerritories,
+  transactEnabled,
+  transactPriceCents,
+  externalPriceUsd,
 }: {
   titleId: string;
   titleSlug: string;
@@ -79,6 +83,9 @@ export default function TitleUploadPanel({
   episodes: Episode[];
   territoryWorldwide: boolean;
   allowedTerritories: string[];
+  transactEnabled: boolean;
+  transactPriceCents: number | null;
+  externalPriceUsd: number | null;
 }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>("idle");
@@ -411,6 +418,18 @@ export default function TitleUploadPanel({
         titleId={titleId}
         initialWorldwide={territoryWorldwide}
         initialAllowed={allowedTerritories}
+      />
+
+      {/* Rental pricing (transactions sub-unit 1 — offer model). After
+          Territories (where it plays), before Visibility (going live): a film's
+          commercial terms. Pre-money — sets the OFFER only (price + enabled),
+          no charge/entitlement/gate yet. */}
+      <RentalPricingCard
+        titleId={titleId}
+        initialEnabled={transactEnabled}
+        initialPriceCents={transactPriceCents}
+        hasMuxEpisode={episodes.some((e) => e.source === "mux")}
+        externalPriceUsd={externalPriceUsd}
       />
 
       {/* Make title public — a SEPARATE, deliberate go-live, intentionally
