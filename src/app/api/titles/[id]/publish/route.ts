@@ -61,22 +61,12 @@ export async function POST(
     return NextResponse.json({ error: "no_published_asset" }, { status: 409 });
   }
 
-  // SAFETY (symmetric to no_published_asset): a title may only go public once its
-  // playback TERRITORY rights are declared — worldwide, or a non-empty allow-list.
-  // Otherwise the default-deny territory helper would make it publicly LISTED but
-  // UNPLAYABLE. This is the forcing function that makes the partner declare rights
-  // (or explicitly pick worldwide) before go-live. Runs before the is_public write.
-  const { data: terr } = await supabase
-    .from("titles")
-    .select("territory_worldwide, allowed_territories")
-    .eq("id", id)
-    .maybeSingle();
-  const hasTerritories =
-    terr?.territory_worldwide === true ||
-    ((terr?.allowed_territories as string[] | null)?.length ?? 0) > 0;
-  if (!hasTerritories) {
-    return NextResponse.json({ error: "no_territories_set" }, { status: 409 });
-  }
+  // NOTE: the territory (no_territories_set) gate that used to live here has been
+  // RELOCATED to the Mux episode-publish route (POST .../episodes/[episodeId]/
+  // publish) — territory rights gate the FILM, not the title. A clip-only / IG /
+  // film-less title can now go public without declaring territories; a DRM film
+  // still cannot go LIVE without them (enforced at episode-publish), and the
+  // isTerritoryAllowed default-deny stays the runtime backstop on every Mux mint.
 
   // WRITE: idempotent flip, select-confirm. The public_requires_active CHECK
   // (is_public => is_active) surfaces as 23514 for an inactive title.

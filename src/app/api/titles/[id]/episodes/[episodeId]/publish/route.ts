@@ -76,6 +76,25 @@ export async function POST(
     return NextResponse.json({ error: "not_ready" }, { status: 409 });
   }
 
+  // TERRITORY (relocated here from the title-publish route): a DRM FILM may only
+  // go live once its playback territory rights are declared — worldwide, or a
+  // non-empty allow-list. This route is the EXCLUSIVE chokepoint for a Mux film
+  // going live (every non-Mux episode is rejected above), so the check fires only
+  // on films, never on clip-only / IG titles. Without it a film would publish
+  // reachable-but-unplayable. (isTerritoryAllowed default-denies an unset title on
+  // the playback-token path — that remains the runtime backstop regardless.)
+  const { data: terr } = await supabase
+    .from("titles")
+    .select("territory_worldwide, allowed_territories")
+    .eq("id", id)
+    .maybeSingle();
+  const hasTerritories =
+    terr?.territory_worldwide === true ||
+    ((terr?.allowed_territories as string[] | null)?.length ?? 0) > 0;
+  if (!hasTerritories) {
+    return NextResponse.json({ error: "no_territories_set" }, { status: 409 });
+  }
+
   // WRITE: idempotent flip, scoped by id + title_id (belt-and-suspenders).
   // Select-confirm the result (read-after-write) rather than trusting a count.
   const { data: updated, error: updErr } = await supabase
