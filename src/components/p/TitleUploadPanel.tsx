@@ -19,6 +19,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import TerritorySelector from "@/components/p/TerritorySelector";
+import PosterEditor from "@/components/PosterEditor";
 
 // MuxUploader is a web component (registers a custom element, touches
 // customElements/HTMLElement) — load it client-only via dynamic ssr:false,
@@ -62,6 +63,7 @@ function publishError(code: string | undefined, status: number): string {
 export default function TitleUploadPanel({
   titleId,
   filmTitle,
+  currentPosterUrl,
   isPublic,
   isPartnerAdmin,
   episodes,
@@ -215,6 +217,22 @@ export default function TitleUploadPanel({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Poster / artwork — title identity, set FIRST (before lifecycle). The
+          shared editor drives the same presign→PUT→PATCH as the admin surface;
+          the partner is authorized via authorizeTitleMutation (owning-partner-
+          admin), and poster_url is the single column every display surface reads. */}
+      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+        <div className="flex items-center gap-3">
+          <span className="rounded-full bg-moonbeem-violet/20 px-2.5 py-0.5 text-caption font-medium text-moonbeem-violet-soft">
+            Poster
+          </span>
+          <span className="text-caption text-moonbeem-ink-subtle">
+            The film's poster — shown across the catalog and on its page
+          </span>
+        </div>
+        <PosterEditor titleId={titleId} initialPosterUrl={currentPosterUrl} />
+      </div>
+
       {/* Existing assets — each unpublished mux asset can be published here too
           (the durable path that works on reload, not just right after upload). */}
       {episodes.length > 0 && (
