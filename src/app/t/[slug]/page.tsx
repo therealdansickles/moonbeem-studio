@@ -16,6 +16,7 @@ import { getPartnerById } from "@/lib/queries/partners";
 import TitleTabs from "@/components/TitleTabs";
 import EpisodeList from "@/components/EpisodeList";
 import HeroPlayer from "@/components/HeroPlayer";
+import RentButton from "@/components/RentButton";
 import FanEditsTab from "@/components/FanEditsTab";
 import VideosTab from "@/components/VideosTab";
 import StillsTab from "@/components/StillsTab";
@@ -275,6 +276,17 @@ export default async function TitlePage({ params }: PageProps) {
       </div>
     ) : null;
 
+  // Rent — minimal Checkout-start button (transactions sub-unit 2). Shown when
+  // the film declares a rental offer. TEMPORARY placement next to Watch Now;
+  // sub-unit 3 builds the real rent-vs-play gate.
+  const rentEl =
+    title.transact_enabled && (title.transact_price_cents ?? 0) > 0 ? (
+      <RentButton
+        titleId={title.id}
+        priceCents={title.transact_price_cents as number}
+      />
+    ) : null;
+
   const aboutContent = (
     <div className="flex flex-col items-center gap-8">
       {title.synopsis && (
@@ -389,6 +401,10 @@ export default async function TitlePage({ params }: PageProps) {
             {/* 2. PRIMARY CTA — Watch Now, relocated here from About. The
                 page's main filled action, directly under identity. */}
             {watchNowEl}
+
+            {/* 2b. RENT — minimal Checkout-start (transactions sub-unit 2).
+                Temporary; sub-unit 3 builds the real rent-vs-play gate. */}
+            {rentEl}
 
             {/* 3. CAMPAIGN CALLOUT — prominent pink-accent block replacing the
                 old inline pill, still linking the campaign page. Secondary to

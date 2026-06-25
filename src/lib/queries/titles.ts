@@ -52,6 +52,10 @@ export type Title = {
   // reads as 0 via `> 0` against undefined).
   rating_avg: number | null;
   rating_count: number;
+  // Rental offer (transactions sub-unit 1/2). Rides getTitleBySlug's select("*")
+  // with no query change; declared here so /t/[slug] can render a Rent button.
+  transact_enabled: boolean;
+  transact_price_cents: number | null;
 };
 
 const WRITING_JOBS = new Set([
