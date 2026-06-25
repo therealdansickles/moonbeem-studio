@@ -178,18 +178,29 @@ export async function POST(request: NextRequest) {
       {
         const session = event.data.object as Stripe.Checkout.Session;
         if (session.metadata?.moonbeem_kind === "rental") {
+          // Only grant once funds are settled. Card Checkout always completes
+          // 'paid'; this guards against a future delayed/async method (e.g. bank
+          // debit) firing completed while still 'unpaid' (which would otherwise
+          // grant a free rental before — or instead of — settlement).
+          if (session.payment_status !== "paid") {
+            console.log(
+              `[stripe-webhook] rental session not paid (status=${session.payment_status}); session=${session.id} — skipping grant`,
+            );
+            break;
+          }
           const md = session.metadata;
           const userId = md.moonbeem_user_id ?? "";
           const titleId = md.moonbeem_title_id ?? "";
           const priceCents = Number(md.moonbeem_price_cents);
           // Validate before granting. A malformed rental event can never
           // succeed on retry → log loudly + ack 200 (don't make Stripe retry a
-          // poisoned event forever).
+          // poisoned event forever). Price must be a positive safe integer (a
+          // $0 rental is nonsensical; the rent route already enforces > 0).
           if (
             !UUID_RE.test(userId) ||
             !UUID_RE.test(titleId) ||
             !Number.isInteger(priceCents) ||
-            priceCents < 0 ||
+            priceCents <= 0 ||
             !Number.isSafeInteger(priceCents)
           ) {
             console.error(

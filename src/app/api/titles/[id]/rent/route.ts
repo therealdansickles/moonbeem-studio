@@ -68,6 +68,7 @@ export async function POST(
     .from("titles")
     .select("id, slug, title, transact_enabled, transact_price_cents")
     .eq("id", id)
+    .is("deleted_at", null) // never transact a soft-deleted offer
     .maybeSingle();
   if (!title) {
     return NextResponse.json({ error: "title_not_found" }, { status: 404 });
