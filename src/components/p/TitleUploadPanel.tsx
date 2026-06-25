@@ -71,6 +71,7 @@ export default function TitleUploadPanel({
   titleId: string;
   titleSlug: string;
   filmTitle: string;
+  currentPosterUrl: string | null;
   isPublic: boolean;
   isPartnerAdmin: boolean;
   episodes: Episode[];
