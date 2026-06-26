@@ -18,7 +18,10 @@ type Body = {
 
 export async function POST(
   request: NextRequest,
-  ctx: { params: Promise<{ title_id: string }> },
+  // Segment name is `id` to match every sibling under /api/titles/[id]/*
+  // (Next forbids two slug names — id vs title_id — at the same path level).
+  // The route's semantics are unchanged: it still keys off the title id.
+  ctx: { params: Promise<{ id: string }> },
 ) {
   const auth = request.headers.get("authorization") ?? "";
   const expected = `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""}`;
@@ -35,10 +38,10 @@ export async function POST(
   // notify calls from our own admin upload routes (those run from
   // Vercel function IPs which would burn budget collectively, but the
   // limit is high enough that real upload bursts pass through).
-  const limit = await enforce("admin", getIp(request), "titles/[title_id]/notify");
+  const limit = await enforce("admin", getIp(request), "titles/[id]/notify");
   if (!limit.ok) return limit.response;
 
-  const { title_id } = await ctx.params;
+  const { id: title_id } = await ctx.params;
   if (!UUID_RE.test(title_id)) {
     return NextResponse.json({ error: "invalid title_id" }, { status: 400 });
   }
