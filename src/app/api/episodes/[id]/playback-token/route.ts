@@ -13,6 +13,10 @@ import { canViewTitle } from "@/lib/title-access";
 import { getEpisodeForPlayback } from "@/lib/playback/episode";
 import { isTerritoryAllowed } from "@/lib/playback/territory";
 import { getMuxSigner } from "@/lib/mux";
+import {
+  getActiveEntitlement,
+  stampFirstPlay,
+} from "@/lib/entitlements/lookup";
 
 // Token signing uses Node crypto.
 export const runtime = "nodejs";
@@ -73,6 +77,33 @@ export async function POST(
   const country = request.headers.get("x-vercel-ip-country");
   if (!(await isTerritoryAllowed(country, { id: episode.title_id }))) {
     return NextResponse.json({ error: "territory_restricted" }, { status: 451 });
+  }
+
+  // ENTITLEMENT GATE (transactions sub-unit 3). Only 'transactional' episodes are
+  // gated; 'free' / 'avod' / null fall straight through to the mint below — today's
+  // EXACT behavior (the gate is inert until a partner enables transact, since every
+  // episode currently resolves to 'free'). Effective mode = COALESCE(per-episode
+  // override, title default). episode.title is non-null here (the canViewTitle gate
+  // above already 403'd a missing title).
+  const effective =
+    episode.monetization_mode ?? episode.title.default_monetization_mode;
+  if (effective === "transactional") {
+    // The entitlement keys on user_id — an anon viewer can't hold one. The
+    // frontend routes a 401 to sign-in.
+    if (!user) {
+      return NextResponse.json({ error: "auth_required" }, { status: 401 });
+    }
+    // Active = a rental/purchase inside the two-clock window, evaluated on the
+    // PRE-stamp row inside getActiveEntitlement. No active entitlement -> 402; the
+    // frontend shows Rent.
+    const ent = await getActiveEntitlement(user.id, episode.title_id);
+    if (!ent) {
+      return NextResponse.json({ error: "not_entitled" }, { status: 402 });
+    }
+    // Active -> arm the 48h clock (DB time, exactly-once, fire-and-proceed), then
+    // fall through to the UNCHANGED mint. Stamp AFTER the activeness check above —
+    // never before, or the first play would be judged against a value we just wrote.
+    await stampFirstPlay(ent.id);
   }
 
   // Mint both tokens (12h). Signing is local crypto via the keypair-only signer.

@@ -18,9 +18,16 @@ export type EpisodeForPlayback = {
   mux_playback_id: string | null;
   requires_drm: boolean;
   is_published: boolean;
-  // Owning title's visibility fields, or null if the title is missing /
-  // soft-deleted (caller treats null as not-viewable).
-  title: { is_public: boolean; partner_id: string | null } | null;
+  // Effective-monetization input (sub-unit 3 gate): the per-episode override.
+  // effective = COALESCE(monetization_mode, title.default_monetization_mode).
+  monetization_mode: string | null;
+  // Owning title's visibility fields + monetization default, or null if the
+  // title is missing / soft-deleted (caller treats null as not-viewable).
+  title: {
+    is_public: boolean;
+    partner_id: string | null;
+    default_monetization_mode: string;
+  } | null;
 };
 
 export async function getEpisodeForPlayback(
@@ -30,7 +37,9 @@ export async function getEpisodeForPlayback(
 
   const { data: ep, error } = await supabase
     .from("title_episodes")
-    .select("id, title_id, source, mux_playback_id, requires_drm, is_published")
+    .select(
+      "id, title_id, source, mux_playback_id, requires_drm, is_published, monetization_mode",
+    )
     .eq("id", episodeId)
     .maybeSingle();
   if (error || !ep) return null;
@@ -40,7 +49,7 @@ export async function getEpisodeForPlayback(
   // Owning title's visibility (soft-delete-scoped, like every other title read).
   const { data: title } = await supabase
     .from("titles")
-    .select("is_public, partner_id")
+    .select("is_public, partner_id, default_monetization_mode")
     .eq("id", row.title_id)
     .is("deleted_at", null)
     .maybeSingle();
@@ -48,7 +57,10 @@ export async function getEpisodeForPlayback(
   return {
     ...row,
     title:
-      (title as { is_public: boolean; partner_id: string | null } | null) ??
-      null,
+      (title as {
+        is_public: boolean;
+        partner_id: string | null;
+        default_monetization_mode: string;
+      } | null) ?? null,
   };
 }
