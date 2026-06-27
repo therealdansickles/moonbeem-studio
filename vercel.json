@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/cleanup-fan-edit-events",
       "schedule": "0 3 1 * *"
+    },
+    {
+      "path": "/api/cron/settle-transactions",
+      "schedule": "0 4 * * *"
     }
   ]
 }
