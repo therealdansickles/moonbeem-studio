@@ -1,6 +1,10 @@
-// POST /api/titles/[id]/rent — start a Stripe Checkout to rent a film.
+// POST /api/titles/[id]/rent — start a Stripe Checkout to RENT or BUY a film.
+// Body: { kind?: 'rental' | 'purchase' }, default 'rental'. kind selects the
+// price column (transact_* vs purchase_*) and the entitlement kind the webhook
+// grants. A bodyless POST is a rental (unchanged for the existing rent button).
 //
-// The FIRST money-IN viewer flow (transactions sub-unit 2). Any AUTHENTICATED
+// The FIRST money-IN viewer flow (transactions su2 rental + su4 purchase). Any
+// AUTHENTICATED
 // viewer may rent: getUser() → 401 if anon — NOT authorizeTitleMutation (that is
 // the partner-admin gate; a renter is a fan, not a title owner). Mirrors the
 // campaign fund route's Checkout shape (mode:'payment', integer-cents
@@ -61,29 +65,59 @@ export async function POST(
     return NextResponse.json({ error: "title_not_found" }, { status: 404 });
   }
 
+  // kind: 'rental' (default — a bodyless POST stays a rental, unchanged for the
+  // existing rent button) or 'purchase'. Validated against the two values.
+  const body = (await request.json().catch(() => ({}))) as { kind?: unknown };
+  let kind: "rental" | "purchase";
+  if (body.kind === undefined || body.kind === "rental") {
+    kind = "rental";
+  } else if (body.kind === "purchase") {
+    kind = "purchase";
+  } else {
+    return NextResponse.json({ error: "invalid_kind" }, { status: 400 });
+  }
+
   const supabase = createServiceRoleClient();
 
-  // Load the offer. Must be transact_enabled with a positive integer price.
+  // Load the offer (both price pairs). Must be enabled with a positive integer
+  // price for the requested kind.
   const { data: title } = await supabase
     .from("titles")
-    .select("id, slug, title, transact_enabled, transact_price_cents")
+    .select(
+      "id, slug, title, transact_enabled, transact_price_cents, purchase_enabled, purchase_price_cents",
+    )
     .eq("id", id)
     .is("deleted_at", null) // never transact a soft-deleted offer
     .maybeSingle();
   if (!title) {
     return NextResponse.json({ error: "title_not_found" }, { status: 404 });
   }
-  const priceCents = title.transact_price_cents as number | null;
+  // Price + enable flag by kind: rental uses the transact_* pair, purchase the
+  // purchase_* pair. Same integer / > 0 validation either way.
+  const enabled =
+    kind === "purchase" ? title.purchase_enabled : title.transact_enabled;
+  const priceCents = (
+    kind === "purchase"
+      ? title.purchase_price_cents
+      : title.transact_price_cents
+  ) as number | null;
   if (
-    title.transact_enabled !== true ||
+    enabled !== true ||
     typeof priceCents !== "number" ||
     !Number.isInteger(priceCents) ||
     priceCents <= 0
   ) {
-    return NextResponse.json({ error: "not_rentable" }, { status: 400 });
+    return NextResponse.json(
+      { error: kind === "purchase" ? "not_purchasable" : "not_rentable" },
+      { status: 400 },
+    );
   }
 
-  // DOUBLE-PAY GUARD: if the viewer already holds an active rental, don't charge.
+  // KIND-AWARE DOUBLE-PAY GUARD.
+  //  - purchase: block ONLY if the viewer already OWNS this title (an active
+  //    purchase). A viewer mid-rental may still buy — the rent→buy upgrade.
+  //  - rental: block if the viewer holds ANY active entitlement (rental OR
+  //    purchase) — they already have access, don't charge again.
   const { data: existing } = await supabase
     .from("entitlements")
     .select("kind, purchased_at, first_played_at")
@@ -91,28 +125,33 @@ export async function POST(
     .eq("title_id", id)
     .order("purchased_at", { ascending: false })
     .limit(5);
-  const alreadyActive = (existing ?? []).some((e) =>
+  const active = (existing ?? []).filter((e) =>
     isEntitlementActive({
       kind: e.kind as string,
       purchased_at: e.purchased_at as string,
       first_played_at: (e.first_played_at as string | null) ?? null,
     }),
   );
-  if (alreadyActive) {
+  const alreadyHas =
+    kind === "purchase"
+      ? active.some((e) => e.kind === "purchase") // already owns it permanently
+      : active.length > 0; // already has access (active rental or purchase)
+  if (alreadyHas) {
     return NextResponse.json({ already_entitled: true });
   }
 
   const stripe = getStripe();
   const baseUrl = publicBaseUrl(request);
   const slug = title.slug as string;
-  const successUrl = `${baseUrl}/t/${slug}?rented=1`;
-  const cancelUrl = `${baseUrl}/t/${slug}?rent_cancelled=1`;
+  const successUrl = `${baseUrl}/t/${slug}?${kind === "purchase" ? "purchased" : "rented"}=1`;
+  const cancelUrl = `${baseUrl}/t/${slug}?${kind === "purchase" ? "purchase_cancelled" : "rent_cancelled"}=1`;
 
   // Metadata round-trips to the webhook (read off session OR payment_intent).
   // All values are strings (Stripe metadata is string→string); the webhook
-  // re-parses moonbeem_price_cents to an integer and re-validates.
+  // re-parses moonbeem_price_cents to an integer and re-validates, and reads
+  // moonbeem_kind to grant the matching entitlement kind.
   const metadata = {
-    moonbeem_kind: "rental",
+    moonbeem_kind: kind,
     moonbeem_user_id: user.id,
     moonbeem_title_id: id,
     moonbeem_price_cents: String(priceCents),
@@ -130,7 +169,9 @@ export async function POST(
             price_data: {
               currency: "usd",
               unit_amount: priceCents, // integer cents, directly (no fee math)
-              product_data: { name: `Rental: ${title.title as string}` },
+              product_data: {
+                name: `${kind === "purchase" ? "Purchase" : "Rental"}: ${title.title as string}`,
+              },
             },
           },
         ],
@@ -143,7 +184,7 @@ export async function POST(
       // idempotency window returns the SAME session, never a second charge. The
       // price is in the key so a partner price change mints a fresh session
       // rather than erroring on a reused key.
-      { idempotencyKey: `rent-${user.id}-${id}-${priceCents}` },
+      { idempotencyKey: `${kind === "purchase" ? "buy" : "rent"}-${user.id}-${id}-${priceCents}` },
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : "stripe_error";

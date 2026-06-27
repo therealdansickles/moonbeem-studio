@@ -167,35 +167,38 @@ export async function POST(request: NextRequest) {
     }
 
     case "checkout.session.completed": {
-      // Viewer-IN (transactions sub-unit 2): a rental Checkout was paid.
-      // Discriminated by moonbeem_kind='rental' metadata. Grant the entitlement
-      // idempotently — a replayed event returns 'already_granted', still 200; a
-      // genuine (non-conflict) insert failure returns 500 so Stripe retries.
+      // Viewer-IN (transactions su2 rental + su4 purchase): a rental OR purchase
+      // Checkout was paid. Discriminated by moonbeem_kind ∈ {'rental','purchase'}
+      // metadata. Grant the entitlement idempotently via grant_entitlement(kind)
+      // — a replayed event returns 'already_granted', still 200; a genuine
+      // (non-conflict) insert failure returns 500 so Stripe retries.
       // Campaign-funding sessions (moonbeem_campaign_funding_id, no
       // moonbeem_kind) fall through UNCHANGED to the partner-IN branch below.
       // Scoped in its own block so `session` doesn't collide with the partner-IN
       // `session` const, keeping that branch byte-for-byte unchanged.
       {
         const session = event.data.object as Stripe.Checkout.Session;
-        if (session.metadata?.moonbeem_kind === "rental") {
+        const md = session.metadata;
+        const moonbeemKind = md?.moonbeem_kind;
+        if (md && (moonbeemKind === "rental" || moonbeemKind === "purchase")) {
           // Only grant once funds are settled. Card Checkout always completes
           // 'paid'; this guards against a future delayed/async method (e.g. bank
           // debit) firing completed while still 'unpaid' (which would otherwise
-          // grant a free rental before — or instead of — settlement).
+          // grant a free entitlement before — or instead of — settlement).
           if (session.payment_status !== "paid") {
             console.log(
-              `[stripe-webhook] rental session not paid (status=${session.payment_status}); session=${session.id} — skipping grant`,
+              `[stripe-webhook] ${moonbeemKind} session not paid (status=${session.payment_status}); session=${session.id} — skipping grant`,
             );
             break;
           }
-          const md = session.metadata;
           const userId = md.moonbeem_user_id ?? "";
           const titleId = md.moonbeem_title_id ?? "";
           const priceCents = Number(md.moonbeem_price_cents);
-          // Validate before granting. A malformed rental event can never
+          // Validate before granting. A malformed transaction event can never
           // succeed on retry → log loudly + ack 200 (don't make Stripe retry a
-          // poisoned event forever). Price must be a positive safe integer (a
-          // $0 rental is nonsensical; the rent route already enforces > 0).
+          // poisoned event forever). Price must be a positive safe integer (a $0
+          // rental/purchase is nonsensical; the transact route enforces > 0). The
+          // kind is already narrowed to 'rental' | 'purchase' by the branch guard.
           if (
             !UUID_RE.test(userId) ||
             !UUID_RE.test(titleId) ||
@@ -204,7 +207,7 @@ export async function POST(request: NextRequest) {
             !Number.isSafeInteger(priceCents)
           ) {
             console.error(
-              `[stripe-webhook] rental session malformed metadata; session=${session.id} user=${userId} title=${titleId} price=${md.moonbeem_price_cents}`,
+              `[stripe-webhook] ${moonbeemKind} session malformed metadata; session=${session.id} user=${userId} title=${titleId} price=${md.moonbeem_price_cents}`,
             );
             break;
           }
@@ -213,27 +216,28 @@ export async function POST(request: NextRequest) {
               ? session.payment_intent
               : (session.payment_intent?.id ?? null);
           const { data: grantResult, error: grantErr } = await supabase.rpc(
-            "grant_rental_entitlement",
+            "grant_entitlement",
             {
               p_session_id: session.id,
               p_user_id: userId,
               p_title_id: titleId,
+              p_kind: moonbeemKind,
               p_price_cents: priceCents,
               p_payment_intent_id: piId,
             },
           );
           if (grantErr) {
             // The ON CONFLICT no-op never errors; an error here is a genuine
-            // failure (FK violation, DB down). The customer paid → 500 so Stripe
-            // retries until the grant lands.
+            // failure (FK violation, bad kind, DB down). The customer paid → 500
+            // so Stripe retries until the grant lands.
             console.error(
-              `[stripe-webhook] grant_rental_entitlement failed; session=${session.id}: ${grantErr.message}`,
+              `[stripe-webhook] grant_entitlement (${moonbeemKind}) failed; session=${session.id}: ${grantErr.message}`,
             );
             return NextResponse.json({ error: "grant_failed" }, { status: 500 });
           }
           // 'granted' (new) or 'already_granted' (idempotent replay) — ack 200.
           console.log(
-            `[stripe-webhook] grant_rental_entitlement ${grantResult} session=${session.id} user=${userId} title=${titleId}`,
+            `[stripe-webhook] grant_entitlement ${grantResult} kind=${moonbeemKind} session=${session.id} user=${userId} title=${titleId}`,
           );
           break;
         }
