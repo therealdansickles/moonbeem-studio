@@ -99,14 +99,21 @@ export default function MuxEpisodePlayer({
     );
   }
   if (tokenState.status === "error") {
-    const message =
-      tokenState.kind === "auth"
-        ? "Sign in to watch this film."
-        : tokenState.kind === "not_entitled"
-          ? "Rent or buy this film to watch."
-          : tokenState.kind === "territory"
-            ? "This film isn't available in your region."
-            : "This episode can't be played right now.";
+    let message: string;
+    switch (tokenState.kind) {
+      case "auth":
+        message = "Sign in to watch this film.";
+        break;
+      case "not_entitled":
+        message = "Rent or buy this film to watch.";
+        break;
+      case "territory":
+        message = "This film isn't available in your region.";
+        break;
+      case "unavailable":
+        message = "This episode can't be played right now.";
+        break;
+    }
     return (
       <div className="flex min-h-[320px] w-full items-center justify-center px-4 text-center text-body-sm text-moonbeem-ink-subtle">
         {message}
