@@ -285,6 +285,8 @@ export default async function TitlePage({ params }: PageProps) {
       <RentButton
         titleId={title.id}
         priceCents={title.transact_price_cents as number}
+        authState={ratingAuthState}
+        returnTo={`/t/${title.slug}`}
       />
     ) : null;
 
@@ -293,6 +295,8 @@ export default async function TitlePage({ params }: PageProps) {
       <BuyButton
         titleId={title.id}
         priceCents={title.purchase_price_cents as number}
+        authState={ratingAuthState}
+        returnTo={`/t/${title.slug}`}
       />
     ) : null;
 

@@ -7,19 +7,34 @@
 // filled Rent CTA stays primary.
 
 import { useState } from "react";
+import GateModal from "@/components/gating/GateModal";
+
+type AuthState = "anon" | "no_creator" | "ready";
 
 export default function BuyButton({
   titleId,
   priceCents,
+  authState,
+  returnTo,
 }: {
   titleId: string;
   priceCents: number;
+  authState: AuthState;
+  returnTo: string;
 }) {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [gateOpen, setGateOpen] = useState(false);
   const dollars = (priceCents / 100).toFixed(2); // display only
 
   async function buy() {
+    // Anon viewers hit the sign-in gate BEFORE any charge POST, mirroring the
+    // library controls. The 401 branch below is now an unreachable defensive
+    // fallback for an anon click (kept intentionally; removing it is out of scope).
+    if (authState === "anon") {
+      setGateOpen(true);
+      return;
+    }
     setLoading(true);
     setMsg(null);
     try {
@@ -71,6 +86,14 @@ export default function BuyButton({
       </button>
       {msg && (
         <p className="text-caption text-moonbeem-ink-subtle m-0">{msg}</p>
+      )}
+      {authState === "anon" && (
+        <GateModal
+          open={gateOpen}
+          onClose={() => setGateOpen(false)}
+          reason="auth_required"
+          returnTo={returnTo}
+        />
       )}
     </div>
   );
