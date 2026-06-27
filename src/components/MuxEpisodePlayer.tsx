@@ -29,7 +29,10 @@ type TokenState =
       playbackToken: string;
       drmToken: string;
     }
-  | { status: "error" };
+  | {
+      status: "error";
+      kind: "auth" | "not_entitled" | "territory" | "unavailable";
+    };
 
 export default function MuxEpisodePlayer({
   episode,
@@ -50,7 +53,15 @@ export default function MuxEpisodePlayer({
           signal: controller.signal,
         });
         if (!res.ok) {
-          setTokenState({ status: "error" });
+          // Branch on the status code alone — the route returns distinguishable
+          // codes (401/402/451), and the error body may not be JSON, so don't
+          // await it. Anything else non-2xx is a generic "unavailable".
+          let kind: "auth" | "not_entitled" | "territory" | "unavailable";
+          if (res.status === 401) kind = "auth";
+          else if (res.status === 402) kind = "not_entitled";
+          else if (res.status === 451) kind = "territory";
+          else kind = "unavailable";
+          setTokenState({ status: "error", kind });
           return;
         }
         const data = (await res.json()) as {
@@ -66,7 +77,9 @@ export default function MuxEpisodePlayer({
         });
       } catch {
         if (controller.signal.aborted) return; // closed/changed — ignore
-        setTokenState({ status: "error" });
+        // A thrown error (network failure, or a non-JSON 200 reaching .json())
+        // is never an auth/payment signal — always "unavailable".
+        setTokenState({ status: "error", kind: "unavailable" });
       }
     })();
     return () => controller.abort();
@@ -86,9 +99,17 @@ export default function MuxEpisodePlayer({
     );
   }
   if (tokenState.status === "error") {
+    const message =
+      tokenState.kind === "auth"
+        ? "Sign in to watch this film."
+        : tokenState.kind === "not_entitled"
+          ? "Rent or buy this film to watch."
+          : tokenState.kind === "territory"
+            ? "This film isn't available in your region."
+            : "This episode can't be played right now.";
     return (
       <div className="flex min-h-[320px] w-full items-center justify-center px-4 text-center text-body-sm text-moonbeem-ink-subtle">
-        This episode can&apos;t be played right now.
+        {message}
       </div>
     );
   }
