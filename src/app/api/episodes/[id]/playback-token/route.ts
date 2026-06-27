@@ -79,15 +79,29 @@ export async function POST(
     return NextResponse.json({ error: "territory_restricted" }, { status: 451 });
   }
 
-  // ENTITLEMENT GATE (transactions sub-unit 3). Only 'transactional' episodes are
-  // gated; 'free' / 'avod' / null fall straight through to the mint below — today's
-  // EXACT behavior (the gate is inert until a partner enables transact, since every
-  // episode currently resolves to 'free'). Effective mode = COALESCE(per-episode
-  // override, title default). episode.title is non-null here (the canViewTitle gate
-  // above already 403'd a missing title).
-  const effective =
-    episode.monetization_mode ?? episode.title.default_monetization_mode;
-  if (effective === "transactional") {
+  // ENTITLEMENT GATE (transactions sub-unit 3). The gate gates exactly when the
+  // title is FOR SALE, derived LIVE from the title's offer flags — NOT from the
+  // stored episode.monetization_mode marker (write-only vestigial after this; two
+  // writers could set it inconsistently). "Sellable" mirrors the charge route's
+  // per-kind condition field-for-field (rent/route.ts:97-108): enabled === true
+  // AND an integer price > 0, OR'd across rental and purchase. So "gated" equals
+  // "the charge path would sell it" — no gated-but-unbuyable, no buyable-but-
+  // ungated. A title with no enabled+priced offer falls straight through to the
+  // mint (today's free behavior). episode.title is non-null here (the canViewTitle
+  // gate above already 403'd a missing title), so these reads are safe.
+  const t = episode.title;
+  const rentSellable =
+    t.transact_enabled === true &&
+    typeof t.transact_price_cents === "number" &&
+    Number.isInteger(t.transact_price_cents) &&
+    t.transact_price_cents > 0;
+  const buySellable =
+    t.purchase_enabled === true &&
+    typeof t.purchase_price_cents === "number" &&
+    Number.isInteger(t.purchase_price_cents) &&
+    t.purchase_price_cents > 0;
+  const gated = rentSellable || buySellable;
+  if (gated) {
     // The entitlement keys on user_id — an anon viewer can't hold one. The
     // frontend routes a 401 to sign-in.
     if (!user) {

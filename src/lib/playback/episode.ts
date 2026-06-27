@@ -23,10 +23,18 @@ export type EpisodeForPlayback = {
   monetization_mode: string | null;
   // Owning title's visibility fields + monetization default, or null if the
   // title is missing / soft-deleted (caller treats null as not-viewable).
+  // Offer flags (transact_*/purchase_*) feed the playback gate's LIVE
+  // sellability derivation — the gate gates exactly when the charge path would
+  // sell (enabled === true && integer price > 0), so it no longer reads the
+  // stored monetization_mode marker.
   title: {
     is_public: boolean;
     partner_id: string | null;
     default_monetization_mode: string;
+    transact_enabled: boolean;
+    purchase_enabled: boolean;
+    transact_price_cents: number | null;
+    purchase_price_cents: number | null;
   } | null;
 };
 
@@ -49,7 +57,9 @@ export async function getEpisodeForPlayback(
   // Owning title's visibility (soft-delete-scoped, like every other title read).
   const { data: title } = await supabase
     .from("titles")
-    .select("is_public, partner_id, default_monetization_mode")
+    .select(
+      "is_public, partner_id, default_monetization_mode, transact_enabled, purchase_enabled, transact_price_cents, purchase_price_cents",
+    )
     .eq("id", row.title_id)
     .is("deleted_at", null)
     .maybeSingle();
@@ -61,6 +71,10 @@ export async function getEpisodeForPlayback(
         is_public: boolean;
         partner_id: string | null;
         default_monetization_mode: string;
+        transact_enabled: boolean;
+        purchase_enabled: boolean;
+        transact_price_cents: number | null;
+        purchase_price_cents: number | null;
       } | null) ?? null,
   };
 }
