@@ -21,6 +21,7 @@ import { useRouter } from "next/navigation";
 import TerritorySelector from "@/components/p/TerritorySelector";
 import PosterEditor from "@/components/PosterEditor";
 import RentalPricingCard from "@/components/p/RentalPricingCard";
+import PurchasePricingCard from "@/components/p/PurchasePricingCard";
 
 // MuxUploader is a web component (registers a custom element, touches
 // customElements/HTMLElement) — load it client-only via dynamic ssr:false,
@@ -72,6 +73,8 @@ export default function TitleUploadPanel({
   allowedTerritories,
   transactEnabled,
   transactPriceCents,
+  purchaseEnabled,
+  purchasePriceCents,
   externalPriceUsd,
 }: {
   titleId: string;
@@ -85,6 +88,8 @@ export default function TitleUploadPanel({
   allowedTerritories: string[];
   transactEnabled: boolean;
   transactPriceCents: number | null;
+  purchaseEnabled: boolean;
+  purchasePriceCents: number | null;
   externalPriceUsd: number | null;
 }) {
   const router = useRouter();
@@ -428,6 +433,16 @@ export default function TitleUploadPanel({
         titleId={titleId}
         initialEnabled={transactEnabled}
         initialPriceCents={transactPriceCents}
+        hasMuxEpisode={episodes.some((e) => e.source === "mux")}
+        externalPriceUsd={externalPriceUsd}
+      />
+
+      {/* Purchase pricing (transactions sub-unit 4). A film can offer rent, buy,
+          or both — the two cards are independent. */}
+      <PurchasePricingCard
+        titleId={titleId}
+        initialEnabled={purchaseEnabled}
+        initialPriceCents={purchasePriceCents}
         hasMuxEpisode={episodes.some((e) => e.source === "mux")}
         externalPriceUsd={externalPriceUsd}
       />

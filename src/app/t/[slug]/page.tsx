@@ -17,6 +17,7 @@ import TitleTabs from "@/components/TitleTabs";
 import EpisodeList from "@/components/EpisodeList";
 import HeroPlayer from "@/components/HeroPlayer";
 import RentButton from "@/components/RentButton";
+import BuyButton from "@/components/BuyButton";
 import FanEditsTab from "@/components/FanEditsTab";
 import VideosTab from "@/components/VideosTab";
 import StillsTab from "@/components/StillsTab";
@@ -287,6 +288,14 @@ export default async function TitlePage({ params }: PageProps) {
       />
     ) : null;
 
+  const buyEl =
+    title.purchase_enabled && (title.purchase_price_cents ?? 0) > 0 ? (
+      <BuyButton
+        titleId={title.id}
+        priceCents={title.purchase_price_cents as number}
+      />
+    ) : null;
+
   const aboutContent = (
     <div className="flex flex-col items-center gap-8">
       {title.synopsis && (
@@ -402,9 +411,10 @@ export default async function TitlePage({ params }: PageProps) {
                 page's main filled action, directly under identity. */}
             {watchNowEl}
 
-            {/* 2b. RENT — minimal Checkout-start (transactions sub-unit 2).
-                Temporary; sub-unit 3 builds the real rent-vs-play gate. */}
+            {/* 2b. RENT / BUY — minimal Checkout-start (transactions su2 rental,
+                su4 purchase). Both show when the title offers both. */}
             {rentEl}
+            {buyEl}
 
             {/* 3. CAMPAIGN CALLOUT — prominent pink-accent block replacing the
                 old inline pill, still linking the campaign page. Secondary to

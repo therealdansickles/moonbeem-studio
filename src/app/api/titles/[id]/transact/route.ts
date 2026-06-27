@@ -1,11 +1,15 @@
-// PATCH /api/titles/[id]/transact — set a title's native RENTAL OFFER (price +
-// enabled). Distributor-set, INTEGER CENTS, NO hard floor (any external
+// PATCH /api/titles/[id]/transact — set a title's native RENTAL and/or PURCHASE
+// OFFER (price + enabled, per kind). Distributor-set, INTEGER CENTS, NO hard
+// floor (any external
 // iTunes/Amazon price is guidance only, surfaced in the UI, never enforced).
 // Title-scoped (NOT /api/admin), so owning-partner-admins are authorized via the
 // OR gate — mirrors PATCH /api/titles/[id]/territories exactly (getUser ->
 // enforce("partnerWrites") -> UUID -> authorizeTitleMutation -> service-role
-// update -> select-confirm -> revalidate). Body:
-//   { transact_enabled: boolean, transact_price_cents: integer }
+// update -> select-confirm -> revalidate). Body (send either or both pairs):
+//   { transact_enabled?: boolean, transact_price_cents?: integer,
+//     purchase_enabled?: boolean, purchase_price_cents?: integer }
+// The episode 'transactional' marker is set when EITHER offer is enabled, and
+// cleared only when BOTH are disabled (the gate is kind-agnostic).
 //
 // VALIDATION: transact_price_cents must be a non-negative SAFE INTEGER (cents);
 // enabling (transact_enabled=true) requires transact_price_cents > 0 (can't
@@ -62,44 +66,77 @@ export async function PATCH(
     return NextResponse.json({ error: authz.reason }, { status });
   }
 
-  let body: { transact_enabled?: unknown; transact_price_cents?: unknown };
+  let body: {
+    transact_enabled?: unknown;
+    transact_price_cents?: unknown;
+    purchase_enabled?: unknown;
+    purchase_price_cents?: unknown;
+  };
   try {
     body = (await request.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  if (typeof body.transact_enabled !== "boolean") {
-    return NextResponse.json({ error: "invalid_enabled" }, { status: 400 });
+  // Validate ONE offer pair (enabled + price): enabled is boolean, price is a
+  // non-negative SAFE INTEGER of cents (reject float / negative / NaN / non-
+  // number — no rounding, no coercion), and you can't enable a $0 offer.
+  function validatePair(
+    enabledVal: unknown,
+    priceVal: unknown,
+  ):
+    | { ok: true; enabled: boolean; price: number }
+    | { ok: false; error: string } {
+    if (typeof enabledVal !== "boolean") {
+      return { ok: false, error: "invalid_enabled" };
+    }
+    if (
+      typeof priceVal !== "number" ||
+      !Number.isInteger(priceVal) ||
+      priceVal < 0 ||
+      !Number.isSafeInteger(priceVal)
+    ) {
+      return { ok: false, error: "invalid_price" };
+    }
+    if (enabledVal && priceVal <= 0) {
+      return { ok: false, error: "price_required_when_enabled" };
+    }
+    return { ok: true, enabled: enabledVal, price: priceVal };
   }
-  const enabled = body.transact_enabled;
 
-  // Price: a non-negative safe integer number of CENTS. Reject float / negative
-  // / NaN / non-number outright — no rounding, no coercion.
-  const price = body.transact_price_cents;
-  if (
-    typeof price !== "number" ||
-    !Number.isInteger(price) ||
-    price < 0 ||
-    !Number.isSafeInteger(price)
-  ) {
-    return NextResponse.json({ error: "invalid_price" }, { status: 400 });
+  // Update whichever offer pair(s) the caller sent. The Rental card sends the
+  // transact_* pair, the Purchase card the purchase_* pair; both may be present.
+  const update: {
+    transact_enabled?: boolean;
+    transact_price_cents?: number;
+    purchase_enabled?: boolean;
+    purchase_price_cents?: number;
+  } = {};
+  if (body.transact_enabled !== undefined) {
+    const r = validatePair(body.transact_enabled, body.transact_price_cents);
+    if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
+    update.transact_enabled = r.enabled;
+    update.transact_price_cents = r.price;
   }
-  // Can't enable a free rental — an enabled offer must cost something.
-  if (enabled && price <= 0) {
-    return NextResponse.json(
-      { error: "price_required_when_enabled" },
-      { status: 400 },
-    );
+  if (body.purchase_enabled !== undefined) {
+    const r = validatePair(body.purchase_enabled, body.purchase_price_cents);
+    if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
+    update.purchase_enabled = r.enabled;
+    update.purchase_price_cents = r.price;
+  }
+  if (Object.keys(update).length === 0) {
+    return NextResponse.json({ error: "no_offer_fields" }, { status: 400 });
   }
 
   const supabase = createServiceRoleClient();
 
   const { data: updated, error } = await supabase
     .from("titles")
-    .update({ transact_enabled: enabled, transact_price_cents: price })
+    .update(update)
     .eq("id", id)
-    .select("id, slug, transact_enabled, transact_price_cents")
+    .select(
+      "id, slug, transact_enabled, transact_price_cents, purchase_enabled, purchase_price_cents",
+    )
     .maybeSingle();
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -109,9 +146,14 @@ export async function PATCH(
   }
 
   // PAID MARKER on the title's Mux film episode(s) — the COALESCE gating source
-  // of truth. Inert today (nothing reads monetization_mode); coherent prep for
-  // the sub-unit-3 playback gate. Best-effort: the price already saved above.
-  const marker = enabled ? "transactional" : null;
+  // of truth (the gate is kind-agnostic: 'transactional' just means "requires
+  // payment", satisfied by an active rental OR purchase). Set when EITHER offer
+  // is enabled; cleared to NULL only when BOTH are disabled. Computed from the
+  // RETURNING row, so it's correct even when only one pair was sent. Best-effort:
+  // the prices already saved above.
+  const anyEnabled =
+    updated.transact_enabled === true || updated.purchase_enabled === true;
+  const marker = anyEnabled ? "transactional" : null;
   const { error: markErr, count: markedCount } = await supabase
     .from("title_episodes")
     .update({ monetization_mode: marker }, { count: "exact" })
@@ -130,6 +172,8 @@ export async function PATCH(
     titleId: updated.id,
     transact_enabled: updated.transact_enabled,
     transact_price_cents: updated.transact_price_cents,
+    purchase_enabled: updated.purchase_enabled,
+    purchase_price_cents: updated.purchase_price_cents,
     mux_episodes_marked: markErr ? null : (markedCount ?? 0),
   });
 }
