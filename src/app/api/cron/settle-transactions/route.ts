@@ -87,7 +87,9 @@ export async function GET(request: NextRequest) {
     const { data: candidates, error: candErr } = await supabase
       .from("entitlements")
       .select(
-        "id, title_id, creator_id, price_paid_cents, stripe_payment_intent_id",
+        // revoked_at/disputed_at (5b feeder c): a refund/dispute that landed
+        // before this pass writes the settlement row -> born already-blocked.
+        "id, title_id, creator_id, price_paid_cents, stripe_payment_intent_id, revoked_at, disputed_at",
       )
       .not("stripe_payment_intent_id", "is", null)
       .order("created_at", { ascending: true }) // stable order
@@ -270,7 +272,18 @@ export async function GET(request: NextRequest) {
                 moonbeem_take_bps: mbBps,
                 creator_share_bps: crBps,
                 stripe_balance_txn_id: bt.id,
-                // payout_status defaults to 'held'.
+                // 5b feeder (c) race handling: a refund/dispute that marked the
+                // entitlement BEFORE this pass runs makes the row born blocked,
+                // never a 'held' row a future release could pay. No marker =>
+                // 'held' (the prior default). This is the ONLY 5b-c change here;
+                // the split math, the sum invariant, and the upsert conflict
+                // handling above/below are untouched.
+                payout_status:
+                  e.revoked_at != null
+                    ? "refunded"
+                    : e.disputed_at != null
+                      ? "disputed"
+                      : "held",
               },
               { onConflict: "entitlement_id", ignoreDuplicates: true },
             )

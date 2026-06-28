@@ -393,6 +393,155 @@ export async function POST(request: NextRequest) {
       break;
     }
 
+    case "charge.refunded": {
+      // Sub-unit 5b feeder (c): a charge was refunded. Block payout on the
+      // settlement AND revoke the buyer's access. Maps by payment_intent (the
+      // only id a Charge event carries back to us) -> entitlement -> settlement.
+      // Reads the event + writes our DB only — NO Stripe write, moves no money.
+      const charge = event.data.object as Stripe.Charge;
+      const piId =
+        typeof charge.payment_intent === "string"
+          ? charge.payment_intent
+          : (charge.payment_intent?.id ?? null);
+      if (!piId) {
+        console.log(
+          `[stripe-webhook] charge.refunded with no payment_intent; charge=${charge.id} — nothing to map`,
+        );
+        break;
+      }
+      // Fail-safe: block on ANY refund. A partial (amount_refunded < amount) is
+      // unexpected for our single-full-charge rentals/purchases — log it and
+      // block anyway (v1 treats any refund as payout-blocking; partial-amount
+      // accounting is deferred).
+      if (charge.amount_refunded < charge.amount) {
+        console.warn(
+          `[stripe-webhook] [refund] unexpected partial refund, blocking payout anyway; charge=${charge.id} refunded=${charge.amount_refunded}/${charge.amount}`,
+        );
+      }
+      // The partial unique index on stripe_payment_intent_id makes this <=1 row.
+      const { data: ent, error: entErr } = await supabase
+        .from("entitlements")
+        .select("id, revoked_at")
+        .eq("stripe_payment_intent_id", piId)
+        .maybeSingle();
+      if (entErr) {
+        console.error(
+          `[stripe-webhook] [refund] entitlement lookup failed PI=${piId}: ${entErr.message}`,
+        );
+        return NextResponse.json({ error: "refund_lookup_failed" }, { status: 500 });
+      }
+      if (!ent) {
+        console.log(
+          `[stripe-webhook] [refund] no entitlement for PI ${piId}, likely non-transaction charge; charge=${charge.id}`,
+        );
+        break;
+      }
+      // Revoke access (idempotent: the IS NULL guard no-ops once revoked).
+      const { error: revErr } = await supabase
+        .from("entitlements")
+        .update({ revoked_at: new Date().toISOString() })
+        .eq("id", ent.id as string)
+        .is("revoked_at", null);
+      if (revErr) {
+        console.error(
+          `[stripe-webhook] [refund] revoke failed ent=${ent.id}: ${revErr.message}`,
+        );
+        return NextResponse.json({ error: "refund_revoke_failed" }, { status: 500 });
+      }
+      // Block payout on the settlement IF it exists. 0 rows = the not-yet-settled
+      // race (the settle pass honors revoked_at later) OR a replay — both are
+      // idempotent no-ops. 'reversed'/'refunded' rows are left as-is.
+      const { error: setErr } = await supabase
+        .from("transaction_settlements")
+        .update({
+          payout_status: "refunded",
+          refunded_at: new Date().toISOString(),
+        })
+        .eq("entitlement_id", ent.id as string)
+        .not("payout_status", "in", "(refunded,reversed)");
+      if (setErr) {
+        console.error(
+          `[stripe-webhook] [refund] settlement block failed ent=${ent.id}: ${setErr.message}`,
+        );
+        return NextResponse.json({ error: "refund_block_failed" }, { status: 500 });
+      }
+      console.log(
+        `[stripe-webhook] [refund] blocked payout + revoked access ent=${ent.id} PI=${piId} charge=${charge.id}`,
+      );
+      break;
+    }
+
+    case "charge.dispute.created": {
+      // Sub-unit 5b feeder (c): a dispute (chargeback) opened. Block payout on
+      // the settlement and mark the entitlement disputed, but DO NOT revoke
+      // access — the claim is contested. Resolution (won/lost) is a manual
+      // runbook, not handled here. Reads the event + writes our DB only.
+      const dispute = event.data.object as Stripe.Dispute;
+      const piId =
+        typeof dispute.payment_intent === "string"
+          ? dispute.payment_intent
+          : (dispute.payment_intent?.id ?? null);
+      const chargeId =
+        typeof dispute.charge === "string"
+          ? dispute.charge
+          : (dispute.charge?.id ?? null);
+      if (!piId) {
+        console.log(
+          `[stripe-webhook] charge.dispute.created with no payment_intent; dispute=${dispute.id} charge=${chargeId ?? "n/a"} — nothing to map`,
+        );
+        break;
+      }
+      const { data: ent, error: entErr } = await supabase
+        .from("entitlements")
+        .select("id, disputed_at")
+        .eq("stripe_payment_intent_id", piId)
+        .maybeSingle();
+      if (entErr) {
+        console.error(
+          `[stripe-webhook] [dispute] entitlement lookup failed PI=${piId}: ${entErr.message}`,
+        );
+        return NextResponse.json({ error: "dispute_lookup_failed" }, { status: 500 });
+      }
+      if (!ent) {
+        console.log(
+          `[stripe-webhook] [dispute] no entitlement for PI ${piId}, likely non-transaction charge; dispute=${dispute.id}`,
+        );
+        break;
+      }
+      // Mark disputed — NO revoke (access continues). Idempotent via IS NULL.
+      const { error: dispErr } = await supabase
+        .from("entitlements")
+        .update({ disputed_at: new Date().toISOString() })
+        .eq("id", ent.id as string)
+        .is("disputed_at", null);
+      if (dispErr) {
+        console.error(
+          `[stripe-webhook] [dispute] mark failed ent=${ent.id}: ${dispErr.message}`,
+        );
+        return NextResponse.json({ error: "dispute_mark_failed" }, { status: 500 });
+      }
+      // Block payout if the settlement exists. 'refunded'/'reversed'/'disputed'
+      // are left as-is (a refund already-blocked wins; replay is a no-op).
+      const { error: setErr } = await supabase
+        .from("transaction_settlements")
+        .update({
+          payout_status: "disputed",
+          disputed_at: new Date().toISOString(),
+        })
+        .eq("entitlement_id", ent.id as string)
+        .not("payout_status", "in", "(refunded,reversed,disputed)");
+      if (setErr) {
+        console.error(
+          `[stripe-webhook] [dispute] settlement block failed ent=${ent.id}: ${setErr.message}`,
+        );
+        return NextResponse.json({ error: "dispute_block_failed" }, { status: 500 });
+      }
+      console.log(
+        `[stripe-webhook] [dispute] blocked payout (access continues) ent=${ent.id} PI=${piId} dispute=${dispute.id}`,
+      );
+      break;
+    }
+
     default:
       // Subscribed events should be the only ones routed here, but
       // log unknowns rather than 4xx so Stripe doesn't keep

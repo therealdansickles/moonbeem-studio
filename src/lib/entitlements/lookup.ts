@@ -26,6 +26,11 @@ export async function getActiveEntitlement(
   const { data, error } = await supabase
     .from("entitlements")
     .select("id, kind, purchased_at, first_played_at")
+    // Refund revocation (5b feeder c): a revoked entitlement is never active —
+    // filter it out at the query so it can't even enter the two-clock loop.
+    // isEntitlementActive (the window rule, shared with the double-pay guard) is
+    // deliberately left untouched; revocation is an orthogonal gate here.
+    .is("revoked_at", null)
     .eq("user_id", userId)
     .eq("title_id", titleId)
     .order("purchased_at", { ascending: false });
