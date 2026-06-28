@@ -884,6 +884,7 @@ function PerTitleRollup({
   titles,
   perTitle,
   isSuperAdmin,
+  partnerSlug,
 }: {
   titles: Array<{
     id: string;
@@ -901,6 +902,9 @@ function PerTitleRollup({
     open_requests: number;
   }>;
   isSuperAdmin: boolean;
+  // Owning partner's slug — the per-title management page is keyed by partner
+  // slug + title id (NOT title slug), so the "Upload & pricing" link needs it.
+  partnerSlug: string;
 }) {
   const metricsByTitle = new Map(perTitle.map((p) => [p.title_id, p]));
   const rows: TitleRollupRow[] = titles
@@ -990,6 +994,23 @@ function PerTitleRollup({
       label: "Open requests",
       align: "right",
       render: (r) => r.open_requests.toLocaleString(),
+    },
+    {
+      // Reach the per-title management surface (film uploader, territories,
+      // rental/purchase pricing). Distinct from the title-cell link above
+      // (which opens admin analytics / the public page); this is the only
+      // persistent route to /p/[slug]/titles/[titleId] for an existing title.
+      key: "manage",
+      label: "",
+      align: "right",
+      render: (r) => (
+        <Link
+          href={`/p/${partnerSlug}/titles/${r.id}`}
+          className="text-moonbeem-pink hover:opacity-90 text-body-sm whitespace-nowrap"
+        >
+          Upload &amp; pricing →
+        </Link>
+      ),
     },
   ];
 
@@ -1846,6 +1867,7 @@ export default async function PartnerDashboardPage({
               titles={titleRows.filter((t) => t.is_active)}
               perTitle={analytics.perTitle}
               isSuperAdmin={isSuperAdmin}
+              partnerSlug={partner.slug as string}
             />
           </section>
         )}

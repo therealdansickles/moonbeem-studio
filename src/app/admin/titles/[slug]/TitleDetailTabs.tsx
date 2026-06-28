@@ -241,6 +241,17 @@ export default function TitleDetailTabs(props: Props) {
             ) : (
               <span className="text-moonbeem-ink-subtle">No partner</span>
             )}
+            {props.partnerSlug && (
+              // Reach the partner per-title surface (film uploader, territories,
+              // rental/purchase pricing) — those controls live there, not on
+              // this admin page. Only meaningful when the title has a partner.
+              <Link
+                href={`/p/${props.partnerSlug}/titles/${props.titleId}`}
+                className="text-moonbeem-pink hover:opacity-90"
+              >
+                Manage upload &amp; pricing →
+              </Link>
+            )}
             <StatusPill
               on={props.isActive}
               label="Active"
