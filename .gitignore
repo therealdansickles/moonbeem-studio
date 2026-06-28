@@ -52,3 +52,10 @@ handoff_*.md
 fixtures/letterboxd/
 fixtures/letterboxd*.zip
 letterboxd-*.zip
+
+# scratch — local one-shot recon/debug scripts and the deno lockfile (an
+# edge-function typecheck artifact). These are throwaways; never commit them.
+# (A `git add -A` once swept ~24 of these into a feature branch — this prevents
+# a recurrence.)
+deno.lock
+scripts/_one_shot_*.mjs
