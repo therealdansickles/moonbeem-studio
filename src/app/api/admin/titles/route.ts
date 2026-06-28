@@ -46,6 +46,9 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ALLOWED_MEDIA_TYPES = ["movie", "tv"] as const;
+// Hosting axis (titles_content_kind_check). 'film' = DRM/Mux-hosted; 'embed' =
+// Instagram/social-hosted. Defaults to 'film'. Orthogonal to media_type.
+const ALLOWED_CONTENT_KINDS = ["film", "embed"] as const;
 
 type NewPartner = {
   name?: string;
@@ -56,6 +59,7 @@ type NewPartner = {
 type Body = {
   title?: string;
   media_type?: string;
+  content_kind?: string;
   year?: number | null;
   poster_url?: string | null;
   synopsis?: string | null;
@@ -95,6 +99,15 @@ export async function POST(request: NextRequest) {
   ) {
     return NextResponse.json(
       { error: "invalid_media_type", allowed: ALLOWED_MEDIA_TYPES },
+      { status: 400 },
+    );
+  }
+
+  // --- content_kind (hosting axis; defaults to 'film') ---
+  const contentKind = body.content_kind ?? "film";
+  if (!(ALLOWED_CONTENT_KINDS as readonly string[]).includes(contentKind)) {
+    return NextResponse.json(
+      { error: "invalid_content_kind", allowed: ALLOWED_CONTENT_KINDS },
       { status: 400 },
     );
   }
@@ -250,6 +263,7 @@ export async function POST(request: NextRequest) {
     slug,
     title,
     media_type: mediaType,
+    content_kind: contentKind,
     year,
     poster_url: posterUrl,
     synopsis,

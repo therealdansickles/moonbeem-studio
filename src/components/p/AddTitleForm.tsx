@@ -18,6 +18,14 @@ const MEDIA_TYPES: ReadonlyArray<{ value: string; label: string; hint: string }>
   { value: "event", label: "Event", hint: "a one-off" },
 ];
 
+// Hosting axis (orthogonal to the format above): how the title is delivered.
+// 'film' uploads a DRM video here; 'embed' is an Instagram/social title whose
+// episodes are pasted in on the admin Settings page.
+const CONTENT_KINDS: ReadonlyArray<{ value: string; label: string; hint: string }> = [
+  { value: "film", label: "Film upload", hint: "DRM video" },
+  { value: "embed", label: "Instagram embed", hint: "social reels" },
+];
+
 const TITLE_MAX_LENGTH = 200;
 
 function friendlyError(code: string | undefined, status: number): string {
@@ -28,6 +36,8 @@ function friendlyError(code: string | undefined, status: number): string {
       return `Title must be ${TITLE_MAX_LENGTH} characters or fewer.`;
     case "invalid_media_type":
       return "Pick a valid type.";
+    case "invalid_content_kind":
+      return "Pick a valid hosting option.";
     case "invalid_year":
       return "Enter a valid year (1870–2100).";
     case "invalid_runtime":
@@ -46,6 +56,7 @@ export default function AddTitleForm({ partnerSlug }: { partnerSlug: string }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [mediaType, setMediaType] = useState("movie");
+  const [contentKind, setContentKind] = useState("film");
   const [year, setYear] = useState("");
   const [runtime, setRuntime] = useState("");
   const [synopsis, setSynopsis] = useState("");
@@ -69,6 +80,7 @@ export default function AddTitleForm({ partnerSlug }: { partnerSlug: string }) {
         body: JSON.stringify({
           title,
           media_type: mediaType,
+          content_kind: contentKind,
           year: year.trim() ? Number(year) : undefined,
           runtime_min: runtime.trim() ? Number(runtime) : undefined,
           synopsis: synopsis.trim() || undefined,
@@ -89,6 +101,7 @@ export default function AddTitleForm({ partnerSlug }: { partnerSlug: string }) {
       setRuntime("");
       setSynopsis("");
       setMediaType("movie");
+      setContentKind("film");
       setOpen(false);
       setPhase("idle");
       router.refresh();
@@ -169,6 +182,30 @@ export default function AddTitleForm({ partnerSlug }: { partnerSlug: string }) {
                   {m.label}{" "}
                   <span className="text-caption text-moonbeem-ink-subtle">
                     · {m.hint}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <span className="text-caption text-moonbeem-ink-muted">Hosting</span>
+            <div className="flex flex-wrap gap-2">
+              {CONTENT_KINDS.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => setContentKind(c.value)}
+                  disabled={busy}
+                  className={`rounded-md border px-3 py-1.5 text-body-sm transition-colors disabled:opacity-60 ${
+                    contentKind === c.value
+                      ? "border-moonbeem-pink bg-moonbeem-pink/10 text-moonbeem-pink"
+                      : "border-white/10 text-moonbeem-ink-muted hover:border-moonbeem-pink"
+                  }`}
+                >
+                  {c.label}{" "}
+                  <span className="text-caption text-moonbeem-ink-subtle">
+                    · {c.hint}
                   </span>
                 </button>
               ))}

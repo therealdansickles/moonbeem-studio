@@ -119,6 +119,9 @@ type Props = {
   isActive: boolean;
   isPublic: boolean;
   partnerId: string | null;
+  // Hosting axis ('film' | 'embed') — drives whether the Settings tab shows the
+  // Instagram-episodes box (embed only). Orthogonal to media_type.
+  contentKind: string;
   partnerName: string | null;
   partnerSlug: string | null;
   hasPartner: boolean;
@@ -337,6 +340,7 @@ export default function TitleDetailTabs(props: Props) {
               initialPartnerId={props.partnerId}
               initialPartnerName={props.partnerName}
               initialPartnerSlug={props.partnerSlug}
+              contentKind={props.contentKind}
               allPartners={props.allPartners}
             />
           )}
@@ -1502,6 +1506,7 @@ function SettingsTab({
   initialPartnerId,
   initialPartnerName,
   initialPartnerSlug,
+  contentKind,
   allPartners,
 }: {
   titleId: string;
@@ -1514,6 +1519,7 @@ function SettingsTab({
   initialPartnerId: string | null;
   initialPartnerName: string | null;
   initialPartnerSlug: string | null;
+  contentKind: string;
   allPartners: PartnerOption[];
 }) {
   const [isActive, setIsActive] = useState(initialIsActive);
@@ -1652,7 +1658,12 @@ function SettingsTab({
         <PosterEditor titleId={titleId} initialPosterUrl={initialPosterUrl} />
       </section>
 
-      <EpisodesEditor titleId={titleId} titleSlug={slug} />
+      {/* Instagram-episodes box — embed titles only. A DRM/Mux film uploads its
+          asset on the partner page; pasting Instagram reels into it is
+          nonsensical, so it's hidden for 'film'. */}
+      {contentKind === "embed" && (
+        <EpisodesEditor titleId={titleId} titleSlug={slug} />
+      )}
 
       <DetailsEditor
         titleId={titleId}

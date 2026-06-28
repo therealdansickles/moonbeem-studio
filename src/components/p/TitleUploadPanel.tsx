@@ -65,6 +65,7 @@ function publishError(code: string | undefined, status: number): string {
 export default function TitleUploadPanel({
   titleId,
   filmTitle,
+  contentKind,
   currentPosterUrl,
   isPublic,
   isPartnerAdmin,
@@ -80,6 +81,10 @@ export default function TitleUploadPanel({
   titleId: string;
   titleSlug: string;
   filmTitle: string;
+  // Hosting axis ('film' | 'embed'). Film uploads its DRM asset + sets
+  // territory/pricing here; embed titles manage episodes on admin Settings, so
+  // those sections are hidden for them. Orthogonal to media_type.
+  contentKind: string;
   currentPosterUrl: string | null;
   isPublic: boolean;
   isPartnerAdmin: boolean;
@@ -291,6 +296,12 @@ export default function TitleUploadPanel({
         </div>
       )}
 
+      {/* FILM-ONLY management: a DRM/Mux film uploads its asset and declares
+          territory + rental/purchase pricing here. For an embed (Instagram)
+          title none of this applies — its episodes are managed on the admin
+          Settings page — so the whole block is hidden and a note shown instead. */}
+      {contentKind === "film" && (
+        <>
       {/* Uploader / lifecycle */}
       <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
         <p className="text-caption uppercase tracking-wide text-moonbeem-ink-muted m-0">
@@ -446,6 +457,24 @@ export default function TitleUploadPanel({
         hasMuxEpisode={episodes.some((e) => e.source === "mux")}
         externalPriceUsd={externalPriceUsd}
       />
+        </>
+      )}
+
+      {/* EMBED titles: no film to upload, no territory/pricing — episodes are
+          managed on the admin Settings page. Poster, the asset list, and
+          Visibility above/below stay visible for both kinds. */}
+      {contentKind === "embed" && (
+        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+          <p className="text-caption uppercase tracking-wide text-moonbeem-ink-muted m-0">
+            Episodes
+          </p>
+          <p className="mt-3 text-body-sm text-moonbeem-ink-muted m-0">
+            This is an Instagram-embed title — its episodes are managed on the
+            admin Settings page. There's no film upload, territory, or pricing
+            here.
+          </p>
+        </div>
+      )}
 
       {/* Make title public — a SEPARATE, deliberate go-live, intentionally
           decoupled from asset-publish so listing the film is one explicit

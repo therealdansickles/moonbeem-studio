@@ -53,6 +53,7 @@ export default function CreateTitleModal({ onClose }: Props) {
   // Title metadata
   const [title, setTitle] = useState("");
   const [mediaType, setMediaType] = useState<"movie" | "tv">("movie");
+  const [contentKind, setContentKind] = useState<"film" | "embed">("film");
   const [year, setYear] = useState("");
   const [posterUrl, setPosterUrl] = useState("");
   const [synopsis, setSynopsis] = useState("");
@@ -131,6 +132,7 @@ export default function CreateTitleModal({ onClose }: Props) {
     const payload: Record<string, unknown> = {
       title: title.trim(),
       media_type: mediaType,
+      content_kind: contentKind,
       is_active: isActive,
       is_public: isPublic,
       is_featured: isFeatured,
@@ -227,6 +229,19 @@ export default function CreateTitleModal({ onClose }: Props) {
               >
                 <option value="movie">Film (movie)</option>
                 <option value="tv">Series (tv)</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-caption text-moonbeem-ink-subtle">
+              Hosting
+              <select
+                value={contentKind}
+                onChange={(e) =>
+                  setContentKind(e.target.value as "film" | "embed")
+                }
+                className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-body-sm text-moonbeem-ink focus:border-moonbeem-pink focus:outline-none"
+              >
+                <option value="film">Film upload (DRM)</option>
+                <option value="embed">Instagram embed</option>
               </select>
             </label>
             <label className="flex flex-col gap-1 text-caption text-moonbeem-ink-subtle">

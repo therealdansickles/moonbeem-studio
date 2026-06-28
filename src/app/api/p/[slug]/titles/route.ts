@@ -27,11 +27,16 @@ import { baseTitleSlug, resolveUniqueSlug } from "@/lib/titles/slug";
 // AND short films; 'tv' = series; 'event' = a one-off event title (its
 // date/venue are set later via the metadata editor).
 const ALLOWED_MEDIA_TYPES = ["movie", "tv", "event"] as const;
+// Hosting axis (titles_content_kind_check). 'film' = DRM/Mux-hosted; 'embed' =
+// Instagram/social-hosted. Defaults to 'film' (this route is the film-upload
+// entry point). Orthogonal to media_type.
+const ALLOWED_CONTENT_KINDS = ["film", "embed"] as const;
 const TITLE_MAX_LENGTH = 200;
 
 type Body = {
   title?: string;
   media_type?: string;
+  content_kind?: string;
   year?: number | null;
   synopsis?: string | null;
   runtime_min?: number | null;
@@ -106,6 +111,14 @@ export async function POST(
     );
   }
 
+  const contentKind = body.content_kind ?? "film";
+  if (!(ALLOWED_CONTENT_KINDS as readonly string[]).includes(contentKind)) {
+    return NextResponse.json(
+      { error: "invalid_content_kind", allowed: ALLOWED_CONTENT_KINDS },
+      { status: 400 },
+    );
+  }
+
   let year: number | null = null;
   if (body.year !== undefined && body.year !== null) {
     if (
@@ -153,6 +166,7 @@ export async function POST(
       slug: slugValue,
       title,
       media_type: mediaType,
+      content_kind: contentKind,
       year,
       synopsis,
       runtime_min: runtimeMin,
