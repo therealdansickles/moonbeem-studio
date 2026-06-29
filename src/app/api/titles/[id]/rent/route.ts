@@ -113,6 +113,22 @@ export async function POST(
     );
   }
 
+  // PUBLISHED-FILM GATE (Fix 1): a title is sellable (rent OR purchase) ONLY once
+  // it has at least one live, published Mux episode — otherwise the sale is
+  // undeliverable (the buyer pays with nothing to watch). Runs AFTER the
+  // kind-aware offer gate above, so this single check covers BOTH kinds. Mirrors
+  // getTitleEpisodes' definition of "live" (is_published = true); reuses the
+  // existing service-role client + the validated path id.
+  const { data: publishedEpisodes } = await supabase
+    .from("title_episodes")
+    .select("id")
+    .eq("title_id", id)
+    .eq("is_published", true)
+    .limit(1);
+  if (!publishedEpisodes || publishedEpisodes.length === 0) {
+    return NextResponse.json({ error: "not_yet_available" }, { status: 400 });
+  }
+
   // KIND-AWARE DOUBLE-PAY GUARD.
   //  - purchase: block ONLY if the viewer already OWNS this title (an active
   //    purchase). A viewer mid-rental may still buy — the rent→buy upgrade.

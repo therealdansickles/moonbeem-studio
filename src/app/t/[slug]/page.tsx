@@ -281,7 +281,7 @@ export default async function TitlePage({ params }: PageProps) {
   // the film declares a rental offer. TEMPORARY placement next to Watch Now;
   // sub-unit 3 builds the real rent-vs-play gate.
   const rentEl =
-    title.transact_enabled && (title.transact_price_cents ?? 0) > 0 ? (
+    title.transact_enabled && (title.transact_price_cents ?? 0) > 0 && episodes.length > 0 ? (
       <RentButton
         titleId={title.id}
         priceCents={title.transact_price_cents as number}
@@ -291,7 +291,7 @@ export default async function TitlePage({ params }: PageProps) {
     ) : null;
 
   const buyEl =
-    title.purchase_enabled && (title.purchase_price_cents ?? 0) > 0 ? (
+    title.purchase_enabled && (title.purchase_price_cents ?? 0) > 0 && episodes.length > 0 ? (
       <BuyButton
         titleId={title.id}
         priceCents={title.purchase_price_cents as number}
