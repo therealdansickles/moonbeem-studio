@@ -139,14 +139,19 @@ async function handleV2AccountEvent(
     );
   }
 
-  // payouts_enabled := the RECIPIENT capability that gates a real platform
-  // transfer (transfers.create({destination}) — the withdraw route's actual
-  // call) succeeding: stripe_balance.stripe_transfers === 'active'. The separate
-  // stripe_balance.payouts capability (balance -> bank) is downstream; see review.
+  // payouts_enabled := BOTH recipient capabilities active, so money can flow all
+  // the way to the distributor's bank rather than sitting in Stripe-balance limbo:
+  //   - stripe_balance.stripe_transfers active -> a platform transfers.create
+  //     ({destination}) lands in their Stripe balance (the withdraw route's call)
+  //   - stripe_balance.payouts active -> that balance pays out to their bank
   const transfersStatus =
     account.configuration?.recipient?.capabilities?.stripe_balance
       ?.stripe_transfers?.status;
-  const payoutsEnabled = transfersStatus === "active";
+  const payoutsStatus =
+    account.configuration?.recipient?.capabilities?.stripe_balance
+      ?.payouts?.status;
+  const payoutsEnabled =
+    transfersStatus === "active" && payoutsStatus === "active";
   // onboarding_completed := v2 analogue of v1 details_submitted — recipient has
   // engaged transfer onboarding (status present and not 'unsupported'). UI-only.
   const onboardingCompleted =
@@ -188,7 +193,7 @@ async function handleV2AccountEvent(
   }
 
   console.log(
-    `[stripe-webhook][v2] ${notification.type} acct=${accountId} transfers=${transfersStatus ?? "none"} payouts_enabled=${payoutsEnabled}`,
+    `[stripe-webhook][v2] ${notification.type} acct=${accountId} transfers=${transfersStatus ?? "none"} payouts=${payoutsStatus ?? "none"} payouts_enabled=${payoutsEnabled}`,
   );
   return NextResponse.json({ received: true });
 }
