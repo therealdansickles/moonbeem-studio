@@ -50,6 +50,149 @@ import { getStripe } from "@/lib/stripe/server";
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// ─── Stage 1: v2 thin-event support (ADDITIVE + INERT) ───────────────────────
+// Accounts created via stripe.accounts.create at the pinned apiVersion are
+// v2-managed and emit v2.core.account.* THIN events, not v1 account.updated — so
+// the existing v1 flip never fires for them. This branch handles the recipient
+// capability-status thin event and flips onboarding_completed / payouts_enabled,
+// routed to the partner/creator table by the SAME metadata key the v1
+// account.updated case uses. It is INERT until Stage 2 subscribes a v2
+// event_destination (no v2 event can reach prod before that), and it runs ABOVE
+// the v1 verification so a v2 payload never reaches constructEvent (which throws
+// on thin events in SDK 22.x) — leaving the v1 path byte-for-byte unchanged.
+
+const V2_RECIPIENT_CAP =
+  "v2.core.account[configuration.recipient].capability_status_updated";
+
+// Routing-only peek at the RAW payload — NOT verification (both branches verify
+// the signature with the correct SDK method below). A v1 fat event always has
+// object === "event"; only a v2 thin event has object === "v2.core.event", so a
+// live v1 event can never be misrouted into the v2 parser.
+function looksLikeV2ThinEvent(rawBody: string): boolean {
+  try {
+    const peek = JSON.parse(rawBody) as { object?: unknown; type?: unknown };
+    return (
+      peek.object === "v2.core.event" &&
+      typeof peek.type === "string" &&
+      peek.type.startsWith("v2.")
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function handleV2AccountEvent(
+  stripe: Stripe,
+  body: string,
+  signature: string,
+  secrets: string[],
+): Promise<NextResponse> {
+  // Verify with parseEventNotification (v2), mirroring the v1 dual-secret loop.
+  let notification:
+    | ReturnType<typeof stripe.parseEventNotification>
+    | null = null;
+  let lastErr = "unknown";
+  for (const secret of secrets) {
+    try {
+      notification = stripe.parseEventNotification(body, signature, secret);
+      break;
+    } catch (err) {
+      lastErr = err instanceof Error ? err.message : "unknown";
+    }
+  }
+  if (!notification) {
+    console.error(
+      `[stripe-webhook][v2] signature verification failed: ${lastErr}`,
+    );
+    return NextResponse.json({ error: "bad_signature" }, { status: 400 });
+  }
+
+  // Only the recipient capability-status event drives the payout flip. Ack any
+  // other (currently unsubscribed) v2 event 200 so Stripe doesn't retry.
+  if (notification.type !== V2_RECIPIENT_CAP) {
+    console.log(`[stripe-webhook][v2] ignoring ${notification.type}`);
+    return NextResponse.json({ received: true });
+  }
+
+  const accountId = notification.related_object?.id ?? null;
+  if (!accountId) {
+    console.warn(
+      `[stripe-webhook][v2] ${notification.type} missing related_object id`,
+    );
+    return NextResponse.json({ received: true });
+  }
+
+  // Fetch the full v2 account WITH the recipient + merchant configurations.
+  let account: Awaited<ReturnType<typeof stripe.v2.core.accounts.retrieve>>;
+  try {
+    account = await stripe.v2.core.accounts.retrieve(accountId, {
+      include: ["configuration.recipient", "configuration.merchant"],
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "unknown";
+    console.error(
+      `[stripe-webhook][v2] account retrieve failed acct=${accountId}: ${msg}`,
+    );
+    return NextResponse.json(
+      { error: "v2_account_retrieve_failed" },
+      { status: 500 },
+    );
+  }
+
+  // payouts_enabled := the RECIPIENT capability that gates a real platform
+  // transfer (transfers.create({destination}) — the withdraw route's actual
+  // call) succeeding: stripe_balance.stripe_transfers === 'active'. The separate
+  // stripe_balance.payouts capability (balance -> bank) is downstream; see review.
+  const transfersStatus =
+    account.configuration?.recipient?.capabilities?.stripe_balance
+      ?.stripe_transfers?.status;
+  const payoutsEnabled = transfersStatus === "active";
+  // onboarding_completed := v2 analogue of v1 details_submitted — recipient has
+  // engaged transfer onboarding (status present and not 'unsupported'). UI-only.
+  const onboardingCompleted =
+    transfersStatus != null && transfersStatus !== "unsupported";
+
+  const fields = {
+    onboarding_completed: onboardingCompleted,
+    payouts_enabled: payoutsEnabled,
+    updated_at: new Date().toISOString(),
+  };
+
+  // Route by the SAME metadata keys the v1 account.updated case uses (that case
+  // is left byte-unchanged; this branch carries its own copy of the routing).
+  const supabase = createServiceRoleClient();
+  if (account.metadata?.moonbeem_partner_id) {
+    const { error } = await supabase
+      .from("partner_payout_accounts")
+      .update(fields)
+      .eq("stripe_connect_account_id", accountId);
+    if (error) {
+      console.error(
+        `[stripe-webhook][v2] partner update failed for ${accountId}: ${error.message}`,
+      );
+    }
+  } else if (account.metadata?.moonbeem_creator_id) {
+    const { error } = await supabase
+      .from("creator_payout_accounts")
+      .update(fields)
+      .eq("stripe_connect_account_id", accountId);
+    if (error) {
+      console.error(
+        `[stripe-webhook][v2] creator update failed for ${accountId}: ${error.message}`,
+      );
+    }
+  } else {
+    console.warn(
+      `[stripe-webhook][v2] account ${accountId} has no moonbeem routing metadata; skipping`,
+    );
+  }
+
+  console.log(
+    `[stripe-webhook][v2] ${notification.type} acct=${accountId} transfers=${transfersStatus ?? "none"} payouts_enabled=${payoutsEnabled}`,
+  );
+  return NextResponse.json({ received: true });
+}
+
 export async function POST(request: NextRequest) {
   const signature = request.headers.get("stripe-signature");
   // Two Stripe endpoints point at THIS same URL, each with its own signing
@@ -79,6 +222,16 @@ export async function POST(request: NextRequest) {
   // Stripe needs the RAW body for signature verification.
   const body = await request.text();
   const stripe = getStripe();
+
+  // v2 thin-event branch (Stage 1: additive + INERT — no v2 subscription exists
+  // yet, so no v2 event reaches prod until Stage 2). It MUST run above the v1
+  // verification: SDK 22.x throws if a v2 thin event is fed to constructEvent, so
+  // we route v2 away first and leave the v1 path below byte-for-byte unchanged.
+  // The discriminator is routing-only (not verification) and can never misroute a
+  // v1 fat event (object "event") into the v2 parser.
+  if (looksLikeV2ThinEvent(body)) {
+    return handleV2AccountEvent(stripe, body, signature, secrets);
+  }
 
   let event: Stripe.Event | null = null;
   let lastErr = "unknown";
