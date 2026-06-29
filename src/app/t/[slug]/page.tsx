@@ -293,12 +293,16 @@ export default async function TitlePage({ params }: PageProps) {
   const watchEl =
     entitlement && episodes.length > 0 ? (
       <div className="flex w-full max-w-sm flex-col gap-2">
-        <Link
-          href={`/t/${title.slug}#watch`}
+        {/* Native <a> with a BARE fragment href — a same-document fragment nav
+            fires native hashchange (Next <Link> uses pushState and does NOT),
+            which the TitleTabs listener catches to open the Watch tab without a
+            reload. Post-checkout return still works via TitleTabs' mount read. */}
+        <a
+          href="#watch"
           className="rounded-md bg-moonbeem-pink px-4 py-2.5 text-body-sm font-semibold text-moonbeem-navy text-center transition-opacity hover:opacity-90"
         >
           Watch
-        </Link>
+        </a>
       </div>
     ) : null;
 
