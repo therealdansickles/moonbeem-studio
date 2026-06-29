@@ -277,8 +277,16 @@ export default async function TitlePage({ params }: PageProps) {
   // Watch Now — the offer button(s). Relocated from About to the title
   // header as the primary CTA (CF-3, Part 1). Visual move only; OfferButton
   // and the /go/offer click-logging path are unchanged.
+  // hasExternalOffer: a RENDERABLE external offer. OfferButton returns null when
+  // provider_url is absent, so raw offers.length can count rows that render
+  // nothing — this is the true "a real external button would show" signal.
+  const hasExternalOffer = offers.some((o) => o.provider_url);
+  // Fix 4: show the external "Watch Now" ONLY when Moonbeem has NO published
+  // hosted film. Once a published episode exists, the internal Watch/Rent/Buy rail
+  // owns the surface and the external provider button is suppressed (recon: 0
+  // titles regress to zero buttons under this gate).
   const watchNowEl =
-    title.is_active && offers.length > 0 ? (
+    title.is_active && hasExternalOffer && episodes.length === 0 ? (
       <div className="flex w-full max-w-sm flex-col gap-2">
         {offers.map((offer) => (
           <OfferButton key={offer.id} offer={offer} titleId={title.id} />
