@@ -209,6 +209,9 @@ export async function POST(request: NextRequest) {
   //       events: checkout.session.completed / checkout.session.expired /
   //               payment_intent.payment_failed (the PLATFORM-scope funding
   //               charge; it only reaches us via this account endpoint)
+  //   - v2 thin-payload destination → STRIPE_WEBHOOK_SECRET_V2
+  //       events: v2.core.account[configuration.recipient].capability_status_updated
+  //               (recipient capability status; flips payouts_enabled)
   // Any one delivery is signed by exactly one of these secrets, so we try
   // each PRESENT secret in turn and accept the first that verifies. Both env
   // vars may not be set during rollout (e.g. STRIPE_WEBHOOK_SECRET_ACCOUNT
@@ -217,6 +220,7 @@ export async function POST(request: NextRequest) {
   const secrets = [
     process.env.STRIPE_WEBHOOK_SECRET,
     process.env.STRIPE_WEBHOOK_SECRET_ACCOUNT,
+    process.env.STRIPE_WEBHOOK_SECRET_V2,
   ].filter((s): s is string => typeof s === "string" && s.length > 0);
   if (!signature || secrets.length === 0) {
     return NextResponse.json({ error: "missing_signature_or_secret" }, {
