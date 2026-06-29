@@ -13,6 +13,7 @@ import {
   type TitleOffer,
 } from "@/lib/queries/titles";
 import { getPartnerById } from "@/lib/queries/partners";
+import { getActiveEntitlement } from "@/lib/entitlements/lookup";
 import TitleTabs from "@/components/TitleTabs";
 import EpisodeList from "@/components/EpisodeList";
 import HeroPlayer from "@/components/HeroPlayer";
@@ -196,6 +197,14 @@ export default async function TitlePage({ params }: PageProps) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  // Entitlement-aware CTA (Fix 3): reuse getActiveEntitlement — the SAME helper
+  // the playback-token route gates playback on — so the page's Watch/Rent CTA can
+  // never disagree with the actual playback gate. null = no active entitlement.
+  const entitlement = user
+    ? await getActiveEntitlement(user.id, title.id)
+    : null;
+
   let alreadyRequested = false;
   let requestedAt: string | null = null;
   if (user) {
@@ -277,11 +286,27 @@ export default async function TitlePage({ params }: PageProps) {
       </div>
     ) : null;
 
+  // Watch (Fix 3) — entitlement-aware internal player CTA. When the viewer holds
+  // an ACTIVE entitlement (getActiveEntitlement, the same gate as playback), show
+  // a primary "Watch" link to the Watch tab (#watch deep-link) and suppress Rent
+  // below. Gated on episodes.length > 0 so the link always lands on a real tab.
+  const watchEl =
+    entitlement && episodes.length > 0 ? (
+      <div className="flex w-full max-w-sm flex-col gap-2">
+        <Link
+          href={`/t/${title.slug}#watch`}
+          className="rounded-md bg-moonbeem-pink px-4 py-2.5 text-body-sm font-semibold text-moonbeem-navy text-center transition-opacity hover:opacity-90"
+        >
+          Watch
+        </Link>
+      </div>
+    ) : null;
+
   // Rent — minimal Checkout-start button (transactions sub-unit 2). Shown when
-  // the film declares a rental offer. TEMPORARY placement next to Watch Now;
-  // sub-unit 3 builds the real rent-vs-play gate.
+  // the film declares a rental offer. Suppressed when the viewer already holds an
+  // active entitlement (they have access — Watch shows instead).
   const rentEl =
-    title.transact_enabled && (title.transact_price_cents ?? 0) > 0 && episodes.length > 0 ? (
+    title.transact_enabled && (title.transact_price_cents ?? 0) > 0 && episodes.length > 0 && !entitlement ? (
       <RentButton
         titleId={title.id}
         priceCents={title.transact_price_cents as number}
@@ -290,8 +315,10 @@ export default async function TitlePage({ params }: PageProps) {
       />
     ) : null;
 
+  // Buy — kept for an active RENTAL holder (rental -> permanent upgrade); hidden
+  // for an active PURCHASE holder (they already own it permanently).
   const buyEl =
-    title.purchase_enabled && (title.purchase_price_cents ?? 0) > 0 && episodes.length > 0 ? (
+    title.purchase_enabled && (title.purchase_price_cents ?? 0) > 0 && episodes.length > 0 && entitlement?.kind !== "purchase" ? (
       <BuyButton
         titleId={title.id}
         priceCents={title.purchase_price_cents as number}
@@ -414,6 +441,10 @@ export default async function TitlePage({ params }: PageProps) {
             {/* 2. PRIMARY CTA — Watch Now, relocated here from About. The
                 page's main filled action, directly under identity. */}
             {watchNowEl}
+
+            {/* 2a. WATCH (Fix 3) — internal player CTA for an entitled viewer,
+                links to the Watch tab. Replaces Rent (suppressed) when owned. */}
+            {watchEl}
 
             {/* 2b. RENT / BUY — minimal Checkout-start (transactions su2 rental,
                 su4 purchase). Both show when the title offers both. */}

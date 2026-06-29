@@ -159,7 +159,7 @@ export async function POST(
   const stripe = getStripe();
   const baseUrl = publicBaseUrl(request);
   const slug = title.slug as string;
-  const successUrl = `${baseUrl}/t/${slug}?${kind === "purchase" ? "purchased" : "rented"}=1`;
+  const successUrl = `${baseUrl}/t/${slug}#watch`;
   const cancelUrl = `${baseUrl}/t/${slug}?${kind === "purchase" ? "purchase_cancelled" : "rent_cancelled"}=1`;
 
   // Metadata round-trips to the webhook (read off session OR payment_intent).
