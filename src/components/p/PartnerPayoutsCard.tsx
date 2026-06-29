@@ -17,7 +17,7 @@ type Status = {
 };
 
 const BTN_CLASS =
-  "self-start rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  "self-start rounded-md bg-moonbeem-violet px-4 py-2 text-body-sm font-semibold text-moonbeem-ink hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
 
 export default function PartnerPayoutsCard({ slug }: Props) {
   const [status, setStatus] = useState<Status | null>(null);
