@@ -110,17 +110,39 @@ export async function POST(request: NextRequest) {
       const onboardingCompleted = !!account.details_submitted;
       const payoutsEnabled = !!account.charges_enabled &&
         !!account.payouts_enabled;
-      const { error } = await supabase
-        .from("creator_payout_accounts")
-        .update({
-          onboarding_completed: onboardingCompleted,
-          payouts_enabled: payoutsEnabled,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("stripe_connect_account_id", account.id);
-      if (error) {
-        console.error(
-          `[stripe-webhook] account.updated row update failed for ${account.id}: ${error.message}`,
+      const fields = {
+        onboarding_completed: onboardingCompleted,
+        payouts_enabled: payoutsEnabled,
+        updated_at: new Date().toISOString(),
+      };
+      // Route by the metadata stamped at accounts.create: partner accounts
+      // carry moonbeem_partner_id, creator accounts moonbeem_creator_id. Each
+      // Connect account id belongs to exactly one table, so the routed update
+      // lands on the owning row (matched by the UNIQUE stripe_connect_account_id).
+      // No routing metadata => loud warn, never a silent cross-table miss.
+      if (account.metadata?.moonbeem_partner_id) {
+        const { error } = await supabase
+          .from("partner_payout_accounts")
+          .update(fields)
+          .eq("stripe_connect_account_id", account.id);
+        if (error) {
+          console.error(
+            `[stripe-webhook] account.updated partner update failed for ${account.id}: ${error.message}`,
+          );
+        }
+      } else if (account.metadata?.moonbeem_creator_id) {
+        const { error } = await supabase
+          .from("creator_payout_accounts")
+          .update(fields)
+          .eq("stripe_connect_account_id", account.id);
+        if (error) {
+          console.error(
+            `[stripe-webhook] account.updated creator update failed for ${account.id}: ${error.message}`,
+          );
+        }
+      } else {
+        console.warn(
+          `[stripe-webhook] account.updated for ${account.id} has no moonbeem routing metadata (moonbeem_partner_id/moonbeem_creator_id); skipping`,
         );
       }
       break;
@@ -130,6 +152,11 @@ export async function POST(request: NextRequest) {
       // event.data.object is the Application; the connected account
       // id is on event.account. Connected account revoked our
       // access; mark them as un-payable until they reconnect.
+      //
+      // This payload does NOT carry our accounts.create metadata, so we route
+      // by LOOKUP, not metadata: the account id is UNIQUE across both payout
+      // tables, so try partner first and, only if it matched no row, try
+      // creator. Exactly one table owns the id; the other update is a no-op.
       const accountId = event.account ?? null;
       if (!accountId) {
         console.warn(
@@ -137,18 +164,32 @@ export async function POST(request: NextRequest) {
         );
         break;
       }
-      const { error } = await supabase
-        .from("creator_payout_accounts")
-        .update({
-          payouts_enabled: false,
-          onboarding_completed: false,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("stripe_connect_account_id", accountId);
-      if (error) {
+      const fields = {
+        payouts_enabled: false,
+        onboarding_completed: false,
+        updated_at: new Date().toISOString(),
+      };
+      const { data: partnerRows, error: partnerErr } = await supabase
+        .from("partner_payout_accounts")
+        .update(fields)
+        .eq("stripe_connect_account_id", accountId)
+        .select("id");
+      if (partnerErr) {
         console.error(
-          `[stripe-webhook] deauthorize row update failed for ${accountId}: ${error.message}`,
+          `[stripe-webhook] deauthorize partner update failed for ${accountId}: ${partnerErr.message}`,
         );
+      }
+      // Fall through to creator only when no partner row matched (0 rows).
+      if (!partnerRows || partnerRows.length === 0) {
+        const { error: creatorErr } = await supabase
+          .from("creator_payout_accounts")
+          .update(fields)
+          .eq("stripe_connect_account_id", accountId);
+        if (creatorErr) {
+          console.error(
+            `[stripe-webhook] deauthorize creator update failed for ${accountId}: ${creatorErr.message}`,
+          );
+        }
       }
       break;
     }

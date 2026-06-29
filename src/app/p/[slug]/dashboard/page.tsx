@@ -22,6 +22,7 @@ import GrowthChart from "@/components/p/GrowthChart";
 import AllEditsTable from "@/components/p/AllEditsTable";
 import PartnerRatesCard from "@/components/p/PartnerRatesCard";
 import PartnerClipsCard from "@/components/p/PartnerClipsCard";
+import PartnerPayoutsCard from "@/components/p/PartnerPayoutsCard";
 import AddTitleForm from "@/components/p/AddTitleForm";
 import CampaignsCard from "@/components/p/CampaignsCard";
 import PartnerSubmissionsSection, {
@@ -1903,6 +1904,12 @@ export default async function PartnerDashboardPage({
             unique_creators_paid={creatorsThisMonth.size}
           />
         </div>
+
+        {isPartnerAdmin && (
+          <div className="mt-10">
+            <PartnerPayoutsCard slug={partner.slug as string} />
+          </div>
+        )}
 
         {partnerClipTitles.length > 0 && (
           <div className="mt-10">
