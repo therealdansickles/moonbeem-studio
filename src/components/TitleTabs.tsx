@@ -47,11 +47,19 @@ export default function TitleTabs({
     { id: "stills", label: "Stills", content: stillsContent },
   ];
 
-  // Deep-link support: /t/[slug]#reviews (etc.) opens that tab on mount —
-  // used by the diary "Review" chip.
+  // Deep-link support: /t/[slug]#watch (etc.) opens that tab — on mount (fresh
+  // deep-links + the post-checkout return) AND on later in-page hash changes. A
+  // same-page #watch CTA click changes the hash WITHOUT remounting, so a mount-
+  // only read would ignore it; the hashchange listener catches those. One shared
+  // applyHash() drives both paths.
   useEffect(() => {
-    const h = window.location.hash.replace("#", "");
-    if (h && sections.some((s) => s.id === h)) setActive(h as SectionId);
+    const applyHash = () => {
+      const h = window.location.hash.replace("#", "");
+      if (h && sections.some((s) => s.id === h)) setActive(h as SectionId);
+    };
+    applyHash(); // initial mount (deep-link / post-checkout return)
+    window.addEventListener("hashchange", applyHash);
+    return () => window.removeEventListener("hashchange", applyHash);
     // sections is derived from props (stable for a title); run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
