@@ -83,6 +83,7 @@ export async function POST() {
     .from("withdrawals")
     .select("id, status")
     .eq("creator_id", creator.id)
+    .eq("source", "campaign")
     .in("status", ["pending", "needs_reconciliation"])
     .limit(1);
   if ((blocking ?? []).length > 0) {
@@ -130,6 +131,7 @@ export async function POST() {
       creator_id: creator.id,
       amount_cents: totalCents,
       status: "pending",
+      source: "campaign",
     })
     .select("id")
     .single();
