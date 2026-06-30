@@ -23,6 +23,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getStripe } from "@/lib/stripe/server";
+import { numericStringToExactBps } from "@/lib/affiliate/rate";
 
 // Wall-clock budget: stop the per-row loop cleanly with headroom to flush the
 // response, then resume next run. A hard Vercel timeout is also safe here
@@ -34,20 +35,10 @@ const BUDGET_MS = 50_000;
 // would replace the client-side anti-join below.
 const CANDIDATE_LIMIT = 500;
 
-// Parse a numeric rate string (a fraction like "0.15") to exact integer basis
-// points (1500). PostgREST returns numeric columns as strings. Returns null if
-// the value is missing or does not map to a whole bps (e.g. more than 4 decimal
-// places) — the caller refuses the row rather than write a rounded rate.
-function toExactBps(rate: string | null): number | null {
-  if (rate === null) return null;
-  const num = Number(rate);
-  if (!Number.isFinite(num)) return null;
-  const scaled = num * 10000;
-  const bps = Math.round(scaled);
-  if (Math.abs(scaled - bps) > 1e-6) return null;
-  if (bps < 0) return null;
-  return bps;
-}
+// The numeric-string -> exact-bps rule lives in lib/affiliate/rate.ts
+// (numericStringToExactBps), shared with the rate-control write guard so the two
+// can't drift. A null rate stays null -> the row is REFUSED (non_integer_bps),
+// never settled at 0 bps.
 
 export async function GET(request: NextRequest) {
   const expected = process.env.CRON_SECRET;
@@ -226,7 +217,7 @@ export async function GET(request: NextRequest) {
 
           // 4. Rates → integer basis points (assert exact; null creator_share
           //    coalesces to 0 bps — always 0 today).
-          const mbBps = toExactBps(title.moonbeem_take_rate_pct);
+          const mbBps = numericStringToExactBps(title.moonbeem_take_rate_pct);
           if (mbBps === null) {
             summary.refused.non_integer_bps++;
             console.warn(
@@ -237,7 +228,7 @@ export async function GET(request: NextRequest) {
           const crBps =
             title.creator_share_pct === null
               ? 0
-              : toExactBps(title.creator_share_pct);
+              : numericStringToExactBps(title.creator_share_pct);
           if (crBps === null) {
             summary.refused.non_integer_bps++;
             console.warn(

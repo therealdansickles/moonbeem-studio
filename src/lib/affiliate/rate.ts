@@ -9,16 +9,15 @@
 // failure (the rental never settles, no payout, no error surfaced). So a
 // non-exact rate must NEVER be persisted; this validator is the guard.
 //
-// (The exact-bps rule is byte-identical to the settle pass's toExactBps; that
-// copy is left in place to avoid editing the live money-rail route — unifying the
-// two behind this helper is a clean, deferred follow-up.)
+// (The settle pass uses the SAME exact-bps rule via numericStringToExactBps below
+// — the previously-duplicated toExactBps copy was unified here so they can't drift.)
 
 // Sanity cap on the affiliate share a distributor may set. 50% is generous — the
 // cut comes from the distributor's OWN net, so this is a guardrail, not policy.
 export const MAX_AFFILIATE_SHARE_FRACTION = 0.5;
 
 // A fraction (0.10) -> exact integer basis points (1000), or null if it does not
-// map to an exact, non-negative bps. Identical rule to the settle pass.
+// map to an exact, non-negative bps. The canonical exact-bps core.
 export function fractionToExactBps(fraction: number): number | null {
   if (!Number.isFinite(fraction)) return null;
   const scaled = fraction * 10000;
@@ -26,6 +25,19 @@ export function fractionToExactBps(fraction: number): number | null {
   if (Math.abs(scaled - bps) > 1e-6) return null; // non-exact bps
   if (bps < 0) return null;
   return bps;
+}
+
+// A NUMERIC-STRING rate (PostgREST serializes numeric columns as strings, e.g.
+// "0.15") -> exact integer bps, via the canonical fractionToExactBps. This is the
+// settle pass's exact-bps front door, unified here so the two can't drift.
+//
+// CRITICAL: the null short-circuit happens BEFORE Number(). A null rate must stay
+// null (the settle pass REFUSES it as non_integer_bps) — never 0. Folding it into
+// fractionToExactBps(Number(rate)) would map null -> Number(null) -> 0 -> 0 bps,
+// silently settling a null take-rate at zero instead of refusing the row.
+export function numericStringToExactBps(rate: string | null): number | null {
+  if (rate === null) return null;
+  return fractionToExactBps(Number(rate));
 }
 
 // Server-AUTHORITATIVE validity for a creator_share_pct value off the wire:
