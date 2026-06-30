@@ -113,7 +113,14 @@ export default async function MePage() {
 
   // Payout state (creator_payout_accounts + unwithdrawn earnings sum
   // - pending withdrawals sum). Mirrors /api/me/payouts/status.
-  const [payoutAcctRes, unwithdrawnRes, pendingRes] = creator
+  //
+  // The pending-withdrawal queries are SOURCE-SCOPED (the display mirror of the
+  // producers' source-scoped re-entry guards, Stage 2a/2b): a pending CAMPAIGN
+  // withdrawal must not mis-show on the affiliate control, and vice-versa. Both
+  // include 'needs_reconciliation' (a parked transfer that already moved money)
+  // to match each producer's blocking guard exactly — so the "in flight"
+  // affordance and the server's accept/reject decision never disagree.
+  const [payoutAcctRes, unwithdrawnRes, pendingRes, affiliatePendingRes] = creator
     ? await Promise.all([
       service
         .from("creator_payout_accounts")
@@ -129,15 +136,26 @@ export default async function MePage() {
         .from("withdrawals")
         .select("amount_cents")
         .eq("creator_id", creator.id)
-        .eq("status", "pending"),
+        .eq("source", "campaign")
+        .in("status", ["pending", "needs_reconciliation"]),
+      service
+        .from("withdrawals")
+        .select("amount_cents")
+        .eq("creator_id", creator.id)
+        .eq("source", "affiliate")
+        .in("status", ["pending", "needs_reconciliation"]),
     ])
-    : [{ data: null }, { data: [] }, { data: [] }];
+    : [{ data: null }, { data: [] }, { data: [] }, { data: [] }];
   const payoutAcct = (payoutAcctRes as { data: { onboarding_completed: boolean; payouts_enabled: boolean } | null }).data;
   const unwithdrawnCents = ((unwithdrawnRes.data ?? []) as Array<{ earnings_cents: number | null }>)
     .reduce((s, r) => s + (r.earnings_cents ?? 0), 0);
   const pendingWithdrawalCents = ((pendingRes.data ?? []) as Array<{ amount_cents: number | null }>)
     .reduce((s, r) => s + (r.amount_cents ?? 0), 0);
   const availableCents = Math.max(0, unwithdrawnCents - pendingWithdrawalCents);
+  // Pending AFFILIATE withdrawal (separate rail, separate Stripe transfer) —
+  // drives the affiliate control's "in flight" affordance.
+  const affiliatePendingCents = ((affiliatePendingRes.data ?? []) as Array<{ amount_cents: number | null }>)
+    .reduce((s, r) => s + (r.amount_cents ?? 0), 0);
 
   // Affiliate earnings balance (Stage B) — held / 14d-matured cuts the creator
   // drove, from the settlement ledger via the SAME shared aggregate the
@@ -889,12 +907,15 @@ export default async function MePage() {
                 </div>
               )}
 
-            {/* Affiliate earnings (Stage B) — held/14d-matured cuts the creator
+            {/* Affiliate earnings (Stage B) — held/maturity cuts the creator
                 drove via their Top-12. Rendered as a SIBLING of the campaign-
                 earnings branches above, on its OWN criterion (lifetime_cents > 0)
                 — so a curator with affiliate earnings but NO campaign earnings
-                (the typical case) still sees it. Display-only; cashing out is
-                Layer 3 (no withdraw button). Server-rendered like the balance. */}
+                (the typical case) still sees it AND can cash out. The withdraw
+                control (Stage 4) reuses PayoutsControls via withdrawPath, posting
+                to the affiliate producer; the shared Connect account means its
+                onboarding affordances (set up / complete / verifying) are correct
+                for both rails, while available + pending are affiliate-scoped. */}
             {affiliateBalance.lifetime_cents > 0 && (
               <div className="mt-3 flex flex-col gap-1 border-t border-white/10 pt-3">
                 <div className="flex items-baseline justify-between">
@@ -912,6 +933,17 @@ export default async function MePage() {
                   <span className="text-body font-semibold tabular-nums text-moonbeem-pink">
                     ${(affiliateBalance.available_cents / 100).toFixed(2)} available
                   </span>
+                </div>
+                <div className="mt-2">
+                  <PayoutsControls
+                    withdrawPath="/api/me/affiliate/withdraw"
+                    hasAccount={!!payoutAcct}
+                    onboardingCompleted={!!payoutAcct?.onboarding_completed}
+                    payoutsEnabled={!!payoutAcct?.payouts_enabled}
+                    availableCents={affiliateBalance.available_cents}
+                    pendingCents={affiliatePendingCents}
+                    minimumCents={MIN_WITHDRAWAL_CENTS}
+                  />
                 </div>
               </div>
             )}

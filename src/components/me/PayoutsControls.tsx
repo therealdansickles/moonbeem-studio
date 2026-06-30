@@ -10,6 +10,11 @@ type Props = {
   availableCents: number;
   pendingCents: number;
   minimumCents: number;
+  // Which withdraw producer to POST to. Defaults to the campaign rail so
+  // existing campaign call sites are unchanged; the affiliate /me control
+  // passes "/api/me/affiliate/withdraw". The onboard flow is shared (one
+  // Connect account per creator), so it stays hardcoded to /payouts/onboard.
+  withdrawPath?: string;
 };
 
 function dollars(cents: number): string {
@@ -23,6 +28,7 @@ export default function PayoutsControls({
   availableCents,
   pendingCents,
   minimumCents,
+  withdrawPath = "/api/me/payouts/withdraw",
 }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -55,8 +61,23 @@ export default function PayoutsControls({
     setError(null);
     setSuccess(null);
     try {
-      const res = await fetch("/api/me/payouts/withdraw", { method: "POST" });
+      const res = await fetch(withdrawPath, { method: "POST" });
       const json = await res.json().catch(() => ({}));
+      // 202 reconciliation park: the transfer WAS initiated — the money moved
+      // — but the ledger flip needs a manual check. This is NOT a failure, so
+      // we must never tell the curator it failed. It's distinguished from a
+      // real error by the needs_reconciliation flag (a real error is !ok
+      // WITHOUT it, handled below). Show the producer's reassuring detail.
+      if (res.status === 202 && json.needs_reconciliation) {
+        setSuccess(
+          (json.detail as string) ??
+            "Your payout was sent and is being reconciled — no action needed.",
+        );
+        // Re-render with fresh server state (the parked withdrawal now blocks
+        // re-entry, so the button correctly disappears).
+        router.refresh();
+        return;
+      }
       if (!res.ok || !json.ok) {
         setError(json.error ?? `request failed (${res.status})`);
         return;
