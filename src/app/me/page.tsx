@@ -886,34 +886,35 @@ export default async function MePage() {
                       />
                     </div>
                   </div>
-
-                  {/* Affiliate earnings (Stage B) — held/14d-matured cuts the
-                      creator drove via their Top-12. Display-only; cashing out is
-                      Layer 3 (no withdraw button). Server-rendered like the
-                      balance above. Shown only when there's a lifetime cut so it
-                      isn't noise for creators who've never driven a sale. */}
-                  {affiliateBalance.lifetime_cents > 0 && (
-                    <div className="mt-2 flex flex-col gap-1 border-t border-white/10 pt-3">
-                      <div className="flex items-baseline justify-between">
-                        <span className="text-body-sm text-moonbeem-ink-muted">
-                          Affiliate earnings
-                        </span>
-                        <span className="text-caption text-moonbeem-ink-subtle">
-                          From rentals you drove
-                        </span>
-                      </div>
-                      <div className="flex items-baseline justify-between">
-                        <span className="text-caption text-moonbeem-ink-subtle tabular-nums">
-                          ${(affiliateBalance.pending_cents / 100).toFixed(2)} pending
-                        </span>
-                        <span className="text-body font-semibold tabular-nums text-moonbeem-pink">
-                          ${(affiliateBalance.available_cents / 100).toFixed(2)} available
-                        </span>
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
+
+            {/* Affiliate earnings (Stage B) — held/14d-matured cuts the creator
+                drove via their Top-12. Rendered as a SIBLING of the campaign-
+                earnings branches above, on its OWN criterion (lifetime_cents > 0)
+                — so a curator with affiliate earnings but NO campaign earnings
+                (the typical case) still sees it. Display-only; cashing out is
+                Layer 3 (no withdraw button). Server-rendered like the balance. */}
+            {affiliateBalance.lifetime_cents > 0 && (
+              <div className="mt-3 flex flex-col gap-1 border-t border-white/10 pt-3">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-body-sm text-moonbeem-ink-muted">
+                    Affiliate earnings
+                  </span>
+                  <span className="text-caption text-moonbeem-ink-subtle">
+                    From rentals you drove
+                  </span>
+                </div>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-caption text-moonbeem-ink-subtle tabular-nums">
+                    ${(affiliateBalance.pending_cents / 100).toFixed(2)} pending
+                  </span>
+                  <span className="text-body font-semibold tabular-nums text-moonbeem-pink">
+                    ${(affiliateBalance.available_cents / 100).toFixed(2)} available
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
