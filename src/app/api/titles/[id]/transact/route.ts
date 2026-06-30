@@ -35,6 +35,7 @@ import { getUser } from "@/lib/dal";
 import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { authorizeTitleMutation } from "@/lib/auth/title-mutation";
+import { validateCreatorSharePct } from "@/lib/affiliate/rate";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -71,6 +72,7 @@ export async function PATCH(
     transact_price_cents?: unknown;
     purchase_enabled?: unknown;
     purchase_price_cents?: unknown;
+    creator_share_pct?: unknown;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -111,6 +113,7 @@ export async function PATCH(
     transact_price_cents?: number;
     purchase_enabled?: boolean;
     purchase_price_cents?: number;
+    creator_share_pct?: number | null;
   } = {};
   if (body.transact_enabled !== undefined) {
     const r = validatePair(body.transact_enabled, body.transact_price_cents);
@@ -123,6 +126,22 @@ export async function PATCH(
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
     update.purchase_enabled = r.enabled;
     update.purchase_price_cents = r.price;
+  }
+  // AFFILIATE RATE (Stage C) — titles.creator_share_pct (a FRACTION, or null to
+  // disable). SERVER-AUTHORITATIVE exact-bps validation via the SHARED validator
+  // the card mirrors: a rate that doesn't map to exact bps would make the settle
+  // pass silently REFUSE every rental of this title, so reject it here
+  // (invalid_affiliate_rate) rather than persist a settlement-breaking value.
+  // Rides the SAME authorizeTitleMutation gate above — no new ownership path.
+  if (body.creator_share_pct !== undefined) {
+    const v = validateCreatorSharePct(body.creator_share_pct);
+    if (!v.ok) {
+      return NextResponse.json(
+        { error: "invalid_affiliate_rate" },
+        { status: 400 },
+      );
+    }
+    update.creator_share_pct = v.value;
   }
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "no_offer_fields" }, { status: 400 });

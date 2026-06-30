@@ -22,6 +22,8 @@ import TerritorySelector from "@/components/p/TerritorySelector";
 import PosterEditor from "@/components/PosterEditor";
 import RentalPricingCard from "@/components/p/RentalPricingCard";
 import PurchasePricingCard from "@/components/p/PurchasePricingCard";
+import AffiliatePricingCard from "@/components/p/AffiliatePricingCard";
+import { fractionToExactBps } from "@/lib/affiliate/rate";
 
 // MuxUploader is a web component (registers a custom element, touches
 // customElements/HTMLElement) — load it client-only via dynamic ssr:false,
@@ -76,6 +78,7 @@ export default function TitleUploadPanel({
   transactPriceCents,
   purchaseEnabled,
   purchasePriceCents,
+  creatorSharePct,
   externalPriceUsd,
 }: {
   titleId: string;
@@ -95,6 +98,7 @@ export default function TitleUploadPanel({
   transactPriceCents: number | null;
   purchaseEnabled: boolean;
   purchasePriceCents: number | null;
+  creatorSharePct: number | null;
   externalPriceUsd: number | null;
 }) {
   const router = useRouter();
@@ -456,6 +460,19 @@ export default function TitleUploadPanel({
         initialPriceCents={purchasePriceCents}
         hasMuxEpisode={episodes.some((e) => e.source === "mux")}
         externalPriceUsd={externalPriceUsd}
+      />
+
+      {/* Affiliate rate (Stage C) — the per-title cut a curator earns for driving
+          a rental/purchase, paid from the distributor's net. Optional; sits with
+          the other monetization terms. */}
+      <AffiliatePricingCard
+        titleId={titleId}
+        initialEnabled={creatorSharePct != null && creatorSharePct > 0}
+        initialPct={
+          creatorSharePct != null && creatorSharePct > 0
+            ? (fractionToExactBps(creatorSharePct) ?? 0) / 100
+            : null
+        }
       />
         </>
       )}
