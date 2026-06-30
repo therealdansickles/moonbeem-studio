@@ -17,6 +17,7 @@ import PlatformIcon from "@/components/PlatformIcon";
 import { isR2ThumbnailUrl } from "@/lib/fan-edits/thumbnail-url";
 import ClaimStubButton from "@/components/me/ClaimStubButton";
 import PayoutsControls from "@/components/me/PayoutsControls";
+import { getAffiliateBalance } from "@/lib/affiliate/balance";
 import WelcomeBanner from "@/components/me/WelcomeBanner";
 import ProfileFanEditCard from "@/components/profile/ProfileFanEditCard";
 import AvatarCircle from "@/components/profile/AvatarCircle";
@@ -137,6 +138,14 @@ export default async function MePage() {
   const pendingWithdrawalCents = ((pendingRes.data ?? []) as Array<{ amount_cents: number | null }>)
     .reduce((s, r) => s + (r.amount_cents ?? 0), 0);
   const availableCents = Math.max(0, unwithdrawnCents - pendingWithdrawalCents);
+
+  // Affiliate earnings balance (Stage B) — held / 14d-matured cuts the creator
+  // drove, from the settlement ledger via the SAME shared aggregate the
+  // /api/me/affiliate/balance route uses (the single home of the validity
+  // predicate, so the route and this page can never drift).
+  const affiliateBalance = creator
+    ? await getAffiliateBalance(creator.id)
+    : { pending_cents: 0, available_cents: 0, lifetime_cents: 0 };
 
   // claimed status: if user has no handle, prompt to claim
   const handle = (userRow?.handle as string | null) ?? null;
@@ -877,6 +886,32 @@ export default async function MePage() {
                       />
                     </div>
                   </div>
+
+                  {/* Affiliate earnings (Stage B) — held/14d-matured cuts the
+                      creator drove via their Top-12. Display-only; cashing out is
+                      Layer 3 (no withdraw button). Server-rendered like the
+                      balance above. Shown only when there's a lifetime cut so it
+                      isn't noise for creators who've never driven a sale. */}
+                  {affiliateBalance.lifetime_cents > 0 && (
+                    <div className="mt-2 flex flex-col gap-1 border-t border-white/10 pt-3">
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-body-sm text-moonbeem-ink-muted">
+                          Affiliate earnings
+                        </span>
+                        <span className="text-caption text-moonbeem-ink-subtle">
+                          From rentals you drove
+                        </span>
+                      </div>
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-caption text-moonbeem-ink-subtle tabular-nums">
+                          ${(affiliateBalance.pending_cents / 100).toFixed(2)} pending
+                        </span>
+                        <span className="text-body font-semibold tabular-nums text-moonbeem-pink">
+                          ${(affiliateBalance.available_cents / 100).toFixed(2)} available
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
           </div>
