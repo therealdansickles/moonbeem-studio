@@ -659,17 +659,45 @@ export async function POST(request: NextRequest) {
         );
         return NextResponse.json({ error: "refund_revoke_failed" }, { status: 500 });
       }
-      // Block payout on the settlement IF it exists. 0 rows = the not-yet-settled
-      // race (the settle pass honors revoked_at later) OR a replay — both are
-      // idempotent no-ops. 'reversed'/'refunded' rows are left as-is.
+      // CLAWBACK MARKING (Layer 3 Stage 3, policy C: ABSORB) — route the
+      // settlement by its CURRENT payout_status (equivalent to
+      // clawbackTargetStatus(status, 'refund') in lib/affiliate/clawback.ts):
+      //   paid          -> reversed (the cut was ALREADY paid out to the curator;
+      //                    ABSORB the funds — NO Stripe reversal, NO negative
+      //                    carry. The 'reversed' marking + the withdrawal_id link
+      //                    capture the exposure so an Option D recovery upgrade is
+      //                    additive later; the 60-day hold on large cuts already
+      //                    shrinks this case. KNOWN v1 EDGE: there is no
+      //                    charge.dispute.closed handler, so a paid cut
+      //                    disputed->reversed then WON stays 'reversed' — a record
+      //                    discrepancy, no payout harm; correct manually.)
+      //   held/disputed -> refunded (never paid; refund-wins over a held-origin
+      //                    dispute; both are held-origin payout-blocked terminals)
+      //   refunded/reversed -> no-op (idempotent on a re-delivered webhook)
+      // Two DISJOINT guarded updates (A targets only 'paid'; B excludes 'paid'),
+      // so they're order-independent and each no-ops once the row is terminal.
+      // 0 rows from both = the not-yet-settled race (settle pass honors revoked_at
+      // later) OR a replay — both idempotent no-ops.
+      const nowIso = new Date().toISOString();
+      // A: a PAID cut -> reversed (absorb).
+      const { error: reverseErr } = await supabase
+        .from("transaction_settlements")
+        .update({ payout_status: "reversed", reversed_at: nowIso })
+        .eq("entitlement_id", ent.id as string)
+        .eq("payout_status", "paid");
+      if (reverseErr) {
+        console.error(
+          `[stripe-webhook] [refund] settlement reverse failed ent=${ent.id}: ${reverseErr.message}`,
+        );
+        return NextResponse.json({ error: "refund_block_failed" }, { status: 500 });
+      }
+      // B: a not-yet-paid cut (held/disputed) -> refunded. 'paid' is now EXCLUDED
+      // (handled by A); 'refunded'/'reversed' stay terminal (idempotent no-op).
       const { error: setErr } = await supabase
         .from("transaction_settlements")
-        .update({
-          payout_status: "refunded",
-          refunded_at: new Date().toISOString(),
-        })
+        .update({ payout_status: "refunded", refunded_at: nowIso })
         .eq("entitlement_id", ent.id as string)
-        .not("payout_status", "in", "(refunded,reversed)");
+        .not("payout_status", "in", "(refunded,reversed,paid)");
       if (setErr) {
         console.error(
           `[stripe-webhook] [refund] settlement block failed ent=${ent.id}: ${setErr.message}`,
@@ -731,16 +759,37 @@ export async function POST(request: NextRequest) {
         );
         return NextResponse.json({ error: "dispute_mark_failed" }, { status: 500 });
       }
-      // Block payout if the settlement exists. 'refunded'/'reversed'/'disputed'
-      // are left as-is (a refund already-blocked wins; replay is a no-op).
+      // CLAWBACK MARKING (Layer 3 Stage 3, policy C: ABSORB) — route the
+      // settlement by its CURRENT payout_status (equivalent to
+      // clawbackTargetStatus(status, 'dispute') in lib/affiliate/clawback.ts):
+      //   paid    -> reversed (ALREADY paid out; ABSORB — no Stripe reversal, no
+      //              negative carry; see the charge.refunded handler's note + the
+      //              KNOWN v1 EDGE: no charge.dispute.closed handler, so a paid cut
+      //              disputed->reversed then WON stays 'reversed'.)
+      //   held    -> disputed (never paid; payout-blocked, access continues)
+      //   refunded/reversed/disputed -> no-op (a refund already-blocked wins;
+      //              replay is a no-op — idempotent on re-delivery)
+      // Two DISJOINT guarded updates (A targets only 'paid'; B excludes 'paid').
+      const nowIso = new Date().toISOString();
+      // A: a PAID cut -> reversed (absorb).
+      const { error: reverseErr } = await supabase
+        .from("transaction_settlements")
+        .update({ payout_status: "reversed", reversed_at: nowIso })
+        .eq("entitlement_id", ent.id as string)
+        .eq("payout_status", "paid");
+      if (reverseErr) {
+        console.error(
+          `[stripe-webhook] [dispute] settlement reverse failed ent=${ent.id}: ${reverseErr.message}`,
+        );
+        return NextResponse.json({ error: "dispute_block_failed" }, { status: 500 });
+      }
+      // B: a not-yet-paid cut (held) -> disputed. 'paid' is now EXCLUDED (handled
+      // by A); 'refunded'/'reversed'/'disputed' stay terminal (idempotent no-op).
       const { error: setErr } = await supabase
         .from("transaction_settlements")
-        .update({
-          payout_status: "disputed",
-          disputed_at: new Date().toISOString(),
-        })
+        .update({ payout_status: "disputed", disputed_at: nowIso })
         .eq("entitlement_id", ent.id as string)
-        .not("payout_status", "in", "(refunded,reversed,disputed)");
+        .not("payout_status", "in", "(refunded,reversed,disputed,paid)");
       if (setErr) {
         console.error(
           `[stripe-webhook] [dispute] settlement block failed ent=${ent.id}: ${setErr.message}`,
