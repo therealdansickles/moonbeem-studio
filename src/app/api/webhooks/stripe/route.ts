@@ -418,6 +418,13 @@ export async function POST(request: NextRequest) {
             typeof session.payment_intent === "string"
               ? session.payment_intent
               : (session.payment_intent?.id ?? null);
+          // Affiliate attribution (Stage 1, INERT): nothing sets
+          // moonbeem_creator_id in checkout metadata yet — Stage 3 (the cookie ->
+          // rent-route -> metadata thread) does — so this is null on every grant
+          // today, and grant_entitlement writes creator_id = NULL, exactly the
+          // pre-attribution behavior. p_creator_id is trailing + defaulted, so a
+          // null value (or an old 6-arg caller during the deploy window) is fine.
+          const creatorId = md.moonbeem_creator_id ?? null;
           const { data: grantResult, error: grantErr } = await supabase.rpc(
             "grant_entitlement",
             {
@@ -427,6 +434,7 @@ export async function POST(request: NextRequest) {
               p_kind: moonbeemKind,
               p_price_cents: priceCents,
               p_payment_intent_id: piId,
+              p_creator_id: creatorId,
             },
           );
           if (grantErr) {
