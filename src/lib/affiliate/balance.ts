@@ -9,23 +9,16 @@
 // session). It does NOT resolve the user itself: that keeps auth/resolution at
 // the boundary and the function reusable. It MUST NEVER be called with a
 // client-supplied creatorId — both callers resolve server-side first.
+//
+// The value-scaled maturity rule lives in ./maturity (dependency-free + unit-
+// testable); the balance AND the withdraw snapshot both use it, so they agree.
 
 import { createServiceRoleClient } from "@/lib/supabase/service";
-
-// VALUE-SCALED maturity hold: a 'held' cut is PENDING until its hold elapses,
-// then AVAILABLE. The hold scales with the cut SIZE — large cuts are held LONGER
-// so the bulk of the dispute window closes before they become withdrawable,
-// shrinking the absorb/clawback exposure on the cuts where a paid-then-disputed
-// loss would be biggest:
-//   cut <  $5.00 (500c) -> 14-day hold (normal)
-//   cut >= $5.00 (500c) -> 60-day hold (high-value)
-// 60d is still < the ~120-day dispute tail, so it REDUCES (not eliminates)
-// paid-then-disputed large cuts; the residual is captured by the 'reversed'
-// clawback marking (Stage 3). The window also lets a refund/dispute flip 'held'
-// -> 'refunded'/'disputed' before a cut is ever paid.
-const HIGH_VALUE_CUT_CENTS = 500; // cuts >= $5.00 are "high value"
-const HOLD_LOW_MS = 14 * 24 * 60 * 60 * 1000; // 14-day hold for normal cuts
-const HOLD_HIGH_MS = 60 * 24 * 60 * 60 * 1000; // 60-day hold for high-value cuts
+import {
+  isAffiliateCutMature,
+  selectMaturedAffiliateRows,
+  type AvailableAffiliateSettlements,
+} from "./maturity";
 
 export type AffiliateBalance = {
   pending_cents: number;
@@ -63,14 +56,11 @@ export async function getAffiliateBalance(
     const cents = (r.affiliate_cut_cents as number | null) ?? 0;
     const status = r.payout_status as string;
     if (status === "held") {
-      // Per-row, value-scaled hold: high-value cuts mature later (see above).
-      const holdMs =
-        cents >= HIGH_VALUE_CUT_CENTS ? HOLD_HIGH_MS : HOLD_LOW_MS;
-      const matureCutoffMs = nowMs - holdMs;
-      const settledMs = Date.parse(r.settled_at as string);
-      // Matured -> available; otherwise (or an unparseable date) -> pending
-      // (conservative: an unreadable date stays unwithdrawable).
-      if (Number.isFinite(settledMs) && settledMs <= matureCutoffMs) {
+      // isAffiliateCutMature is the shared value-scaled rule (also used by the
+      // withdraw snapshot) so the balance and the snapshot can never disagree.
+      if (
+        isAffiliateCutMature(cents, Date.parse(r.settled_at as string), nowMs)
+      ) {
         available += cents;
       } else {
         pending += cents;
@@ -85,4 +75,31 @@ export async function getAffiliateBalance(
     available_cents: available,
     lifetime_cents: lifetime,
   };
+}
+
+// The AVAILABLE (matured-held) affiliate settlements for a creator — the withdraw
+// SNAPSHOT. Returns the row ids + cut_cents AND their sum from ONE fetch at ONE
+// moment (via selectMaturedAffiliateRows), so total_cents === sum(rows): the
+// withdraw transfers total_cents and flips exactly rows.map(id) to 'paid', so the
+// amount can't drift from the rows it pays. Service-role (the ledger is
+// RLS-on-no-policies); the caller resolves creatorId from the session.
+export async function getAvailableAffiliateSettlements(
+  creatorId: string,
+): Promise<AvailableAffiliateSettlements> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("transaction_settlements")
+    .select("id, affiliate_cut_cents, settled_at")
+    .eq("creator_id", creatorId)
+    .eq("payout_status", "held")
+    .gt("affiliate_cut_cents", 0);
+  if (error || !data) return { rows: [], total_cents: 0 };
+  return selectMaturedAffiliateRows(
+    data as Array<{
+      id: string;
+      affiliate_cut_cents: number | null;
+      settled_at: string;
+    }>,
+    Date.now(),
+  );
 }
