@@ -217,7 +217,11 @@ export default function ProfileView({
               <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-pink uppercase m-0">
                 Top 12
               </h2>
-              <Top12Grid topTitles={topTitles} isOwner={false} />
+              <Top12Grid
+                topTitles={topTitles}
+                isOwner={false}
+                viaCreatorId={profile.creator_id}
+              />
             </section>
           )}
 

@@ -162,16 +162,63 @@ export async function POST(
   const successUrl = `${baseUrl}/t/${slug}#watch`;
   const cancelUrl = `${baseUrl}/t/${slug}?${kind === "purchase" ? "purchase_cancelled" : "rent_cancelled"}=1`;
 
+  // ATTRIBUTION CAPTURE (Stage 3, best-effort). Read the mb_aff cookie set by
+  // /go/title on a profile Top-12 click; if it names a valid CLAIMED creator who
+  // is NOT the buyer and the click is within the 7-day window, credit them. The
+  // ENTIRE block is wrapped in try/catch: ANY failure (missing/garbage cookie,
+  // JSON parse error, query error) leaves creatorId null and the sale proceeds
+  // UNCHANGED. Attribution must never block or throw the rent/buy.
+  let creatorId: string | null = null;
+  try {
+    const raw = request.cookies.get("mb_aff")?.value;
+    if (raw) {
+      const parsed = JSON.parse(raw) as {
+        creator_id?: unknown;
+        title_id?: unknown;
+        ts?: unknown;
+      };
+      const cookieCreatorId =
+        typeof parsed.creator_id === "string" ? parsed.creator_id : null;
+      const ts = typeof parsed.ts === "number" ? parsed.ts : 0;
+      // Window guard: 7 days (last-click recency). Scoping (ii): we do NOT
+      // require parsed.title_id to match `id` — any title in the window credits
+      // the curator (title_id is carried for a future scoping-(i) narrowing).
+      const withinWindow = ts > 0 && Date.now() - ts <= 604800000;
+      if (cookieCreatorId && UUID_RE.test(cookieCreatorId) && withinWindow) {
+        // Valid CLAIMED creator AND not self-attribution, in one query.
+        const { data: creator } = await supabase
+          .from("creators")
+          .select("user_id")
+          .eq("id", cookieCreatorId)
+          .eq("is_claimed", true)
+          .not("user_id", "is", null)
+          .is("deleted_at", null)
+          .maybeSingle();
+        if (creator && (creator.user_id as string) !== user.id) {
+          creatorId = cookieCreatorId; // valid credit
+        }
+        // creator null (invalid/unclaimed) OR user_id === buyer (self) → null
+      }
+    }
+  } catch {
+    creatorId = null; // best-effort: any failure → unattributed, sale proceeds
+  }
+
   // Metadata round-trips to the webhook (read off session OR payment_intent).
   // All values are strings (Stripe metadata is string→string); the webhook
   // re-parses moonbeem_price_cents to an integer and re-validates, and reads
-  // moonbeem_kind to grant the matching entitlement kind.
-  const metadata = {
+  // moonbeem_kind to grant the matching entitlement kind. moonbeem_creator_id is
+  // added ONLY when attribution resolved (omitted otherwise — webhook reads
+  // ?? null).
+  const metadata: Record<string, string> = {
     moonbeem_kind: kind,
     moonbeem_user_id: user.id,
     moonbeem_title_id: id,
     moonbeem_price_cents: String(priceCents),
   };
+  if (creatorId) {
+    metadata.moonbeem_creator_id = creatorId;
+  }
 
   let session;
   try {

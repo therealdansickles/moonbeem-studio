@@ -14,10 +14,17 @@ type Props = {
   // ("$X.XX per 1,000 views") so the card doesn't reach for any
   // campaign internals.
   cpmDisplay?: string | null;
+  // Affiliate attribution (Stage 3): when set (the profile Top-12 view-only
+  // render passes the profile owner's creator_id), the card links through
+  // /go/title so that curator is credited if the viewer rents. Every other
+  // call site omits it → a bare /t/[slug] link, unchanged.
+  viaCreatorId?: string;
 };
 
-export default function TitleCard({ title, cpmDisplay }: Props) {
-  const href = `/t/${title.slug}`;
+export default function TitleCard({ title, cpmDisplay, viaCreatorId }: Props) {
+  const href = viaCreatorId
+    ? `/go/title?via=${encodeURIComponent(viaCreatorId)}&slug=${encodeURIComponent(title.slug)}`
+    : `/t/${title.slug}`;
 
   return (
     <Link

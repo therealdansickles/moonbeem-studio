@@ -28,11 +28,15 @@ import AddToTop12Modal from "./AddToTop12Modal";
 type Props = {
   topTitles: TopTitle[];
   isOwner: boolean;
+  // Affiliate attribution (Stage 3): the profile owner's creator_id, passed by
+  // ProfileView for the public (view-only) profile so each Top-12 card links
+  // through /go/title. Absent on the owner-editable (/me) render.
+  viaCreatorId?: string;
 };
 
 const TOTAL_SLOTS = 12;
 
-export default function Top12Grid({ topTitles, isOwner }: Props) {
+export default function Top12Grid({ topTitles, isOwner, viaCreatorId }: Props) {
   const router = useRouter();
   const [reorderMode, setReorderMode] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -150,7 +154,7 @@ export default function Top12Grid({ topTitles, isOwner }: Props) {
         {slots.map((slot, i) => (
           <div key={i} className="aspect-[2/3] w-full">
             {slot ? (
-              <TitleCard title={slot.title} />
+              <TitleCard title={slot.title} viaCreatorId={viaCreatorId} />
             ) : (
               <div className="h-full w-full rounded-xl border border-dashed border-white/10 bg-white/[0.02]" />
             )}
