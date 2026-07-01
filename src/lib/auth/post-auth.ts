@@ -41,8 +41,13 @@ export async function runPostAuth(args: {
   origin: string;
   userAgent: string | null;
   params: PostAuthParams;
+  // Status for the final redirect. Defaults to 307 — the code callback's
+  // original behavior (a GET→GET redirect, so unchanged). The token_hash POST
+  // path passes 303 so the browser GETs the destination instead of re-POSTing.
+  redirectStatus?: 303 | 307;
 }): Promise<NextResponse> {
-  const { supabase, userId, origin, userAgent, params } = args;
+  const { supabase, userId, origin, userAgent, params, redirectStatus = 307 } =
+    args;
   const {
     action,
     title_id: titleId,
@@ -170,12 +175,16 @@ export async function runPostAuth(args: {
     onboardParams.set("signin", "1");
     return NextResponse.redirect(
       `${origin}/onboarding/handle?${onboardParams.toString()}`,
+      redirectStatus,
     );
   }
 
   if (safeRedirect) {
-    return NextResponse.redirect(`${origin}${safeRedirect}${toastQuery}`);
+    return NextResponse.redirect(
+      `${origin}${safeRedirect}${toastQuery}`,
+      redirectStatus,
+    );
   }
 
-  return NextResponse.redirect(`${origin}/me${toastQuery}`);
+  return NextResponse.redirect(`${origin}/me${toastQuery}`, redirectStatus);
 }
