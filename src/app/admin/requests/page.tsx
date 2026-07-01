@@ -35,7 +35,8 @@ type AggregatedRow = {
 
 const TYPE_LABEL: Record<string, string> = {
   fan_edits: "Fan edits",
-  clips_and_stills: "Clips & stills",
+  clips: "Clips",
+  stills: "Stills",
 };
 
 const RECENTLY_FULFILLED_DAYS = 30;

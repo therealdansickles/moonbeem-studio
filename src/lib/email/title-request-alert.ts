@@ -11,7 +11,7 @@ import { getOrigin } from "./origin";
 import { sendBrandedEmail, type SendResult } from "./send";
 import { escapeHtml, paragraph, signoff, wrap } from "./components";
 
-type RequestType = "fan_edits" | "clips_and_stills";
+type RequestType = "fan_edits" | "clips" | "stills";
 
 function getAdminEmail(): string {
   return process.env.MOONBEEM_ALERT_EMAIL ?? "hello@moonbeem.studio";
@@ -22,7 +22,8 @@ function describeRequestType(t: RequestType): {
   noun: string;
 } {
   if (t === "fan_edits") return { short: "fan edit", noun: "fan edits" };
-  return { short: "clips & stills", noun: "clips and stills" };
+  if (t === "clips") return { short: "clips", noun: "clips" };
+  return { short: "stills", noun: "stills" };
 }
 
 type BuildArgs = {

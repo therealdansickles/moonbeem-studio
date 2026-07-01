@@ -5,6 +5,7 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildPublicUrl } from "@/lib/r2/upload";
 import { notifyTitleRequesters } from "@/lib/notifications/notify-title-requesters";
 import { drainQueue } from "@/lib/email-queue";
+import { fulfillTitleRequestsForContent } from "@/lib/title-requests/fulfill-on-content-upload";
 import { enforce } from "@/lib/ratelimit";
 
 // Batched admin clip upload. One POST per batch = one notify call per
@@ -93,19 +94,12 @@ export async function POST(request: NextRequest) {
 
   const newIds = data.map((d) => d.id as string);
 
-  // Mark every clips_and_stills request for this title as fulfilled.
-  // Service-role because admin users don't own these rows.
-  try {
-    const admin = createServiceRoleClient();
-    await admin
-      .from("title_requests")
-      .update({ fulfilled_at: new Date().toISOString() })
-      .eq("title_id", body.title_id)
-      .eq("request_type", "clips_and_stills")
-      .is("fulfilled_at", null);
-  } catch (err) {
-    console.error("mark requests fulfilled failed (clip batch)", err);
-  }
+  // Mark every open 'clips' request for this title as fulfilled (2026-07-01
+  // split: a clip upload closes 'clips' requests only). Service-role because
+  // admin users don't own these rows. Fire-and-forget via the shared helper —
+  // a fulfillment failure must not break the upload.
+  const admin = createServiceRoleClient();
+  await fulfillTitleRequestsForContent(admin, body.title_id, "clips");
 
   // One notify call for the whole batch — each requester gets one
   // email row referencing all N clip ids via content_ids[].

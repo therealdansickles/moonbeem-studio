@@ -292,7 +292,11 @@ export async function drainQueue(
     // line. Missing row (unlikely but possible if the request was
     // deleted between enqueue and drain) just omits the date.
     const requestType =
-      row.content_type === "fan_edit" ? "fan_edits" : "clips_and_stills";
+      row.content_type === "fan_edit"
+        ? "fan_edits"
+        : row.content_type === "clip"
+          ? "clips"
+          : "stills";
     const requestedAtIso =
       requestedAtMap.get(
         `${row.user_id}|${row.title_id}|${requestType}`,

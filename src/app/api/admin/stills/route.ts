@@ -5,6 +5,7 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildPublicUrl } from "@/lib/r2/upload";
 import { notifyTitleRequesters } from "@/lib/notifications/notify-title-requesters";
 import { drainQueue } from "@/lib/email-queue";
+import { fulfillTitleRequestsForContent } from "@/lib/title-requests/fulfill-on-content-upload";
 import { enforce } from "@/lib/ratelimit";
 
 // Batched admin still upload — mirrors /api/admin/clips. See that
@@ -91,19 +92,12 @@ export async function POST(request: NextRequest) {
 
   const newIds = data.map((d) => d.id as string);
 
-  // Mark every clips_and_stills request for this title as fulfilled.
-  // Service-role because admin users don't own these rows.
-  try {
-    const admin = createServiceRoleClient();
-    await admin
-      .from("title_requests")
-      .update({ fulfilled_at: new Date().toISOString() })
-      .eq("title_id", body.title_id)
-      .eq("request_type", "clips_and_stills")
-      .is("fulfilled_at", null);
-  } catch (err) {
-    console.error("mark requests fulfilled failed (still batch)", err);
-  }
+  // Mark every open 'stills' request for this title as fulfilled (2026-07-01
+  // split: a still upload closes 'stills' requests only). Service-role because
+  // admin users don't own these rows. Fire-and-forget via the shared helper —
+  // a fulfillment failure must not break the upload.
+  const admin = createServiceRoleClient();
+  await fulfillTitleRequestsForContent(admin, body.title_id, "stills");
 
   let enqueuedIds: string[] = [];
   try {

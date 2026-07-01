@@ -4,7 +4,7 @@ import { enforce, getIp } from "@/lib/ratelimit";
 import { sendTitleRequestAlert } from "@/lib/email/title-request-alert";
 import { PUBLICLY_READABLE_FAN_EDIT_STATUSES } from "@/lib/fan-edits/status";
 
-type RequestType = "fan_edits" | "clips_and_stills";
+type RequestType = "fan_edits" | "clips" | "stills";
 
 type Body = {
   title_id?: string;
@@ -16,7 +16,7 @@ type Body = {
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const VALID_REQUEST_TYPES: RequestType[] = ["fan_edits", "clips_and_stills"];
+const VALID_REQUEST_TYPES: RequestType[] = ["fan_edits", "clips", "stills"];
 
 function buildSignInUrl(args: {
   titleId: string;
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
   })();
   if ((requestType as string) === "__invalid__") {
     return NextResponse.json(
-      { error: "request_type must be 'fan_edits' or 'clips_and_stills'" },
+      { error: "request_type must be 'fan_edits', 'clips', or 'stills'" },
       { status: 400 },
     );
   }
@@ -108,20 +108,26 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // If the title already has a published fan_edit, the request is
-  // pre-fulfilled at insert time. No notification fires — that's the
-  // fan-edit fulfillment hook's job, and this isn't a fan_edit insert.
-  // Visibility = same 3-condition rule the fan_edit display surfaces use.
-  const { data: existingFanEdit } = await supabase
-    .from("fan_edits")
-    .select("id")
-    .eq("title_id", body.title_id)
-    .eq("is_active", true)
-    .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
-    .is("deleted_at", null)
-    .limit(1)
-    .maybeSingle();
-  const fulfilledAt = existingFanEdit ? new Date().toISOString() : null;
+  // If the title already has a published fan_edit, a FAN_EDITS request is
+  // pre-fulfilled at insert time. clips/stills requests are NOT pre-fulfilled
+  // by a fan_edit — they're satisfied only by an actual clip/still upload — so
+  // this born-fulfilled check is scoped to request_type='fan_edits'. No
+  // notification fires — that's the fan-edit fulfillment hook's job, and this
+  // isn't a fan_edit insert. Visibility = the same 3-condition rule the
+  // fan_edit display surfaces use.
+  let fulfilledAt: string | null = null;
+  if (requestType === "fan_edits") {
+    const { data: existingFanEdit } = await supabase
+      .from("fan_edits")
+      .select("id")
+      .eq("title_id", body.title_id)
+      .eq("is_active", true)
+      .in("verification_status", PUBLICLY_READABLE_FAN_EDIT_STATUSES)
+      .is("deleted_at", null)
+      .limit(1)
+      .maybeSingle();
+    fulfilledAt = existingFanEdit ? new Date().toISOString() : null;
+  }
 
   const { error } = await supabase.from("title_requests").insert({
     title_id: body.title_id,

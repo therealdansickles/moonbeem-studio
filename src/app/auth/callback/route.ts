@@ -31,8 +31,13 @@ export async function GET(request: Request) {
   const safeRedirect =
     redirectTo && redirectTo.startsWith("/") ? redirectTo : null;
 
-  const requestType: "fan_edits" | "clips_and_stills" =
-    requestTypeParam === "clips_and_stills" ? "clips_and_stills" : "fan_edits";
+  // Explicit allowlist of the three valid request types; any other value
+  // (including a missing param or legacy 'clips_and_stills') falls back to
+  // 'fan_edits'.
+  const requestType: "fan_edits" | "clips" | "stills" =
+    requestTypeParam === "clips" || requestTypeParam === "stills"
+      ? requestTypeParam
+      : "fan_edits";
 
   let resolvedTitleName = titleParam;
   let requestSubmitted = false;

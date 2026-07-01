@@ -79,12 +79,17 @@ export async function notifyTitleRequesters(
     );
   } else {
     // Map contentType to the title_requests.request_type the user
-    // actually asked for. Clips and stills are both delivered via the
-    // 'clips_and_stills' request_type; fan_edits is its own bucket.
-    // Pre-fix this query pulled requesters for BOTH types, so a clip
-    // upload would email people who only asked for fan edits.
+    // actually asked for: fan_edit -> fan_edits, clip -> clips,
+    // still -> stills (the 2026-07-01 split made clips and stills
+    // independent request types). Scoping the query to exactly the
+    // matching type means a clip upload only emails people who asked
+    // for clips, a still upload only those who asked for stills.
     const requestType =
-      contentType === "fan_edit" ? "fan_edits" : "clips_and_stills";
+      contentType === "fan_edit"
+        ? "fan_edits"
+        : contentType === "clip"
+          ? "clips"
+          : "stills";
     const { data: requestRows, error: reqErr } = await supabase
       .from("title_requests")
       .select("user_id")
