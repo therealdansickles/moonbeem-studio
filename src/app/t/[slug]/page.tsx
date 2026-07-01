@@ -205,6 +205,41 @@ export default async function TitlePage({ params }: PageProps) {
     ? await getActiveEntitlement(user.id, title.id)
     : null;
 
+  // Per-type "already submitted" state for the Clips/Stills request CTAs.
+  // ONE query buckets both types by request_type — a clips request seeds only
+  // the Clips CTA, a stills request only the Stills CTA. Authed client, so RLS
+  // title_requests_self_read (auth.uid() = user_id) permits the self-read.
+  let clipsRequest: { alreadyRequested: boolean; requestedAt: string | null } = {
+    alreadyRequested: false,
+    requestedAt: null,
+  };
+  let stillsRequest: { alreadyRequested: boolean; requestedAt: string | null } = {
+    alreadyRequested: false,
+    requestedAt: null,
+  };
+  if (user) {
+    const { data: openRequests } = await supabase
+      .from("title_requests")
+      .select("requested_at, request_type")
+      .eq("title_id", title.id)
+      .eq("user_id", user.id)
+      .is("fulfilled_at", null)
+      .in("request_type", ["clips", "stills"]);
+    for (const row of openRequests ?? []) {
+      if (row.request_type === "clips") {
+        clipsRequest = {
+          alreadyRequested: true,
+          requestedAt: row.requested_at as string,
+        };
+      } else if (row.request_type === "stills") {
+        stillsRequest = {
+          alreadyRequested: true,
+          requestedAt: row.requested_at as string,
+        };
+      }
+    }
+  }
+
   // Gating — the clips + stills tabs need the viewer's tier and
   // lifetime download counts for their quota affordances.
   // Super-admins are coerced to "verified" for the UI (unlimited
@@ -556,6 +591,8 @@ export default async function TitlePage({ params }: PageProps) {
                     titleId={title.id}
                     titleName={title.title}
                     titleSlug={title.slug}
+                    alreadyRequested={clipsRequest.alreadyRequested}
+                    requestedAt={clipsRequest.requestedAt}
                   />
                 )}
               </>
@@ -573,6 +610,8 @@ export default async function TitlePage({ params }: PageProps) {
                     titleId={title.id}
                     titleName={title.title}
                     titleSlug={title.slug}
+                    alreadyRequested={stillsRequest.alreadyRequested}
+                    requestedAt={stillsRequest.requestedAt}
                   />
                 )}
               </>
