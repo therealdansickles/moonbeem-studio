@@ -16,7 +16,7 @@
 import { NextResponse } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
-import { runPostAuth } from "@/lib/auth/post-auth";
+import { runPostAuth, type PostAuthParams } from "@/lib/auth/post-auth";
 
 function escapeHtml(s: string): string {
   return s
@@ -34,17 +34,61 @@ function htmlResponse(body: string, status: number): NextResponse {
   });
 }
 
-// The passthrough params carried from the requesting page into this confirm
-// page. All rendered into hidden fields (escaped) so the POST can replay them.
-const PASSTHROUGH = [
-  "token_hash",
-  "type",
-  "next",
+// The confirm page carries only these three through the GET→POST form. All
+// deferred-request passthrough (action/title_id/title/request_type) and the
+// final destination ride INSIDE `next` — which, after the template flip, is the
+// email's {{ .RedirectTo }} = the old-style emailRedirectTo URL. The POST
+// unpacks it via resolvePassthroughFromNext(). A plain `next` (e.g. /me) is used
+// as the destination as-is.
+const PASSTHROUGH = ["token_hash", "type", "next"] as const;
+
+const NEST_KEYS = [
   "action",
   "title_id",
   "title",
   "request_type",
+  "redirect_to",
 ] as const;
+
+// Unpack the passthrough carried in `next`. If `next` is the old-style wrapper
+// URL (e.g. /auth/callback?redirect_to=/t/x&action=request_fan_edits&title_id=…)
+// — i.e. its query carries any of NEST_KEYS — extract those and use the EMBEDDED
+// redirect_to as the destination; the /auth/callback wrapper itself is never a
+// redirect target. Otherwise `next` is a plain path (e.g. /me) and IS the
+// destination. Open-redirect safety is enforced downstream by runPostAuth's
+// safeRedirect (destination must start with "/"); we also strip any host here so
+// an absolute external URL collapses to a same-origin path.
+function resolvePassthroughFromNext(nextRaw: string): PostAuthParams {
+  const empty: PostAuthParams = {
+    action: null,
+    title_id: null,
+    title: null,
+    redirect_to: null,
+    request_type: null,
+  };
+  if (!nextRaw) return empty;
+
+  let u: URL;
+  try {
+    // Base handles root-relative values; an absolute URL ignores the base.
+    u = new URL(nextRaw, "http://internal.invalid");
+  } catch {
+    return { ...empty, redirect_to: nextRaw.startsWith("/") ? nextRaw : null };
+  }
+
+  const q = u.searchParams;
+  if (NEST_KEYS.some((k) => q.has(k))) {
+    return {
+      action: q.get("action"),
+      title_id: q.get("title_id"),
+      title: q.get("title"),
+      request_type: q.get("request_type"),
+      redirect_to: q.get("redirect_to"),
+    };
+  }
+  // Plain path: use its path+query as the destination (host stripped).
+  return { ...empty, redirect_to: u.pathname + u.search + u.hash };
+}
 
 function page(inner: string): string {
   return `<!doctype html>
@@ -105,6 +149,10 @@ export async function POST(request: Request) {
 
   if (!tokenHash || !type) return fail();
 
+  // `type` is passed to verifyOtp VERBATIM — no allowlist. This must accept
+  // every email OTP type: 'magiclink' (sign-in) AND 'signup' (the new-user
+  // "Confirm signup" email) AND 'recovery' etc. An invalid/unknown type simply
+  // fails verifyOtp and falls through to the graceful auth_failed below.
   const supabase = await createClient();
   const { data, error } = await supabase.auth.verifyOtp({
     token_hash: tokenHash,
@@ -113,19 +161,16 @@ export async function POST(request: Request) {
 
   if (error || !data.user) return fail();
 
+  // Passthrough (action/title_id/title/request_type) + the final destination are
+  // unpacked from `next` (the email's {{ .RedirectTo }}). A plain `next` (e.g.
+  // /me) becomes the destination as-is.
   const next = String(form.get("next") ?? "");
   return runPostAuth({
     supabase,
     userId: data.user.id,
     origin,
     userAgent: request.headers.get("user-agent"),
-    params: {
-      action: (form.get("action") as string) || null,
-      title_id: (form.get("title_id") as string) || null,
-      title: (form.get("title") as string) || null,
-      redirect_to: next || null,
-      request_type: (form.get("request_type") as string) || null,
-    },
+    params: resolvePassthroughFromNext(next),
     // POST → 303 so the browser GETs the destination (never re-POSTs).
     redirectStatus: 303,
   });
