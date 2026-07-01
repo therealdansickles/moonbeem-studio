@@ -50,6 +50,28 @@ const NEST_KEYS = [
   "redirect_to",
 ] as const;
 
+// The auth entry/wrapper routes must NEVER be a redirect destination. Landing
+// back on /auth/callback — especially a BARE one with no ?code, which is exactly
+// what a plain sign-in produces (emailRedirectTo = ${origin}/auth/callback, no
+// query) — bounces to /login?error=auth_failed even though verifyOtp already
+// set a valid session, so the user sees the login page while signed in.
+// /auth/confirm and /login are collapsed for the same reason. Any resolved
+// destination whose pathname is one of these becomes /me (runPostAuth still
+// overrides to /onboarding/handle for a handle-less user). Enforced in EVERY
+// branch below, not just the embedded-params one.
+const AUTH_ROUTES = new Set(["/auth/callback", "/auth/confirm", "/login"]);
+
+function neutralizeAuthWrapper(dest: string | null): string | null {
+  if (!dest) return dest;
+  let path: string;
+  try {
+    path = new URL(dest, "http://internal.invalid").pathname;
+  } catch {
+    path = dest.split("?")[0].split("#")[0];
+  }
+  return AUTH_ROUTES.has(path) ? "/me" : dest;
+}
+
 // Unpack the passthrough carried in `next`. If `next` is the old-style wrapper
 // URL (e.g. /auth/callback?redirect_to=/t/x&action=request_fan_edits&title_id=…)
 // — i.e. its query carries any of NEST_KEYS — extract those and use the EMBEDDED
@@ -73,7 +95,12 @@ function resolvePassthroughFromNext(nextRaw: string): PostAuthParams {
     // Base handles root-relative values; an absolute URL ignores the base.
     u = new URL(nextRaw, "http://internal.invalid");
   } catch {
-    return { ...empty, redirect_to: nextRaw.startsWith("/") ? nextRaw : null };
+    return {
+      ...empty,
+      redirect_to: neutralizeAuthWrapper(
+        nextRaw.startsWith("/") ? nextRaw : null,
+      ),
+    };
   }
 
   const q = u.searchParams;
@@ -83,11 +110,14 @@ function resolvePassthroughFromNext(nextRaw: string): PostAuthParams {
       title_id: q.get("title_id"),
       title: q.get("title"),
       request_type: q.get("request_type"),
-      redirect_to: q.get("redirect_to"),
+      redirect_to: neutralizeAuthWrapper(q.get("redirect_to")),
     };
   }
   // Plain path: use its path+query as the destination (host stripped).
-  return { ...empty, redirect_to: u.pathname + u.search + u.hash };
+  return {
+    ...empty,
+    redirect_to: neutralizeAuthWrapper(u.pathname + u.search + u.hash),
+  };
 }
 
 function page(inner: string): string {
