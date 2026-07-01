@@ -145,9 +145,14 @@ export default async function Home() {
             --text-display-xl on desktop). 12vw is the preferred
             scaling band — keeps the wordmark visually large
             without overflowing on any viewport ≥320px. */}
-        <h1 className="font-wordmark font-bold text-moonbeem-pink m-0 text-[clamp(2.5rem,12vw,6rem)] leading-[0.95]">
-          moonbeem.
-        </h1>
+        <div className="flex flex-col items-center">
+          <h1 className="font-wordmark font-bold text-moonbeem-pink m-0 text-[clamp(2.5rem,12vw,6rem)] leading-[0.95]">
+            moonbeem.
+          </h1>
+          <p className="text-heading-sm font-semibold tracking-wide text-moonbeem-ink text-center m-0 mt-3">
+            Watch<span className="text-moonbeem-pink">.</span> Share<span className="text-moonbeem-pink">.</span> Earn<span className="text-moonbeem-pink">.</span>
+          </p>
+        </div>
       </div>
 
       {rendered.map((r, i) => {
