@@ -22,7 +22,7 @@ import BuyButton from "@/components/BuyButton";
 import FanEditsTab from "@/components/FanEditsTab";
 import VideosTab from "@/components/VideosTab";
 import StillsTab from "@/components/StillsTab";
-import RequestFanEditsCTA from "@/components/RequestFanEditsCTA";
+import RequestContentCTA from "@/components/RequestContentCTA";
 import RequestSubmittedToast from "@/components/RequestSubmittedToast";
 import AboutCredits from "@/components/AboutCredits";
 import OfferButtonClient from "@/components/OfferButtonClient";
@@ -205,23 +205,6 @@ export default async function TitlePage({ params }: PageProps) {
     ? await getActiveEntitlement(user.id, title.id)
     : null;
 
-  let alreadyRequested = false;
-  let requestedAt: string | null = null;
-  if (user) {
-    const { data: existingRequest } = await supabase
-      .from("title_requests")
-      .select("requested_at")
-      .eq("title_id", title.id)
-      .eq("user_id", user.id)
-      .eq("request_type", "fan_edits")
-      .is("fulfilled_at", null)
-      .maybeSingle();
-    if (existingRequest) {
-      alreadyRequested = true;
-      requestedAt = existingRequest.requested_at as string;
-    }
-  }
-
   // Gating — the clips + stills tabs need the viewer's tier and
   // lifetime download counts for their quota affordances.
   // Super-admins are coerced to "verified" for the UI (unlimited
@@ -347,15 +330,6 @@ export default async function TitlePage({ params }: PageProps) {
         </p>
       )}
       <AboutCredits title={title} />
-      {fanEdits.length === 0 && (
-        <RequestFanEditsCTA
-          titleId={title.id}
-          titleName={title.title}
-          titleSlug={title.slug}
-          alreadyRequested={alreadyRequested}
-          requestedAt={requestedAt}
-        />
-      )}
     </div>
   );
 
@@ -570,18 +544,38 @@ export default async function TitlePage({ params }: PageProps) {
             }
             reviewsContent={reviewsContent}
             videosContent={
-              <VideosTab
-                clips={clips}
-                tier={effectiveTier}
-                clipDownloadUsage={clipDownloadUsage}
-              />
+              <>
+                <VideosTab
+                  clips={clips}
+                  tier={effectiveTier}
+                  clipDownloadUsage={clipDownloadUsage}
+                />
+                {clips.length === 0 && (
+                  <RequestContentCTA
+                    requestType="clips"
+                    titleId={title.id}
+                    titleName={title.title}
+                    titleSlug={title.slug}
+                  />
+                )}
+              </>
             }
             stillsContent={
-              <StillsTab
-                stills={stills}
-                tier={effectiveTier}
-                stillDownloadUsage={stillDownloadUsage}
-              />
+              <>
+                <StillsTab
+                  stills={stills}
+                  tier={effectiveTier}
+                  stillDownloadUsage={stillDownloadUsage}
+                />
+                {stills.length === 0 && (
+                  <RequestContentCTA
+                    requestType="stills"
+                    titleId={title.id}
+                    titleName={title.title}
+                    titleSlug={title.slug}
+                  />
+                )}
+              </>
             }
           />
         </div>
