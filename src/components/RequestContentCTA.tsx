@@ -129,26 +129,31 @@ export default function RequestContentCTA({
   if (status === "done") {
     const when = submittedAt ? formatRelativeDays(submittedAt) : null;
     return (
-      <div
-        className="flex items-center gap-2 text-body-sm text-moonbeem-ink-muted animate-fade-in"
-        role="status"
-        aria-live="polite"
-      >
-        <svg
-          className="h-4 w-4 text-moonbeem-pink shrink-0"
-          viewBox="0 0 16 16"
-          fill="none"
-          aria-hidden="true"
+      <div className="flex flex-col items-center gap-2">
+        <button
+          type="button"
+          disabled
+          aria-disabled="true"
+          className="bg-moonbeem-pink text-moonbeem-navy rounded-md px-6 py-3 text-body font-semibold hover:opacity-90 disabled:opacity-60 disabled:cursor-default transition-opacity inline-flex items-center gap-2"
+          role="status"
+          aria-live="polite"
         >
-          <path
-            d="M3 8.5l3.5 3.5L13 5"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        <span>{when ? `${labels.submitted} ${when}` : labels.submitted}</span>
+          <svg
+            className="h-4 w-4 text-moonbeem-navy shrink-0"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M3 8.5l3.5 3.5L13 5"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <span>{when ? `${labels.submitted} ${when}` : labels.submitted}</span>
+        </button>
       </div>
     );
   }
