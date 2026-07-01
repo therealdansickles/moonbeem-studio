@@ -16,7 +16,7 @@ import {
   wrap,
 } from "./components";
 
-type ContentPhrasing = { noun: string; subjectNoun: string };
+type ContentPhrasing = { noun: string; subjectNoun: string; verb: string };
 
 function describeContent(
   type: ContentType,
@@ -26,17 +26,20 @@ function describeContent(
     return {
       noun: count === 1 ? "clip" : "clips",
       subjectNoun: count === 1 ? "clip" : "clips",
+      verb: count === 1 ? "is" : "are",
     };
   }
   if (type === "still") {
     return {
       noun: count === 1 ? "still" : "stills",
       subjectNoun: count === 1 ? "still" : "stills",
+      verb: count === 1 ? "is" : "are",
     };
   }
   return {
     noun: count === 1 ? "fan edit" : "fan edits",
     subjectNoun: count === 1 ? "fan edit" : "fan edits",
+    verb: count === 1 ? "is" : "are",
   };
 }
 
@@ -89,7 +92,7 @@ export function buildRequestFulfilledEmail(args: BuildArgs): {
   const innerHtml = [
     paragraph("Hey Beemer,"),
     paragraph(
-      `The ${phrasing.noun} you requested for ${titleNameEsc} are now available on Moonbeem.`,
+      `The ${phrasing.noun} you requested for ${titleNameEsc} ${phrasing.verb} now available on Moonbeem.`,
     ),
     button({
       href: titleHref,
@@ -112,7 +115,7 @@ export function buildRequestFulfilledEmail(args: BuildArgs): {
   const textLines = [
     "Hey Beemer,",
     "",
-    `The ${phrasing.noun} you requested for ${titleName} are now available on Moonbeem.`,
+    `The ${phrasing.noun} you requested for ${titleName} ${phrasing.verb} now available on Moonbeem.`,
     "",
     `See the ${phrasing.noun}: ${titleHref}`,
   ];
@@ -122,7 +125,7 @@ export function buildRequestFulfilledEmail(args: BuildArgs): {
   textLines.push("", "More soon,", "Team Moonbeem");
 
   return {
-    subject: `The ${phrasing.subjectNoun} you requested for ${titleName} are now available`,
+    subject: `The ${phrasing.subjectNoun} you requested for ${titleName} ${phrasing.verb} now available`,
     html,
     text: textLines.join("\n"),
   };
