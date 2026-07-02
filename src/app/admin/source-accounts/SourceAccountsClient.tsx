@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export type MatchView = {
   id: string;
@@ -81,6 +81,16 @@ export default function SourceAccountsClient({
   const [scrapeMsg, setScrapeMsg] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
+  // Sync from the server whenever router.refresh() (after a scrape) delivers fresh
+  // props. useState(initial) alone seeds ONCE at mount, so without this the client
+  // keeps rendering the pre-scrape snapshot even though the rows persisted — that
+  // was the "nothing persisted" acceptance failure: the writes landed, the queue
+  // just never repainted. Confirmed/rejected matches are DB-status-changed, so the
+  // fresh server props already exclude them and this reset stays consistent.
+  useEffect(() => {
+    setAccounts(initial);
+  }, [initial]);
+
   function removeMatch(accountId: string, groupId: string, matchId: string) {
     setAccounts((prev) =>
       prev.map((a) => {
@@ -136,15 +146,19 @@ export default function SourceAccountsClient({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
+        const parts = [json.error, json.category, json.detail]
+          .filter(Boolean)
+          .join(" · ");
         setScrapeMsg((m) => ({
           ...m,
-          [account.id]: json.message ?? json.error ?? "scrape failed",
+          [account.id]: json.message ?? (parts || "scrape failed"),
         }));
         return;
       }
+      // DB-CONFIRMED counts (post-write SELECT), not in-memory tallies.
       setScrapeMsg((m) => ({
         ...m,
-        [account.id]: `Done: ${json.fetched} fetched · ${json.processedPosts} newly processed · ${json.matchesInserted} matches queued · ${json.noMatchPosts} no-match${json.truncated ? " · TRUNCATED (raise depth)" : ""}. Refreshing…`,
+        [account.id]: `Done — DB-confirmed: ${json.dbPostsTotal} posts in queue · ${json.dbPendingMatches} pending matches. (this run: ${json.fetched} fetched, ${json.matchesInserted} new${json.truncated ? ", TRUNCATED — more remain" : ""})`,
       }));
       // Reload the server queue with the freshly-inserted pending matches.
       router.refresh();

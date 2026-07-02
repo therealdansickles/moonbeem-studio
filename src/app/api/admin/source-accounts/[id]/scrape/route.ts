@@ -18,8 +18,10 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getUsedUnits } from "@/lib/source-accounts/ensembledata";
 import {
   scrapeSourceAccount,
-  BACKFILL_MAX_PAGES,
-  INCREMENTAL_MAX_PAGES,
+  BACKFILL_PAGE_DEPTH,
+  BACKFILL_MAX_CALLS,
+  INCREMENTAL_PAGE_DEPTH,
+  INCREMENTAL_MAX_CALLS,
   type ScrapeMode,
   type SourceAccountRow,
 } from "@/lib/source-accounts/pipeline";
@@ -56,9 +58,12 @@ export async function POST(
     return NextResponse.json({ error: "account_inactive" }, { status: 400 });
   }
 
-  // Budget guard.
-  const maxPages = mode === "backfill" ? BACKFILL_MAX_PAGES : INCREMENTAL_MAX_PAGES;
-  const projected = maxPages * 10 + 10; // ~1 unit/post * pages*10, + resolve/overhead
+  // Budget guard. Ceiling = pages * ~10 units/page, + resolve/overhead.
+  const maxPages =
+    mode === "backfill"
+      ? BACKFILL_PAGE_DEPTH * BACKFILL_MAX_CALLS
+      : INCREMENTAL_PAGE_DEPTH * INCREMENTAL_MAX_CALLS;
+  const projected = maxPages * 10 + 10;
   const today = new Date().toISOString().slice(0, 10);
   const units = await getUsedUnits(today);
   const budgetEnv = process.env.ENSEMBLEDATA_DAILY_UNIT_BUDGET;
@@ -80,11 +85,21 @@ export async function POST(
     }
   }
 
-  const result = await scrapeSourceAccount(
-    supabase,
-    account as SourceAccountRow,
-    { mode },
-  );
+  let result;
+  try {
+    result = await scrapeSourceAccount(supabase, account as SourceAccountRow, {
+      mode,
+    });
+  } catch (e) {
+    // A DB write inside the pipeline threw (checked + surfaced, never silent).
+    return NextResponse.json(
+      {
+        error: "scrape_write_failed",
+        detail: e instanceof Error ? e.message : String(e),
+      },
+      { status: 500 },
+    );
+  }
   if (!result.ok) {
     // Park-don't-corrupt: resolve/fetch failures wrote nothing.
     return NextResponse.json(

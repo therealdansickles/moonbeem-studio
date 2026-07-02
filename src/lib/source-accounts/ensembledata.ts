@@ -160,31 +160,20 @@ export async function resolveInstagramUserId(handle: string): Promise<ResolveRes
   };
 }
 
-// Fetch (and normalize) a user's posts. depth=maxPages auto-paginates ~10 posts
-// per depth in one call. oldest_timestamp (unix seconds) stops server-side
-// pagination once older posts are reached — the incremental path passes the
-// account's cursor_max_taken_at here. Pinned posts are ALWAYS returned regardless
-// of oldest_timestamp; the caller dedups (unique shortcode) and computes the next
-// cursor from non-pinned posts only.
-export async function fetchInstagramPosts(
-  userId: string,
-  opts: { maxPages: number; oldestTimestamp?: number | null },
-): Promise<FetchPostsResult> {
-  const token = getToken();
-  if (!token) return { ok: false, error: "missing_token", detail: "ENSEMBLEDATA_TOKEN unset" };
+// One page's parsed result (internal). PageOk has no `ok` field, so `"posts" in x`
+// discriminates it from EdError.
+type PageOk = {
+  posts: NormalizedPost[];
+  rawNodeCount: number;
+  rawCount: number | null;
+  lastCursor: string | null;
+};
+type PageFetch = (startCursor: string | null) => Promise<PageOk | EdError>;
 
-  const depth = Math.max(1, Math.floor(opts.maxPages));
-  let url = `${ENSEMBLEDATA_BASE}/instagram/user/posts?user_id=${encodeURIComponent(
-    userId,
-  )}&depth=${depth}&token=${encodeURIComponent(token)}`;
-  if (opts.oldestTimestamp != null && Number.isFinite(opts.oldestTimestamp)) {
-    url += `&oldest_timestamp=${Math.floor(opts.oldestTimestamp)}`;
-  }
-
-  const r = await edGet(url, POSTS_TIMEOUT_MS);
-  if (!r.ok) return r;
-
-  const data = (r.body as Record<string, unknown>).data;
+// Parse one /instagram/user/posts response body into a PageOk. Pure — no network.
+export function parsePostsPage(body: unknown): PageOk | EdError {
+  const data =
+    body && typeof body === "object" ? (body as Record<string, unknown>).data : null;
   if (!data || typeof data !== "object") {
     return { ok: false, error: "bad_shape", detail: "no data envelope in user/posts" };
   }
@@ -195,7 +184,8 @@ export async function fetchInstagramPosts(
   const rawCountVal = (data as Record<string, unknown>).count;
   const rawCount = typeof rawCountVal === "number" ? rawCountVal : null;
   const lastCursorVal = (data as Record<string, unknown>).last_cursor;
-  const lastCursor = typeof lastCursorVal === "string" && lastCursorVal ? lastCursorVal : null;
+  const lastCursor =
+    typeof lastCursorVal === "string" && lastCursorVal ? lastCursorVal : null;
 
   const posts: NormalizedPost[] = [];
   for (const entry of rawPosts) {
@@ -209,12 +199,112 @@ export async function fetchInstagramPosts(
     const n = normalizeInstagramNode(node as Record<string, unknown>);
     if (n) posts.push(n);
   }
+  return { posts, rawNodeCount: rawPosts.length, rawCount, lastCursor };
+}
 
-  const fetchedCount = rawPosts.length;
-  const truncated =
-    opts.oldestTimestamp == null && rawCount != null && fetchedCount < rawCount;
+export type DrainOk = {
+  ok: true;
+  posts: NormalizedPost[];
+  fetchedNodeCount: number;
+  rawCount: number | null;
+  lastCursor: string | null;
+  truncated: boolean;
+  calls: number;
+};
 
-  return { ok: true, posts, rawCount, fetchedCount, lastCursor, truncated };
+// Pagination driver. EnsembleData's `depth` caps at ~8 pages (~80 posts) per call;
+// to drain a larger account you pass the previous response's last_cursor as the
+// next call's start_cursor (verified param, 2026-07-02). Follows the cursor across
+// up to maxCalls pages, deduping by shortcode (pinned posts + page overlaps repeat),
+// and stops as soon as the account is drained (no last_cursor, or a page adds
+// nothing new). Testable in isolation with a fake fetchPage:
+//   - a FIRST-page error parks (nothing landed) -> returns the EdError;
+//   - a LATER-page error keeps the pages already drained and flags truncated;
+//   - hitting maxCalls with a cursor still open flags truncated.
+export async function drainPages(
+  fetchPage: PageFetch,
+  opts: { maxCalls: number },
+): Promise<DrainOk | EdError> {
+  const byCode = new Map<string, NormalizedPost>();
+  let fetchedNodeCount = 0;
+  let rawCount: number | null = null;
+  let cursor: string | null = null;
+  let lastCursor: string | null = null;
+  let calls = 0;
+
+  const done = (truncated: boolean): DrainOk => ({
+    ok: true,
+    posts: Array.from(byCode.values()),
+    fetchedNodeCount,
+    rawCount,
+    lastCursor,
+    truncated,
+    calls,
+  });
+
+  for (let i = 0; i < opts.maxCalls; i++) {
+    const page = await fetchPage(cursor);
+    if (!("posts" in page)) {
+      if (i === 0) return page; // park — nothing landed
+      return done(true); // keep drained pages; more may remain
+    }
+    calls++;
+    if (rawCount === null) rawCount = page.rawCount;
+    fetchedNodeCount += page.rawNodeCount;
+    let newCount = 0;
+    for (const p of page.posts) {
+      if (!byCode.has(p.shortcode)) {
+        byCode.set(p.shortcode, p);
+        newCount++;
+      }
+    }
+    lastCursor = page.lastCursor;
+    if (!page.lastCursor || newCount === 0) return done(false); // drained
+    cursor = page.lastCursor;
+  }
+  return done(true); // hit the call budget with a cursor still open
+}
+
+// Fetch (and normalize) a user's posts, draining via start_cursor. Backfill passes
+// a larger maxCalls; incremental passes oldest_timestamp (stops server-side
+// pagination early) + a small maxCalls. Pinned posts are always returned and are
+// deduped by shortcode across pages; the caller computes the cursor from non-pinned
+// posts only.
+export async function fetchInstagramPosts(
+  userId: string,
+  opts: { pageDepth: number; maxCalls: number; oldestTimestamp?: number | null },
+): Promise<FetchPostsResult> {
+  const token = getToken();
+  if (!token) return { ok: false, error: "missing_token", detail: "ENSEMBLEDATA_TOKEN unset" };
+
+  const depth = Math.max(1, Math.floor(opts.pageDepth));
+  const fetchPage: PageFetch = async (startCursor) => {
+    let url = `${ENSEMBLEDATA_BASE}/instagram/user/posts?user_id=${encodeURIComponent(
+      userId,
+    )}&depth=${depth}&token=${encodeURIComponent(token)}`;
+    if (opts.oldestTimestamp != null && Number.isFinite(opts.oldestTimestamp)) {
+      url += `&oldest_timestamp=${Math.floor(opts.oldestTimestamp)}`;
+    }
+    if (startCursor) {
+      url += `&start_cursor=${encodeURIComponent(startCursor)}`;
+    }
+    const r = await edGet(url, POSTS_TIMEOUT_MS);
+    if (!r.ok) return r;
+    return parsePostsPage(r.body);
+  };
+
+  const drained = await drainPages(fetchPage, {
+    maxCalls: Math.max(1, Math.floor(opts.maxCalls)),
+  });
+  if (!drained.ok) return drained;
+  return {
+    ok: true,
+    posts: drained.posts,
+    rawCount: drained.rawCount,
+    fetchedCount: drained.fetchedNodeCount,
+    lastCursor: drained.lastCursor,
+    truncated: drained.truncated,
+  };
 }
 
 // The shared daily unit meter. Returns per-platform usage + the instagram figure

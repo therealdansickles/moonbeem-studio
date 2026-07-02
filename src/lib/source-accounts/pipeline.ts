@@ -43,6 +43,10 @@ export type ScrapeSummary = {
   matchesInserted: number; // pending match rows actually inserted
   noMatchPosts: number; // processed posts that yielded zero catalog matches
   cursorMaxTakenAt: number | null;
+  // Never-silent persistence: DB-CONFIRMED counts (post-write SELECT), so the
+  // panel reports what actually landed, not in-memory tallies.
+  dbPostsTotal: number;
+  dbPendingMatches: number;
 };
 
 export type ScrapeError = {
@@ -52,8 +56,13 @@ export type ScrapeError = {
   detail: string;
 };
 
-export const BACKFILL_MAX_PAGES = 20; // ~200 posts capacity (docstowatch = 153)
-export const INCREMENTAL_MAX_PAGES = 8; // oldest_timestamp stops pagination early
+// EnsembleData's `depth` caps at ~8 pages (~80 posts) per call; backfill drains the
+// rest via start_cursor across up to MAX_CALLS calls (docstowatch = 153 -> 2 calls).
+// Incremental relies on oldest_timestamp to stop server-side, so it needs few calls.
+export const BACKFILL_PAGE_DEPTH = 8;
+export const BACKFILL_MAX_CALLS = 6; // up to ~480 posts before truncating
+export const INCREMENTAL_PAGE_DEPTH = 8;
+export const INCREMENTAL_MAX_CALLS = 3;
 export const MATCH_THRESHOLD = 0.6;
 
 export async function scrapeSourceAccount(
@@ -74,11 +83,12 @@ export async function scrapeSourceAccount(
   }
 
   // 2. Fetch (park on any bad response — nothing is written yet).
-  const maxPages =
-    opts.mode === "backfill" ? BACKFILL_MAX_PAGES : INCREMENTAL_MAX_PAGES;
-  const oldestTimestamp =
-    opts.mode === "incremental" ? account.cursor_max_taken_at : null;
-  const fetched = await fetchInstagramPosts(userId, { maxPages, oldestTimestamp });
+  const isBackfill = opts.mode === "backfill";
+  const fetched = await fetchInstagramPosts(userId, {
+    pageDepth: isBackfill ? BACKFILL_PAGE_DEPTH : INCREMENTAL_PAGE_DEPTH,
+    maxCalls: isBackfill ? BACKFILL_MAX_CALLS : INCREMENTAL_MAX_CALLS,
+    oldestTimestamp: isBackfill ? null : account.cursor_max_taken_at,
+  });
   if (!fetched.ok) {
     return { ok: false, stage: "fetch", error: fetched.error, detail: fetched.detail };
   }
@@ -181,6 +191,21 @@ export async function scrapeSourceAccount(
     })
     .eq("id", account.id);
 
+  // 7. Never-silent persistence: read back the DB-CONFIRMED counts for this account
+  //    so the panel reports what actually landed, not the in-memory tallies above.
+  const { count: dbPostsTotal } = await supabase
+    .from("source_account_posts")
+    .select("id", { count: "exact", head: true })
+    .eq("source_account_id", account.id);
+  const { count: dbPendingMatches } = await supabase
+    .from("source_account_post_matches")
+    .select("id, source_account_posts!inner(source_account_id)", {
+      count: "exact",
+      head: true,
+    })
+    .eq("status", "pending")
+    .eq("source_account_posts.source_account_id", account.id);
+
   return {
     ok: true,
     mode: opts.mode,
@@ -192,5 +217,7 @@ export async function scrapeSourceAccount(
     matchesInserted,
     noMatchPosts,
     cursorMaxTakenAt: advanced,
+    dbPostsTotal: dbPostsTotal ?? 0,
+    dbPendingMatches: dbPendingMatches ?? 0,
   };
 }
