@@ -50,6 +50,7 @@ import {
   type RunCounters,
   updateRunProgress,
 } from "./checkpoint.ts";
+import { groupFanEditsByPost } from "./group.ts";
 
 const MAX_FAN_EDITS_PER_INVOCATION = 100;
 const WALL_CLOCK_BUDGET_MS = 60_000;
@@ -148,7 +149,7 @@ Deno.serve(async (_req: Request) => {
     // YT rows to fetchYouTubeMetrics; EnsembleData handles the rest.
     const { data: fanEdits, error: queryErr } = await supabase
       .from("fan_edits")
-      .select("id, platform, embed_url")
+      .select("id, platform, embed_url, post_id")
       .eq("view_tracking_status", "active")
       .or(
         `last_refreshed_at.is.null,last_refreshed_at.lt.${refreshCutoff}`,
@@ -175,111 +176,120 @@ Deno.serve(async (_req: Request) => {
 
     let earlyExitReason: "rate_limited" | "wall_clock_budget" | null = null;
 
-    for (const fe of fanEdits) {
-      // Wall-clock budget check before each fan_edit.
+    // Group by post so we fetch EnsembleData ONCE per unique post and fan the
+    // identical stats out to every fan_edit sharing it (N fetches -> 1). The
+    // per-row writes below are unchanged, so stored values are byte-identical to
+    // the old per-row path — this is an equivalence-preserving cost fix. See group.ts.
+    const groups = groupFanEditsByPost(
+      fanEdits as {
+        id: string;
+        platform: string;
+        embed_url: string;
+        post_id: string | null;
+      }[],
+    );
+
+    for (const group of groups) {
+      // Wall-clock budget check before each post.
       if (Date.now() - startTime > WALL_CLOCK_BUDGET_MS) {
         earlyExitReason = "wall_clock_budget";
         break;
       }
 
+      // ONE fetch per post.
       const result = await fetchEngagementMetrics({
-        platform: fe.platform as string,
-        embed_url: fe.embed_url as string,
+        platform: group.platform,
+        embed_url: group.embed_url,
       });
 
-      counters.fan_edits_processed += 1;
+      if (result.error === "rate_limited") {
+        // Stop — none of this post's rows are advanced (their last_refreshed_at
+        // is untouched); the next invocation reprocesses them and the rest.
+        console.warn(
+          `[view-tracking] RATE_LIMITED at post ${group.embed_url}; exiting partial`,
+        );
+        earlyExitReason = "rate_limited";
+        break;
+      }
 
-      if (result.error === null) {
-        try {
-          await writeSnapshotAndUpdateFanEdit(supabase, fe.id as string, {
-            view_count: result.view_count,
-            like_count: result.like_count,
-            comment_count: result.comment_count,
-            share_count: result.share_count,
-            thumbnail_url: result.thumbnail_url,
-            duration_seconds: result.duration_seconds,
-            aspect_ratio: result.aspect_ratio,
-            creator_handle_displayed: result.creator_handle_displayed,
-            posted_at: result.posted_at,
-            raw_payload: result.raw_payload,
-          });
-          counters.fan_edits_succeeded += 1;
-        } catch (err) {
-          counters.fan_edits_failed += 1;
-          const msg = err instanceof Error ? err.message : String(err);
-          console.error(
-            `[view-tracking] write failed for ${fe.id}: ${msg}`,
+      // Fan the single result out to every fan_edit sharing this post. Each row
+      // still gets its own snapshot + counter update (per-row semantics preserved).
+      for (const feId of group.ids) {
+        counters.fan_edits_processed += 1;
+
+        if (result.error === null) {
+          try {
+            await writeSnapshotAndUpdateFanEdit(supabase, feId, {
+              view_count: result.view_count,
+              like_count: result.like_count,
+              comment_count: result.comment_count,
+              share_count: result.share_count,
+              thumbnail_url: result.thumbnail_url,
+              duration_seconds: result.duration_seconds,
+              aspect_ratio: result.aspect_ratio,
+              creator_handle_displayed: result.creator_handle_displayed,
+              posted_at: result.posted_at,
+              raw_payload: result.raw_payload,
+            });
+            counters.fan_edits_succeeded += 1;
+          } catch (err) {
+            counters.fan_edits_failed += 1;
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`[view-tracking] write failed for ${feId}: ${msg}`);
+            // Surface the write_failed reason on fan_edits so it's queryable
+            // without trawling Edge Function logs. Best-effort.
+            try {
+              await recordRefreshError(supabase, feId, `write_failed: ${msg}`);
+            } catch (recErr) {
+              console.error(
+                `[view-tracking] recordRefreshError after write_failed for ${feId}: ${
+                  recErr instanceof Error ? recErr.message : recErr
+                }`,
+              );
+            }
+          }
+        } else if (result.error === "not_found" || result.error === "private") {
+          try {
+            const { markedDead } = await handleFailure(
+              supabase,
+              feId,
+              result.error,
+              FAILURE_THRESHOLD_TO_MARK_DEAD,
+            );
+            counters.fan_edits_failed += 1;
+            if (markedDead) counters.fan_edits_dead_marked += 1;
+          } catch (err) {
+            console.error(
+              `[view-tracking] handleFailure failed for ${feId}: ${
+                err instanceof Error ? err.message : err
+              }`,
+            );
+          }
+        } else {
+          // 'transient' or 'parse_error' — skip without changing
+          // last_refreshed_at or failure_count (not the post's fault). Record the
+          // per-row error so silent-skip classes stay queryable from fan_edits.
+          console.warn(
+            `[view-tracking] SKIPPED fan_edit_id=${feId} reason=${result.error}`,
           );
-          // Surface the write_failed reason on fan_edits so it's
-          // queryable without trawling Edge Function logs. Best-effort:
-          // if the error record itself fails, log and move on (the
-          // primary write failure has already been counted).
           try {
             await recordRefreshError(
               supabase,
-              fe.id as string,
-              `write_failed: ${msg}`,
+              feId,
+              `${result.error}: ${group.platform} fetch returned ${result.error}`,
             );
           } catch (recErr) {
             console.error(
-              `[view-tracking] recordRefreshError after write_failed for ${fe.id}: ${
+              `[view-tracking] recordRefreshError after ${result.error} for ${feId}: ${
                 recErr instanceof Error ? recErr.message : recErr
               }`,
             );
           }
         }
-      } else if (
-        result.error === "not_found" || result.error === "private"
-      ) {
-        try {
-          const { markedDead } = await handleFailure(
-            supabase,
-            fe.id as string,
-            result.error,
-            FAILURE_THRESHOLD_TO_MARK_DEAD,
-          );
-          counters.fan_edits_failed += 1;
-          if (markedDead) counters.fan_edits_dead_marked += 1;
-        } catch (err) {
-          console.error(
-            `[view-tracking] handleFailure failed for ${fe.id}: ${
-              err instanceof Error ? err.message : err
-            }`,
-          );
-        }
-      } else if (result.error === "rate_limited") {
-        // Stop — exit partial without advancing cursor through this
-        // fan_edit. The next invocation reprocesses it.
-        console.warn(
-          `[view-tracking] RATE_LIMITED at fan_edit_id=${fe.id}; exiting partial`,
-        );
-        earlyExitReason = "rate_limited";
-        break;
-      } else {
-        // 'transient' or 'parse_error' — skip without changing
-        // last_refreshed_at or failure_count (not the post's fault).
-        // Do record the per-row error so silent-skip classes (e.g.
-        // pre-2026-05-11 TikTok /photo/ rows) are queryable from
-        // fan_edits directly instead of inferred from picker drift.
-        console.warn(
-          `[view-tracking] SKIPPED fan_edit_id=${fe.id} reason=${result.error}`,
-        );
-        try {
-          await recordRefreshError(
-            supabase,
-            fe.id as string,
-            `${result.error}: ${fe.platform as string} fetch returned ${result.error}`,
-          );
-        } catch (recErr) {
-          console.error(
-            `[view-tracking] recordRefreshError after ${result.error} for ${fe.id}: ${
-              recErr instanceof Error ? recErr.message : recErr
-            }`,
-          );
-        }
+
+        lastProcessed = feId;
       }
 
-      lastProcessed = fe.id as string;
       await updateRunProgress(supabase, runId, counters, lastProcessed);
     }
 
