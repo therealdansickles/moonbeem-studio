@@ -116,36 +116,13 @@ function listDataRowCount(rows: string[][]): number {
 
 type Signature = "reviews" | "diary" | "ratings" | "bare" | null;
 
-// Header-based signature — position-independent, order-independent, identical to
-// how normalize.ts reads columns (getCol by lowercased header name). Ordered
-// most-specific first: reviews contains rating+rewatch too, so "review" must win
-// before diary/ratings; the bare set {name,year,date,letterboxd uri} is shared by
-// watchlist/watched/likes and is therefore ambiguous by header alone.
-function signatureOf(h: Record<string, number>): Signature {
-  const has = (c: string) => c in h;
-  const filmish = has("name") && has("letterboxd uri");
-  if (!filmish) return null;
-  if (has("review")) return "reviews";
-  if (has("rewatch") || has("watched date")) return "diary";
-  if (has("rating")) return "ratings";
-  return "bare";
-}
-
-// Filename hint (substring on the canonicalized stem). Used to (a) resolve the
-// bare/ambiguous set and (b) cross-check an unambiguous header signature.
-// watchlist is checked before watched (neither is a substring of the other, but
-// keep it explicit).
-function filenameHint(canon: string): CsvCategory | null {
-  if (canon.includes("watchlist")) return "watchlist";
-  if (canon.includes("watched")) return "watched";
-  if (canon.includes("likes") || canon.includes("films")) return "likesFilms";
-  if (canon.includes("ratings")) return "ratings";
-  if (canon.includes("diary")) return "diary";
-  if (canon.includes("reviews")) return "reviews";
-  if (canon.includes("profile")) return "profile";
-  if (canon.includes("comments")) return "comments";
-  return null;
-}
+// NOTE: the header-signature and filename-hint logic is computed INLINE in
+// classify() below (not as tiny signatureOf()/filenameHint() helpers) on
+// purpose — see the comment there. Header signature rules: reviews contains
+// rating+rewatch too, so "review" must win first; the bare set {date,name,year,
+// letterboxd uri} is shared by watchlist/watched/likes and is ambiguous by
+// header alone. Hint rules: substring on the canonicalized stem, watchlist
+// before watched.
 
 function dataRowCount(rows: string[][]): number {
   return rows.length > 1 ? rows.length - 1 : 0;
@@ -172,11 +149,35 @@ function classify(file: InputFile): Classified {
     };
   }
 
-  const h = indexHeaders(rows[0]);
-  const sig = signatureOf(h);
+  // Signature + hint are computed INLINE (not via tiny helpers taking these as
+  // params) DELIBERATELY: the SWC production minifier inlined those helpers and
+  // folded the single-use `const headers = indexHeaders(...)` into the helper's
+  // FIRST parameter reference, then dropped the binding — leaving the helper's
+  // other references undeclared -> "ReferenceError: h is not defined" in the
+  // prod bundle ONLY (dev/Turbopack was fine, which masked it). Referencing
+  // `headers` and `canon` as genuinely multi-use locals in THIS scope keeps the
+  // minifier from eliminating them.
+  const headers = indexHeaders(rows[0]);
   const canon = canonicalizeFilename(file.name);
-  const hint = filenameHint(canon);
   const rc = dataRowCount(rows);
+
+  let sig: Signature = null;
+  if ("name" in headers && "letterboxd uri" in headers) {
+    if ("review" in headers) sig = "reviews";
+    else if ("rewatch" in headers || "watched date" in headers) sig = "diary";
+    else if ("rating" in headers) sig = "ratings";
+    else sig = "bare";
+  }
+
+  let hint: CsvCategory | null = null;
+  if (canon.includes("watchlist")) hint = "watchlist";
+  else if (canon.includes("watched")) hint = "watched";
+  else if (canon.includes("likes") || canon.includes("films")) hint = "likesFilms";
+  else if (canon.includes("ratings")) hint = "ratings";
+  else if (canon.includes("diary")) hint = "diary";
+  else if (canon.includes("reviews")) hint = "reviews";
+  else if (canon.includes("profile")) hint = "profile";
+  else if (canon.includes("comments")) hint = "comments";
 
   // Unambiguous header signatures. The filename must AGREE; on contradiction the
   // header wins (contents are ground truth) and we flag it.

@@ -313,14 +313,21 @@ export default function LetterboxdImport({
   // through the exact same cycle a real export uses.
   const finalizeAssignments = useCallback(
     (assigned: AssignedFile[]) => {
-      const bytes = buildSyntheticZip(
-        assigned.map((a) => ({ category: a.category, name: a.name, text: a.text })),
-      );
-      // Re-wrap in a plain ArrayBuffer-backed view so Blob's typing is satisfied
-      // (zipSync output is already ArrayBuffer-backed — this is a lib-type
-      // formality, not a real copy-of-shared-memory concern).
-      const blob = new Blob([new Uint8Array(bytes)], { type: "application/zip" });
-      void startUpload(blob, describeAssignments(assigned));
+      // Guarded: this is also reachable from the ResolutionView Continue button
+      // (outside any try), so a buildSyntheticZip throw must surface, not vanish.
+      try {
+        const bytes = buildSyntheticZip(
+          assigned.map((a) => ({ category: a.category, name: a.name, text: a.text })),
+        );
+        // Re-wrap in a plain ArrayBuffer-backed view so Blob's typing is
+        // satisfied (zipSync output is already ArrayBuffer-backed — this is a
+        // lib-type formality, not a real copy-of-shared-memory concern).
+        const blob = new Blob([new Uint8Array(bytes)], { type: "application/zip" });
+        void startUpload(blob, describeAssignments(assigned));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        setPhase("failed");
+      }
     },
     [startUpload],
   );
@@ -330,32 +337,37 @@ export default function LetterboxdImport({
   const onCsvFiles = useCallback(
     async (files: File[]) => {
       setError(null);
-      const totalBytes = files.reduce((s, f) => s + f.size, 0);
-      if (totalBytes > MAX_BYTES) {
-        setError(
-          `Those files are ${(totalBytes / 1024 / 1024).toFixed(1)} MB total — the limit is 25 MB.`,
-        );
-        return;
-      }
-      let inputs: Array<{ name: string; text: string }>;
+      // Instant processing feedback, and the WHOLE read -> identify -> zip path
+      // wrapped so no exception can be silent (an uncaught throw here — e.g. the
+      // minifier ReferenceError — previously rendered nothing at all).
+      setPhase("uploading");
+      setStatusText("Reading your files…");
       try {
-        inputs = await Promise.all(
+        const totalBytes = files.reduce((s, f) => s + f.size, 0);
+        if (totalBytes > MAX_BYTES) {
+          setError(
+            `Those files are ${(totalBytes / 1024 / 1024).toFixed(1)} MB total — the limit is 25 MB.`,
+          );
+          setPhase("failed");
+          return;
+        }
+        const inputs = await Promise.all(
           files.map(async (f) => ({ name: f.name, text: await f.text() })),
         );
+        const result = identifyCsvFiles(inputs);
+        const clean =
+          result.ambiguous.length === 0 &&
+          result.conflicts.length === 0 &&
+          result.unrecognized.length === 0;
+        if (clean) {
+          finalizeAssignments(result.assigned);
+        } else {
+          setIdentify(result);
+          setPhase("resolving");
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
-        return;
-      }
-      const result = identifyCsvFiles(inputs);
-      const clean =
-        result.ambiguous.length === 0 &&
-        result.conflicts.length === 0 &&
-        result.unrecognized.length === 0;
-      if (clean) {
-        finalizeAssignments(result.assigned);
-      } else {
-        setIdentify(result);
-        setPhase("resolving");
+        setPhase("failed");
       }
     },
     [finalizeAssignments],
@@ -399,7 +411,15 @@ export default function LetterboxdImport({
         return;
       }
       if (phase !== "idle" && phase !== "failed") return;
-      onSelection(files);
+      // Top-level sync guard so a synchronous throw in the branch selection
+      // (zip validation, extension routing) can never bubble uncaught. The async
+      // CSV path self-guards inside onCsvFiles.
+      try {
+        onSelection(files);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        setPhase("failed");
+      }
     },
     [phase, onSelection],
   );
