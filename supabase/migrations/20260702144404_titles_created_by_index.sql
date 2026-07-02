@@ -1,0 +1,21 @@
+-- Applied via Supabase apply_migration on 2026-07-02 (recorded in
+-- supabase_migrations.schema_migrations as version 20260702144404 — this file's
+-- prefix is set to that exact version so `supabase db push` sees it as already
+-- applied and does not try to re-run it).
+--
+-- Plain CREATE INDEX (NOT CONCURRENTLY): the migration runner wraps statements in
+-- a transaction and CONCURRENTLY cannot run inside one. Per repo precedent
+-- 20260501000007 on this same ~1.44M-row / 6 GB table, a plain build completes
+-- fast (measured 24.4s here) and the brief write-only SHARE lock (reads
+-- unaffected) is acceptable. CONCURRENTLY was rejected on this cluster because
+-- its statement_timeout is a 2min config-file default that cannot be raised per
+-- call over the pooler, so a slow CONCURRENTLY build risks being killed mid-build
+-- and left INVALID.
+--
+-- WHY: titles.created_by -> users.id is ON DELETE SET NULL. Deleting a user must
+-- locate that user's titles rows to null created_by; without this index that was
+-- a full seq scan of the 6 GB titles table, which blew the 60s gateway timeout on
+-- every user delete (the admin DELETE-user endpoint 504'd all week). With the
+-- index the same delete cascade runs in ~21 ms.
+
+CREATE INDEX idx_titles_created_by ON public.titles (created_by);
