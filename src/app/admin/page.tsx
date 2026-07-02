@@ -501,6 +501,12 @@ export default async function AdminLanding() {
             >
               Open requests →
             </Link>
+            <Link
+              href="/admin/source-accounts"
+              className="rounded-md border border-white/10 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
+            >
+              Source accounts →
+            </Link>
           </div>
         </div>
 

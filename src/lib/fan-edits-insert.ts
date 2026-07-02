@@ -43,10 +43,22 @@ export type InsertOutcome =
 
 const CAPTION_MAX = 500;
 
+// dedupeScope controls the app-level idempotency check:
+//   'global' (default) — skip if ANY fan_edit already has this embed_url. This is
+//              the original behavior; Discover/CSV callers rely on it (a URL only
+//              ever lives on one title through those flows).
+//   'title'  — skip only if THIS title already has the embed_url. Lets one post
+//              attach to multiple titles (Source Accounts: a listicle post is
+//              confirmed against several catalog titles). The DB
+//              fan_edits_title_post_id_uniq (title_id, post_id) index is the
+//              matching hard guard for this grain.
+export type DedupeScope = "global" | "title";
+
 export async function insertFanEditCandidate(
   supabase: SupabaseClient,
   titleId: string,
   c: FanEditCandidate,
+  opts?: { dedupeScope?: DedupeScope },
 ): Promise<InsertOutcome> {
   // Validate URL parses for the platform's id/shortcode pattern.
   const shortcode = parseShortcodeFromUrl(c.embed_url, c.platform);
@@ -61,11 +73,17 @@ export async function insertFanEditCandidate(
   // Idempotency: skip if an existing fan_edit already has this URL.
   // CSV importer treats this as "already_imported"; we surface the
   // existing id so the UI can mark the row as already-in-library.
-  const { data: existing, error: existErr } = await supabase
+  let existQuery = supabase
     .from("fan_edits")
     .select("id")
-    .eq("embed_url", c.embed_url)
-    .maybeSingle();
+    .eq("embed_url", c.embed_url);
+  if (opts?.dedupeScope === "title") {
+    // Scope the idempotency check to this title so the same post can attach to
+    // other titles (see DedupeScope). The (title_id, post_id) unique index is
+    // the hard backstop.
+    existQuery = existQuery.eq("title_id", titleId);
+  }
+  const { data: existing, error: existErr } = await existQuery.maybeSingle();
   if (existErr) {
     return { ok: false, reason: "insert_failed", detail: existErr.message };
   }
