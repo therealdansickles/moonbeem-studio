@@ -155,11 +155,20 @@ export default function SourceAccountsClient({
         }));
         return;
       }
-      // DB-CONFIRMED counts (post-write SELECT), not in-memory tallies.
-      setScrapeMsg((m) => ({
-        ...m,
-        [account.id]: `Done — DB-confirmed: ${json.dbPostsTotal} posts in queue · ${json.dbPendingMatches} pending matches. (this run: ${json.fetched} fetched, ${json.matchesInserted} new${json.truncated ? ", TRUNCATED — more remain" : ""})`,
-      }));
+      // DB-CONFIRMED counts (post-write SELECT), not in-memory tallies. Incremental
+      // stops at the cursor — leftover older posts are not a truncation — so it never
+      // shows TRUNCATED; that stays reserved for a backfill that didn't fully drain.
+      const dbLine = `DB-confirmed: ${json.dbPostsTotal} posts in queue · ${json.dbPendingMatches} pending matches`;
+      const run = `${json.fetched} fetched, ${json.matchesInserted} new`;
+      let runLine: string;
+      if (json.mode === "incremental") {
+        runLine = json.truncated
+          ? `Partial — a burst exceeded one pass; cursor held, run again or backfill. ${dbLine}. (${run})`
+          : `Up to date — caught up to cursor. ${dbLine}. (${run})`;
+      } else {
+        runLine = `Done — ${dbLine}. (this run: ${run}${json.truncated ? ", TRUNCATED — more remain" : ""})`;
+      }
+      setScrapeMsg((m) => ({ ...m, [account.id]: runLine }));
       // Reload the server queue with the freshly-inserted pending matches.
       router.refresh();
     } finally {

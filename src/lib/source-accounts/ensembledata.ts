@@ -223,7 +223,15 @@ export type DrainOk = {
 //   - hitting maxCalls with a cursor still open flags truncated.
 export async function drainPages(
   fetchPage: PageFetch,
-  opts: { maxCalls: number },
+  opts: {
+    maxCalls: number;
+    // Cursor-aware stop (incremental): returns true once the accumulated posts have
+    // paged back to the account cursor — i.e. all NEW content is captured. When it
+    // fires we stop cleanly (truncated=false). Absent (backfill) -> drain to
+    // exhaustion. If the cap is hit before it fires, truncated=true (new posts may
+    // remain) and the caller must HOLD the cursor so a re-run closes the gap.
+    reachedCursor?: (posts: NormalizedPost[]) => boolean;
+  },
 ): Promise<DrainOk | EdError> {
   const byCode = new Map<string, NormalizedPost>();
   let fetchedNodeCount = 0;
@@ -259,10 +267,17 @@ export async function drainPages(
       }
     }
     lastCursor = page.lastCursor;
-    if (!page.lastCursor || newCount === 0) return done(false); // drained
+    // Caught up to the cursor (incremental): all new content captured — clean stop,
+    // even though older posts (a last_cursor) remain by definition.
+    if (opts.reachedCursor && opts.reachedCursor(Array.from(byCode.values()))) {
+      return done(false);
+    }
+    if (!page.lastCursor || newCount === 0) return done(false); // drained / exhausted
     cursor = page.lastCursor;
   }
-  return done(true); // hit the call budget with a cursor still open
+  // Hit the call budget with a cursor still open. Backfill: more posts remain.
+  // Incremental: reachedCursor never fired, so NEW posts may remain -> truncated.
+  return done(true);
 }
 
 // Fetch (and normalize) a user's posts, draining via start_cursor. Backfill passes
@@ -272,7 +287,12 @@ export async function drainPages(
 // posts only.
 export async function fetchInstagramPosts(
   userId: string,
-  opts: { pageDepth: number; maxCalls: number; oldestTimestamp?: number | null },
+  opts: {
+    pageDepth: number;
+    maxCalls: number;
+    oldestTimestamp?: number | null;
+    reachedCursor?: (posts: NormalizedPost[]) => boolean;
+  },
 ): Promise<FetchPostsResult> {
   const token = getToken();
   if (!token) return { ok: false, error: "missing_token", detail: "ENSEMBLEDATA_TOKEN unset" };
@@ -295,6 +315,7 @@ export async function fetchInstagramPosts(
 
   const drained = await drainPages(fetchPage, {
     maxCalls: Math.max(1, Math.floor(opts.maxCalls)),
+    reachedCursor: opts.reachedCursor,
   });
   if (!drained.ok) return drained;
   return {

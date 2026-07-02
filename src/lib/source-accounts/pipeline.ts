@@ -62,6 +62,13 @@ export type ScrapeError = {
 export const BACKFILL_PAGE_DEPTH = 8;
 export const BACKFILL_MAX_CALLS = 6; // up to ~480 posts before truncating
 export const INCREMENTAL_PAGE_DEPTH = 8;
+// Incremental is bounded by a CURSOR-AWARE stop, not the call budget: it follows
+// start_cursor only while still ABOVE the cursor (catching up), and stops the moment
+// a fetched non-pinned post reaches back to (<=) the cursor — so a typical week is
+// ONE ~10-unit call. The cap (3) is just a burst backstop: if a burst exceeds it,
+// the run is flagged truncated and the cursor is HELD (not advanced) so a re-run
+// closes the gap. An oldest_timestamp response still carries a last_cursor, which is
+// why "one call" alone isn't enough — the stop must be cursor-aware, not budget-only.
 export const INCREMENTAL_MAX_CALLS = 3;
 export const MATCH_THRESHOLD = 0.6;
 
@@ -84,10 +91,21 @@ export async function scrapeSourceAccount(
 
   // 2. Fetch (park on any bad response — nothing is written yet).
   const isBackfill = opts.mode === "backfill";
+  const cursor = account.cursor_max_taken_at;
   const fetched = await fetchInstagramPosts(userId, {
     pageDepth: isBackfill ? BACKFILL_PAGE_DEPTH : INCREMENTAL_PAGE_DEPTH,
     maxCalls: isBackfill ? BACKFILL_MAX_CALLS : INCREMENTAL_MAX_CALLS,
-    oldestTimestamp: isBackfill ? null : account.cursor_max_taken_at,
+    oldestTimestamp: isBackfill ? null : cursor,
+    // Incremental stop discriminator: a fetched NON-PINNED post has reached back to
+    // (<=) the cursor, so every newer post is already captured. Pins are excluded —
+    // they are always old and would false-trigger on page 1 during a burst.
+    reachedCursor:
+      !isBackfill && cursor != null
+        ? (posts) =>
+            posts.some(
+              (p) => !p.is_pinned && p.taken_at != null && p.taken_at <= cursor,
+            )
+        : undefined,
   });
   if (!fetched.ok) {
     return { ok: false, stage: "fetch", error: fetched.error, detail: fetched.detail };
@@ -179,10 +197,16 @@ export async function scrapeSourceAccount(
     }
   }
 
-  // 6. Advance the cursor forward-only, over NON-pinned posts only.
+  // 6. Advance the cursor forward-only, over NON-pinned posts only — UNLESS this was
+  //    a truncated incremental (a burst exceeded the call cap). Then HOLD the cursor:
+  //    advancing past the unfetched newer posts would seal them permanently; holding
+  //    it lets the next run (or a backfill) close the gap, and dedup makes the
+  //    re-seen posts free. last_scraped_at still updates (a scrape did happen).
   const runCursor = computeIncrementalCursor(posts);
-  const advanced =
-    Math.max(account.cursor_max_taken_at ?? 0, runCursor ?? 0) || null;
+  const holdCursor = !isBackfill && fetched.truncated;
+  const advanced = holdCursor
+    ? (account.cursor_max_taken_at ?? null)
+    : Math.max(account.cursor_max_taken_at ?? 0, runCursor ?? 0) || null;
   await supabase
     .from("source_accounts")
     .update({
@@ -212,6 +236,9 @@ export async function scrapeSourceAccount(
     userId,
     fetched: posts.length,
     rawCount: fetched.rawCount,
+    // Evidence-based per mode (computed in drainPages): backfill = cap hit with a
+    // cursor open; incremental = cap hit before reachedCursor fired (new posts may
+    // remain). A normal incremental that catches up to the cursor is truncated=false.
     truncated: fetched.truncated,
     processedPosts,
     matchesInserted,
