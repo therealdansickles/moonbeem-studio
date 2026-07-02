@@ -215,8 +215,8 @@ export async function GET(request: NextRequest) {
             continue;
           }
 
-          // 4. Rates → integer basis points (assert exact; null creator_share
-          //    coalesces to 0 bps — always 0 today).
+          // 4. Rates → integer basis points (assert exact; creator_share → 0 bps
+          //    when the sale is unattributed or the rate is null — see below).
           const mbBps = numericStringToExactBps(title.moonbeem_take_rate_pct);
           if (mbBps === null) {
             summary.refused.non_integer_bps++;
@@ -225,7 +225,17 @@ export async function GET(request: NextRequest) {
             );
             continue;
           }
+          // ATTRIBUTION-CONDITIONAL (2026-07-02 fix): the affiliate cut is paid
+          // for ATTRIBUTION — a curator actually drove the sale — NOT for the
+          // title merely HAVING a rate. An UNATTRIBUTED sale (entitlement
+          // creator_id IS NULL) of a creator-share title must carve NO cut;
+          // otherwise the cents orphan onto a creator_id=NULL settlement that
+          // getAffiliateBalance never pays out (distributor underpaid, nobody
+          // paid). No creator_id → 0 bps → affiliate_cut 0 → the amount stays in
+          // distributorNet. The exact-bps refuse below still guards the
+          // attributed path (where the rate is actually used).
           const crBps =
+            (e.creator_id as string | null) === null ||
             title.creator_share_pct === null
               ? 0
               : numericStringToExactBps(title.creator_share_pct);
