@@ -17,6 +17,7 @@ import { NextResponse } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { runPostAuth, type PostAuthParams } from "@/lib/auth/post-auth";
+import { neutralizeAuthWrapper } from "@/lib/auth/redirect";
 
 function escapeHtml(s: string): string {
   return s
@@ -50,27 +51,10 @@ const NEST_KEYS = [
   "redirect_to",
 ] as const;
 
-// The auth entry/wrapper routes must NEVER be a redirect destination. Landing
-// back on /auth/callback — especially a BARE one with no ?code, which is exactly
-// what a plain sign-in produces (emailRedirectTo = ${origin}/auth/callback, no
-// query) — bounces to /login?error=auth_failed even though verifyOtp already
-// set a valid session, so the user sees the login page while signed in.
-// /auth/confirm and /login are collapsed for the same reason. Any resolved
-// destination whose pathname is one of these becomes /me (runPostAuth still
-// overrides to /onboarding/handle for a handle-less user). Enforced in EVERY
-// branch below, not just the embedded-params one.
-const AUTH_ROUTES = new Set(["/auth/callback", "/auth/confirm", "/login"]);
-
-function neutralizeAuthWrapper(dest: string | null): string | null {
-  if (!dest) return dest;
-  let path: string;
-  try {
-    path = new URL(dest, "http://internal.invalid").pathname;
-  } catch {
-    path = dest.split("?")[0].split("#")[0];
-  }
-  return AUTH_ROUTES.has(path) ? "/me" : dest;
-}
+// neutralizeAuthWrapper (imported from @/lib/auth/redirect) collapses any auth
+// entry/wrapper route (/auth/callback, /auth/confirm, /login) to /me — an auth
+// route must never be a post-verify redirect destination. Shared with the
+// /login signed-in bounce so the two can't drift. Enforced in EVERY branch below.
 
 // Unpack the passthrough carried in `next`. If `next` is the old-style wrapper
 // URL (e.g. /auth/callback?redirect_to=/t/x&action=request_fan_edits&title_id=…)

@@ -1129,7 +1129,7 @@ function PreviewView({
           onClick={onReupload}
           className="w-fit text-body-sm text-moonbeem-pink hover:opacity-90"
         >
-          Upload a different file →
+          Upload a different export →
         </button>
       </div>
 
@@ -1292,7 +1292,7 @@ function AppliedView({
           onClick={onReupload}
           className="w-fit text-body-sm text-moonbeem-pink hover:opacity-90"
         >
-          Upload a different file →
+          Upload a different export →
         </button>
       </div>
     </section>
@@ -1400,7 +1400,7 @@ function PublishedView({
           onClick={onReupload}
           className="w-fit text-body-sm text-moonbeem-pink hover:opacity-90"
         >
-          Import another file →
+          Start another import →
         </button>
       </div>
     </section>
