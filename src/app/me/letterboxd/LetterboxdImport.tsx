@@ -553,9 +553,9 @@ export default function LetterboxdImport({
               <p className="text-body-sm text-moonbeem-ink-muted m-0">
                 In Letterboxd, go to{" "}
                 <span className="text-moonbeem-ink">
-                  Settings → Import &amp; Export → Export your data
+                  Settings → Data → Export your data
                 </span>
-                , then drop the .zip — or your .csv files — here.
+                . Then drop the .zip or your .csv files here.
               </p>
               <input
                 ref={inputRef}
@@ -584,6 +584,7 @@ export default function LetterboxdImport({
                 Up to 25 MB. We import ratings, diary, reviews, watchlist,
                 watched, and lists. Likes and comments are skipped.
               </p>
+              <ExportHelp />
             </div>
             {error && (
               <p className="text-body-sm text-red-300 m-0">{error}</p>
@@ -854,6 +855,64 @@ function ResolutionView({
       </div>
       {error && <p className="text-body-sm text-red-300 m-0">{error}</p>}
     </section>
+  );
+}
+
+// Collapsible "how to export from Letterboxd" help, inline inside the import
+// card. Collapsed by default; state is component-local (no persistence). When
+// collapsed it adds only the one toggle link and does not disturb the layout.
+function ExportHelp() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 text-caption text-moonbeem-pink transition-opacity hover:opacity-90"
+      >
+        <span>Need help exporting from Letterboxd?</span>
+        <svg
+          className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+          viewBox="0 0 12 12"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M3 4.5 6 7.5 9 4.5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      {open && (
+        <div className="mt-3 text-left">
+          <h3 className="text-body-sm font-medium text-moonbeem-ink m-0">
+            How to export your Letterboxd data
+          </h3>
+          <ol className="mt-2 flex list-decimal flex-col gap-1 pl-5 text-body-sm text-moonbeem-ink-muted">
+            <li>Sign in at letterboxd.com.</li>
+            <li>Click your username in the top menu, then Settings.</li>
+            <li>Open the Data tab.</li>
+            <li>Click Export your data.</li>
+            <li>
+              Confirm in the window that appears. Letterboxd downloads a .zip of
+              your films, ratings, reviews, and lists.
+            </li>
+            <li>
+              Drop that .zip here. If your download arrived as separate .csv
+              files, drop those instead.
+            </li>
+          </ol>
+          <p className="mt-3 text-caption text-moonbeem-ink-muted m-0">
+            Your export usually downloads in a few seconds. On some devices it
+            arrives as loose .csv files instead of a .zip. Both work here.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 
