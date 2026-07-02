@@ -239,7 +239,7 @@ export default function LetterboxdImport({
   const startUpload = useCallback(
     async (body: Blob, statusDetail?: string) => {
       setPhase("uploading");
-      setStatusText(statusDetail ? `Uploading — ${statusDetail}` : "Uploading…");
+      setStatusText(statusDetail ? `Uploading. ${statusDetail}` : "Uploading…");
       try {
         const presignRes = await fetch("/api/me/letterboxd/presign", {
           method: "POST",
@@ -280,7 +280,7 @@ export default function LetterboxdImport({
         setPhase("analyzing");
         setStatusText(
           statusDetail
-            ? `Analyzing your export — ${statusDetail}`
+            ? `Analyzing your export. ${statusDetail}`
             : "Analyzing your export…",
         );
         poll(job_id);
@@ -301,7 +301,7 @@ export default function LetterboxdImport({
         return;
       }
       if (file.size > MAX_BYTES) {
-        setError(`That file is ${(file.size / 1024 / 1024).toFixed(1)} MB — the limit is 25 MB.`);
+        setError(`That file is ${(file.size / 1024 / 1024).toFixed(1)} MB. The limit is 25 MB.`);
         return;
       }
       void startUpload(file);
@@ -346,7 +346,7 @@ export default function LetterboxdImport({
         const totalBytes = files.reduce((s, f) => s + f.size, 0);
         if (totalBytes > MAX_BYTES) {
           setError(
-            `Those files are ${(totalBytes / 1024 / 1024).toFixed(1)} MB total — the limit is 25 MB.`,
+            `Those files are ${(totalBytes / 1024 / 1024).toFixed(1)} MB total. The limit is 25 MB.`,
           );
           setPhase("failed");
           return;
@@ -532,8 +532,8 @@ export default function LetterboxdImport({
           </h1>
           <p className="text-body-sm text-moonbeem-ink-muted m-0">
             Upload your Letterboxd export and we&apos;ll match your films to
-            Moonbeem and show you a preview. Nothing is imported yet —
-            you&apos;ll confirm on the next step.
+            Moonbeem and show you a preview. Nothing is imported yet.
+            You&apos;ll confirm on the next step.
           </p>
         </header>
 
@@ -717,7 +717,7 @@ function ResolutionView({
         </h2>
         <p className="mt-1 text-caption text-moonbeem-ink-subtle m-0">
           We recognized most of your files. Tell us about the rest, then
-          continue — nothing is imported yet.
+          continue. Nothing is imported yet.
         </p>
 
         {ready && (
@@ -781,8 +781,8 @@ function ResolutionView({
                 className="rounded-md border border-white/10 bg-white/[0.02] px-3 py-2"
               >
                 <p className="text-body-sm text-moonbeem-ink m-0">
-                  Two files look like {CATEGORY_LABEL[conf.category].toLowerCase()} —
-                  choose which to import.
+                  Two files look like {CATEGORY_LABEL[conf.category].toLowerCase()}.
+                  Choose which to import.
                 </p>
                 <div className="mt-2 flex flex-col gap-1">
                   {conf.files.map((file, k) => (
@@ -828,8 +828,8 @@ function ResolutionView({
                 key={`unrec-${i}`}
                 className="text-caption text-moonbeem-ink-subtle m-0"
               >
-                <span className="text-moonbeem-ink-muted">{u.name}</span> — skipped,
-                not a Letterboxd export file
+                <span className="text-moonbeem-ink-muted">{u.name}</span>: skipped. Not
+                a Letterboxd export file
               </p>
             ))}
           </div>
@@ -1056,7 +1056,7 @@ function PreviewView({
       {preview.unmatched.length > 0 && (
         <div className="flex flex-col gap-2">
           <h3 className="text-body-sm font-medium text-moonbeem-ink m-0">
-            Importing as text — not in our catalog yet ({preview.unmatched.length}
+            Importing as text, not in our catalog yet ({preview.unmatched.length}
             {preview.unmatched_truncated > 0 ? `+${preview.unmatched_truncated} more` : ""})
           </h3>
           <p className="text-caption text-moonbeem-ink-subtle m-0">
@@ -1234,7 +1234,7 @@ function AppliedView({
         </h2>
         <p className="text-body-sm text-moonbeem-ink-muted m-0">
           Your ratings, diary, watched films, and lists imported as private.
-          Nothing shows on your profile until you publish — that&apos;s the next
+          Nothing shows on your profile until you publish. That&apos;s the next
           step.
         </p>
       </div>
