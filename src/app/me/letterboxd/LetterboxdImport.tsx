@@ -6,8 +6,38 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import {
+  identifyCsvFiles,
+  buildSyntheticZip,
+  type IdentifyResult,
+  type AssignedFile,
+  type CsvCategory,
+} from "@/lib/letterboxd/csv-select";
 
 const MAX_BYTES = 25 * 1024 * 1024;
+
+// A one-line "Detected: ratings, diary, watchlist, watched, 3 lists" summary of
+// what the loose-CSV path is about to upload — shown while the synthetic zip
+// analyzes, so the CSV path telegraphs the same content a zip would.
+function describeAssignments(assigned: AssignedFile[]): string {
+  const labels: string[] = [];
+  const singles: Array<[CsvCategory, string]> = [
+    ["ratings", "ratings"],
+    ["diary", "diary"],
+    ["reviews", "reviews"],
+    ["watchlist", "watchlist"],
+    ["watched", "watched"],
+  ];
+  for (const [cat, label] of singles) {
+    if (assigned.some((a) => a.category === cat)) labels.push(label);
+  }
+  const lists = assigned.filter((a) => a.category === "list").length;
+  if (lists) labels.push(`${lists} list${lists === 1 ? "" : "s"}`);
+  if (assigned.some((a) => a.category === "likesFilms")) labels.push("likes (skipped)");
+  if (assigned.some((a) => a.category === "profile")) labels.push("profile (skipped)");
+  if (assigned.some((a) => a.category === "comments")) labels.push("comments (skipped)");
+  return labels.length ? `Detected: ${labels.join(", ")}` : "";
+}
 
 type CategoryStats = {
   total: number;
@@ -58,6 +88,7 @@ type ImportPreview = {
 
 type Phase =
   | "idle"
+  | "resolving"
   | "uploading"
   | "analyzing"
   | "ready"
@@ -117,6 +148,11 @@ export default function LetterboxdImport({
   const [publishedCounts, setPublishedCounts] = useState<PublishCounts | null>(
     null,
   );
+  // Loose-CSV path: when a selection needs user input (ambiguous / conflicting /
+  // unrecognized files), the identification result is parked here and phase goes
+  // to "resolving" (an inline step inside the card, not a modal).
+  const [identify, setIdentify] = useState<IdentifyResult | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Set on unmount so an in-flight poll fetch that resolves after teardown does
@@ -132,6 +168,8 @@ export default function LetterboxdImport({
     setPreview(null);
     setJobId(null);
     setApplied(null);
+    setIdentify(null);
+    setDragOver(false);
     if (inputRef.current) inputRef.current.value = "";
   }, []);
 
@@ -189,19 +227,14 @@ export default function LetterboxdImport({
     void tick();
   }, []);
 
-  const onFile = useCallback(
-    async (file: File) => {
-      setError(null);
-      if (!file.name.toLowerCase().endsWith(".zip")) {
-        setError("Please choose your Letterboxd export .zip file.");
-        return;
-      }
-      if (file.size > MAX_BYTES) {
-        setError(`That file is ${(file.size / 1024 / 1024).toFixed(1)} MB — the limit is 25 MB.`);
-        return;
-      }
+  // Shared uploader: presign -> PUT the zip bytes -> create import job -> poll.
+  // Byte-identical to the original for the .zip path (a File IS a Blob, passed
+  // straight through); the loose-CSV path passes a synthesized zip Blob + a
+  // "Detected: …" detail line. NOTHING server-side changes — same three calls.
+  const startUpload = useCallback(
+    async (body: Blob, statusDetail?: string) => {
       setPhase("uploading");
-      setStatusText("Uploading…");
+      setStatusText(statusDetail ? `Uploading — ${statusDetail}` : "Uploading…");
       try {
         const presignRes = await fetch("/api/me/letterboxd/presign", {
           method: "POST",
@@ -224,7 +257,7 @@ export default function LetterboxdImport({
             "Content-Type": contentType,
             "Content-Disposition": contentDisposition,
           },
-          body: file,
+          body,
         });
         if (!putRes.ok) throw new Error(`upload failed (${putRes.status})`);
 
@@ -240,7 +273,11 @@ export default function LetterboxdImport({
         const { job_id } = (await importRes.json()) as { job_id: string };
         setJobId(job_id);
         setPhase("analyzing");
-        setStatusText("Analyzing your export…");
+        setStatusText(
+          statusDetail
+            ? `Analyzing your export — ${statusDetail}`
+            : "Analyzing your export…",
+        );
         poll(job_id);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -249,6 +286,140 @@ export default function LetterboxdImport({
     },
     [poll],
   );
+
+  // Single .zip — the original path, unchanged validation + messages.
+  const onZipFile = useCallback(
+    (file: File) => {
+      setError(null);
+      if (!file.name.toLowerCase().endsWith(".zip")) {
+        setError("Please choose your Letterboxd export .zip file.");
+        return;
+      }
+      if (file.size > MAX_BYTES) {
+        setError(`That file is ${(file.size / 1024 / 1024).toFixed(1)} MB — the limit is 25 MB.`);
+        return;
+      }
+      void startUpload(file);
+    },
+    [startUpload],
+  );
+
+  // Synthesize the export-shaped zip from resolved assignments and upload it
+  // through the exact same cycle a real export uses.
+  const finalizeAssignments = useCallback(
+    (assigned: AssignedFile[]) => {
+      const bytes = buildSyntheticZip(
+        assigned.map((a) => ({ category: a.category, name: a.name, text: a.text })),
+      );
+      // Re-wrap in a plain ArrayBuffer-backed view so Blob's typing is satisfied
+      // (zipSync output is already ArrayBuffer-backed — this is a lib-type
+      // formality, not a real copy-of-shared-memory concern).
+      const blob = new Blob([new Uint8Array(bytes)], { type: "application/zip" });
+      void startUpload(blob, describeAssignments(assigned));
+    },
+    [startUpload],
+  );
+
+  // One-or-more .csv (no zip). Read text, identify, then either upload straight
+  // through (clean) or open the inline resolution step (messy).
+  const onCsvFiles = useCallback(
+    async (files: File[]) => {
+      setError(null);
+      const totalBytes = files.reduce((s, f) => s + f.size, 0);
+      if (totalBytes > MAX_BYTES) {
+        setError(
+          `Those files are ${(totalBytes / 1024 / 1024).toFixed(1)} MB total — the limit is 25 MB.`,
+        );
+        return;
+      }
+      let inputs: Array<{ name: string; text: string }>;
+      try {
+        inputs = await Promise.all(
+          files.map(async (f) => ({ name: f.name, text: await f.text() })),
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        return;
+      }
+      const result = identifyCsvFiles(inputs);
+      const clean =
+        result.ambiguous.length === 0 &&
+        result.conflicts.length === 0 &&
+        result.unrecognized.length === 0;
+      if (clean) {
+        finalizeAssignments(result.assigned);
+      } else {
+        setIdentify(result);
+        setPhase("resolving");
+      }
+    },
+    [finalizeAssignments],
+  );
+
+  // Branch a selection by extension. Exactly one .zip -> zip path; one-or-more
+  // .csv with no zip -> CSV path; anything mixed (zip+csv, multiple zips, or
+  // nothing usable) -> the inline "not both" error.
+  const onSelection = useCallback(
+    (files: File[]) => {
+      setError(null);
+      const zips = files.filter((f) => f.name.toLowerCase().endsWith(".zip"));
+      const csvs = files.filter((f) => f.name.toLowerCase().endsWith(".csv"));
+      if (zips.length > 1 || (zips.length === 1 && csvs.length > 0)) {
+        setError("Drop either your export .zip or your .csv files, not both.");
+        return;
+      }
+      if (zips.length === 1) {
+        onZipFile(zips[0]);
+        return;
+      }
+      if (csvs.length > 0) {
+        void onCsvFiles(csvs);
+        return;
+      }
+      setError("Drop either your export .zip or your .csv files.");
+    },
+    [onZipFile, onCsvFiles],
+  );
+
+  // Phase-aware entry for BOTH the file input and drag-drop. A drop mid-
+  // resolution is rejected (never silently resets in-progress choices); drops
+  // mid-upload are ignored. Only idle/failed accept a fresh selection.
+  const handleIncoming = useCallback(
+    (files: File[]) => {
+      if (files.length === 0) return;
+      if (phase === "resolving") {
+        setError(
+          "Finish choosing for these files, or start over, before adding more.",
+        );
+        return;
+      }
+      if (phase !== "idle" && phase !== "failed") return;
+      onSelection(files);
+    },
+    [phase, onSelection],
+  );
+
+  const onDropCard = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOver(false);
+      handleIncoming(Array.from(e.dataTransfer.files));
+    },
+    [handleIncoming],
+  );
+
+  const onDragOverCard = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      if (phase === "idle" || phase === "failed") setDragOver(true);
+    },
+    [phase],
+  );
+
+  const onDragLeaveCard = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+  }, []);
 
   const onApply = useCallback(async () => {
     if (!jobId) return;
@@ -321,22 +492,32 @@ export default function LetterboxdImport({
 
         {(phase === "idle" || phase === "failed") && (
           <section className="flex flex-col gap-4">
-            <div className="rounded-lg border border-dashed border-white/15 bg-white/[0.02] p-6 text-center">
+            <div
+              onDragOver={onDragOverCard}
+              onDragLeave={onDragLeaveCard}
+              onDrop={onDropCard}
+              className={`rounded-lg border border-dashed p-6 text-center transition-colors ${
+                dragOver
+                  ? "border-moonbeem-pink/60 bg-moonbeem-pink/5"
+                  : "border-white/15 bg-white/[0.02]"
+              }`}
+            >
               <p className="text-body-sm text-moonbeem-ink-muted m-0">
                 In Letterboxd, go to{" "}
                 <span className="text-moonbeem-ink">
                   Settings → Import &amp; Export → Export your data
                 </span>
-                , then drop the .zip here.
+                , then drop the .zip — or your .csv files — here.
               </p>
               <input
                 ref={inputRef}
                 type="file"
-                accept=".zip,application/zip"
+                accept=".zip,.csv,application/zip,text/csv"
+                multiple
                 className="hidden"
                 onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void onFile(f);
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length) handleIncoming(files);
                 }}
               />
               <button
@@ -349,7 +530,7 @@ export default function LetterboxdImport({
                 }}
                 className="mt-4 inline-block rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90"
               >
-                Choose your export .zip
+                Choose your export (.zip or .csv files)
               </button>
               <p className="mt-3 text-caption text-moonbeem-ink-subtle m-0">
                 Up to 25 MB. We import ratings, diary, reviews, watchlist,
@@ -360,6 +541,15 @@ export default function LetterboxdImport({
               <p className="text-body-sm text-red-300 m-0">{error}</p>
             )}
           </section>
+        )}
+
+        {phase === "resolving" && identify && (
+          <ResolutionView
+            identify={identify}
+            onContinue={finalizeAssignments}
+            onStartOver={reset}
+            error={error}
+          />
         )}
 
         {(phase === "uploading" ||
@@ -391,6 +581,231 @@ export default function LetterboxdImport({
         )}
       </div>
     </div>
+  );
+}
+
+const CATEGORY_LABEL: Record<CsvCategory, string> = {
+  ratings: "Ratings",
+  diary: "Diary",
+  reviews: "Reviews",
+  watchlist: "Watchlist",
+  watched: "Watched",
+  likesFilms: "Likes",
+  comments: "Comments",
+  profile: "Profile",
+  list: "List",
+};
+
+// Inline resolution step for the loose-CSV path (NOT a modal — lives in the same
+// dashed card). Renders one row per file needing input: ambiguous bare files get
+// a Watchlist/Watched/Skip select (no pre-selection); conflicting same-category
+// files get a pick-one; unrecognized files are shown as skipped. Continue stays
+// disabled until every ambiguous AND every conflict is resolved and at least one
+// file remains to import.
+function ResolutionView({
+  identify,
+  onContinue,
+  onStartOver,
+  error,
+}: {
+  identify: IdentifyResult;
+  onContinue: (assigned: AssignedFile[]) => void;
+  onStartOver: () => void;
+  error: string | null;
+}) {
+  const [ambChoices, setAmbChoices] = useState<
+    Array<"" | "watchlist" | "watched" | "skip">
+  >(() => identify.ambiguous.map(() => ""));
+  const [conflictChoices, setConflictChoices] = useState<number[]>(() =>
+    identify.conflicts.map(() => -1),
+  );
+
+  const buildFinal = (): AssignedFile[] => {
+    const out: AssignedFile[] = [...identify.assigned];
+    identify.ambiguous.forEach((amb, i) => {
+      const c = ambChoices[i];
+      if (c === "watchlist" || c === "watched") {
+        out.push({
+          category: c,
+          name: amb.name,
+          text: amb.text,
+          rowCount: amb.rowCount,
+          note: null,
+        });
+      }
+    });
+    identify.conflicts.forEach((conf, j) => {
+      const k = conflictChoices[j];
+      if (k >= 0) {
+        const file = conf.files[k];
+        out.push({
+          category: conf.category,
+          name: file.name,
+          text: file.text,
+          rowCount: file.rowCount,
+          note: null,
+        });
+      }
+    });
+    return out;
+  };
+
+  const allAmbChosen = ambChoices.every((c) => c !== "");
+  const allConflictsChosen = conflictChoices.every((i) => i >= 0);
+  const final = buildFinal();
+  const canContinue = allAmbChosen && allConflictsChosen && final.length > 0;
+
+  const ready = describeAssignments(identify.assigned);
+  const assignedNotes = identify.assigned
+    .map((a) => a.note)
+    .filter((n): n is string => Boolean(n));
+
+  return (
+    <section className="flex flex-col gap-4">
+      <div className="rounded-lg border border-dashed border-white/15 bg-white/[0.02] p-6">
+        <h2 className="text-body font-medium text-moonbeem-ink m-0">
+          A few files need your input
+        </h2>
+        <p className="mt-1 text-caption text-moonbeem-ink-subtle m-0">
+          We recognized most of your files. Tell us about the rest, then
+          continue — nothing is imported yet.
+        </p>
+
+        {ready && (
+          <p className="mt-4 text-body-sm text-moonbeem-ink-muted m-0">
+            Ready: <span className="text-moonbeem-ink">{ready}</span>
+          </p>
+        )}
+        {assignedNotes.map((n, i) => (
+          <p key={`an-${i}`} className="mt-1 text-caption text-moonbeem-ink-subtle m-0">
+            {n}
+          </p>
+        ))}
+
+        {/* Ambiguous — bare {date,name,year,uri}: watchlist vs watched vs skip */}
+        {identify.ambiguous.length > 0 && (
+          <div className="mt-5 flex flex-col gap-2">
+            {identify.ambiguous.map((amb, i) => (
+              <div
+                key={`amb-${i}`}
+                className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.02] px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-body-sm text-moonbeem-ink m-0">
+                    {amb.name}
+                  </p>
+                  <p className="text-caption text-moonbeem-ink-subtle m-0">
+                    {amb.rowCount} row{amb.rowCount === 1 ? "" : "s"} · could be
+                    watchlist or watched
+                  </p>
+                </div>
+                <select
+                  value={ambChoices[i]}
+                  onChange={(e) => {
+                    const v = e.target.value as "" | "watchlist" | "watched" | "skip";
+                    setAmbChoices((prev) => {
+                      const next = [...prev];
+                      next[i] = v;
+                      return next;
+                    });
+                  }}
+                  className="shrink-0 rounded-md border border-white/15 bg-moonbeem-navy px-2 py-1 text-body-sm text-moonbeem-ink"
+                >
+                  <option value="" disabled>
+                    Choose…
+                  </option>
+                  <option value="watchlist">Watchlist</option>
+                  <option value="watched">Watched</option>
+                  <option value="skip">Skip</option>
+                </select>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Conflicts — two files map to the same single-slot category */}
+        {identify.conflicts.length > 0 && (
+          <div className="mt-5 flex flex-col gap-3">
+            {identify.conflicts.map((conf, j) => (
+              <div
+                key={`conf-${j}`}
+                className="rounded-md border border-white/10 bg-white/[0.02] px-3 py-2"
+              >
+                <p className="text-body-sm text-moonbeem-ink m-0">
+                  Two files look like {CATEGORY_LABEL[conf.category].toLowerCase()} —
+                  choose which to import.
+                </p>
+                <div className="mt-2 flex flex-col gap-1">
+                  {conf.files.map((file, k) => (
+                    <label
+                      key={`conf-${j}-${k}`}
+                      className="flex cursor-pointer items-center gap-2 text-body-sm text-moonbeem-ink-muted"
+                    >
+                      <input
+                        type="radio"
+                        name={`conflict-${j}`}
+                        checked={conflictChoices[j] === k}
+                        onChange={() =>
+                          setConflictChoices((prev) => {
+                            const next = [...prev];
+                            next[j] = k;
+                            return next;
+                          })
+                        }
+                        className="accent-moonbeem-pink"
+                      />
+                      <span className="truncate">
+                        {file.name}
+                        <span className="ml-2 text-caption text-moonbeem-ink-subtle">
+                          {file.rowCount} row{file.rowCount === 1 ? "" : "s"}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <p className="mt-1 text-caption text-moonbeem-ink-subtle m-0">
+                  The other file is skipped.
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Unrecognized — informational, no action */}
+        {identify.unrecognized.length > 0 && (
+          <div className="mt-5 flex flex-col gap-1">
+            {identify.unrecognized.map((u, i) => (
+              <p
+                key={`unrec-${i}`}
+                className="text-caption text-moonbeem-ink-subtle m-0"
+              >
+                <span className="text-moonbeem-ink-muted">{u.name}</span> — skipped,
+                not a Letterboxd export file
+              </p>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-6 flex items-center gap-4 border-t border-white/10 pt-4">
+          <button
+            type="button"
+            disabled={!canContinue}
+            onClick={() => onContinue(final)}
+            className="inline-block rounded-md bg-moonbeem-pink px-4 py-2 text-body-sm font-semibold text-moonbeem-navy transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Continue
+          </button>
+          <button
+            type="button"
+            onClick={onStartOver}
+            className="text-body-sm text-moonbeem-pink hover:opacity-90"
+          >
+            Start over
+          </button>
+        </div>
+      </div>
+      {error && <p className="text-body-sm text-red-300 m-0">{error}</p>}
+    </section>
   );
 }
 
