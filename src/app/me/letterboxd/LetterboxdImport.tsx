@@ -154,6 +154,11 @@ export default function LetterboxdImport({
   const [identify, setIdentify] = useState<IdentifyResult | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Drag-enter depth counter: dragenter/dragleave fire for every child boundary
+  // as the cursor moves across the card's inner text/button, so a naive
+  // leave->false flickers the visual and can clear it mid-drag. Counting keeps
+  // the drop zone "active" until the cursor truly leaves the card.
+  const dragDepth = useRef(0);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Set on unmount so an in-flight poll fetch that resolves after teardown does
   // not schedule another tick or setState on the unmounted component.
@@ -399,27 +404,49 @@ export default function LetterboxdImport({
     [phase, onSelection],
   );
 
-  const onDropCard = useCallback(
+  // The HTML drag-and-drop spec requires cancelling BOTH dragenter AND dragover
+  // to register an element as a valid drop zone. Cancelling only dragover works
+  // for some in-page drags but NOT reliably for OS-originated file drags (macOS
+  // Chrome from Finder) — without the dragenter cancel the browser never fires
+  // `drop`. So we cancel every drag event on the card + stopPropagation so the
+  // dashed card owns the whole gesture.
+  const onDragEnterCard = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
-      setDragOver(false);
-      handleIncoming(Array.from(e.dataTransfer.files));
-    },
-    [handleIncoming],
-  );
-
-  const onDragOverCard = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
+      e.stopPropagation();
+      dragDepth.current += 1;
       if (phase === "idle" || phase === "failed") setDragOver(true);
     },
     [phase],
   );
 
+  const onDragOverCard = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Show the copy cursor while hovering with files.
+    e.dataTransfer.dropEffect = "copy";
+  }, []);
+
   const onDragLeaveCard = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setDragOver(false);
+    e.stopPropagation();
+    dragDepth.current -= 1;
+    if (dragDepth.current <= 0) {
+      dragDepth.current = 0;
+      setDragOver(false);
+    }
   }, []);
+
+  const onDropCard = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragDepth.current = 0;
+      setDragOver(false);
+      handleIncoming(Array.from(e.dataTransfer.files));
+    },
+    [handleIncoming],
+  );
 
   const onApply = useCallback(async () => {
     if (!jobId) return;
@@ -493,6 +520,7 @@ export default function LetterboxdImport({
         {(phase === "idle" || phase === "failed") && (
           <section className="flex flex-col gap-4">
             <div
+              onDragEnter={onDragEnterCard}
               onDragOver={onDragOverCard}
               onDragLeave={onDragLeaveCard}
               onDrop={onDropCard}
