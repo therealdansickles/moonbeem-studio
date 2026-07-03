@@ -41,7 +41,9 @@ import {
 import { fetchEngagementMetrics } from "./ensemble.ts";
 import {
   handleFailure,
+  markRefreshFailed,
   recordRefreshError,
+  setShortBackoff,
   writeSnapshotAndUpdateFanEdit,
 } from "./upsert.ts";
 import {
@@ -51,6 +53,11 @@ import {
   updateRunProgress,
 } from "./checkpoint.ts";
 import { groupFanEditsByPost } from "./group.ts";
+import {
+  deathProceeds,
+  isParseDeathCandidate,
+  RATE_LIMITED_BACKOFF_MS,
+} from "./backoff.ts";
 
 const MAX_FAN_EDITS_PER_INVOCATION = 100;
 const WALL_CLOCK_BUDGET_MS = 60_000;
@@ -100,7 +107,12 @@ Deno.serve(async (_req: Request) => {
     fan_edits_succeeded: 0,
     fan_edits_failed: 0,
     fan_edits_dead_marked: 0,
+    rows_backed_off: 0,
+    rows_marked_failed: 0,
   };
+  // Parse_error rows that crossed the death threshold this run; the trailing-success
+  // breaker is applied to them after the loop (deferred so it sees fresh successes).
+  const deathCandidates: { id: string; platform: string; reason: string }[] = [];
 
   try {
     supabase = createClient(
@@ -143,16 +155,24 @@ Deno.serve(async (_req: Request) => {
     const refreshCutoff = new Date(
       Date.now() - REFRESH_INTERVAL_HOURS * 60 * 60 * 1000,
     ).toISOString();
+    const nowIso = new Date().toISOString();
 
     // YouTube refresh re-enabled 2026-05-11 via YT Data API v3
     // (env: YOUTUBE_API_KEY). fetchEngagementMetrics dispatches
     // YT rows to fetchYouTubeMetrics; EnsembleData handles the rest.
+    //
+    // Step 1.5: the second .or() is the error-backoff gate — a row that recently
+    // failed sits out until its refresh_backoff_until elapses (the two .or() groups
+    // are AND-combined). Rows that never failed have a null backoff and pass freely.
     const { data: fanEdits, error: queryErr } = await supabase
       .from("fan_edits")
       .select("id, platform, embed_url, post_id")
       .eq("view_tracking_status", "active")
       .or(
         `last_refreshed_at.is.null,last_refreshed_at.lt.${refreshCutoff}`,
+      )
+      .or(
+        `refresh_backoff_until.is.null,refresh_backoff_until.lte.${nowIso}`,
       )
       .order("last_refreshed_at", { ascending: true, nullsFirst: true })
       .limit(MAX_FAN_EDITS_PER_INVOCATION);
@@ -203,11 +223,15 @@ Deno.serve(async (_req: Request) => {
       });
 
       if (result.error === "rate_limited") {
-        // Stop — none of this post's rows are advanced (their last_refreshed_at
-        // is untouched); the next invocation reprocesses them and the rest.
+        // Stop — none of this post's rows are advanced (last_refreshed_at untouched).
+        // rate_limited is inert (spec §2): give the throttled row(s) only a short
+        // backoff so they aren't first to re-hit next run — no counter, no death.
         console.warn(
           `[view-tracking] RATE_LIMITED at post ${group.embed_url}; exiting partial`,
         );
+        for (const feId of group.ids) {
+          await setShortBackoff(supabase, feId, RATE_LIMITED_BACKOFF_MS);
+        }
         earlyExitReason = "rate_limited";
         break;
       }
@@ -240,6 +264,7 @@ Deno.serve(async (_req: Request) => {
             // without trawling Edge Function logs. Best-effort.
             try {
               await recordRefreshError(supabase, feId, `write_failed: ${msg}`);
+              counters.rows_backed_off += 1;
             } catch (recErr) {
               console.error(
                 `[view-tracking] recordRefreshError after write_failed for ${feId}: ${
@@ -272,12 +297,16 @@ Deno.serve(async (_req: Request) => {
           console.warn(
             `[view-tracking] SKIPPED fan_edit_id=${feId} reason=${result.error}`,
           );
+          const reason =
+            `${result.error}: ${group.platform} fetch returned ${result.error}`;
           try {
-            await recordRefreshError(
-              supabase,
-              feId,
-              `${result.error}: ${group.platform} fetch returned ${result.error}`,
-            );
+            const { newCount } = await recordRefreshError(supabase, feId, reason);
+            counters.rows_backed_off += 1;
+            // Only parse_error escalates. Collect the candidate for the post-loop
+            // trailing-success breaker (deferred so it sees this run's successes).
+            if (isParseDeathCandidate(result.error, newCount)) {
+              deathCandidates.push({ id: feId, platform: group.platform, reason });
+            }
           } catch (recErr) {
             console.error(
               `[view-tracking] recordRefreshError after ${result.error} for ${feId}: ${
@@ -291,6 +320,53 @@ Deno.serve(async (_req: Request) => {
       }
 
       await updateRunProgress(supabase, runId, counters, lastProcessed);
+    }
+
+    // Death sweep with the trailing-success breaker (spec §4). Deferred to here so
+    // successes_24h includes this run's fresh refreshes. Per candidate platform: death
+    // proceeds iff >=5 successful refreshes in the last 24h OR <5 active rows; else
+    // suppressed (candidates keep their 24h backoff, re-evaluated next run). Runs on
+    // both normal completion and early exit, over whatever candidates were collected.
+    if (deathCandidates.length > 0) {
+      const cutoff24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const platforms = [...new Set(deathCandidates.map((c) => c.platform))];
+      for (const platform of platforms) {
+        const platCandidates = deathCandidates.filter((c) => c.platform === platform);
+        const { count: successes24h } = await supabase
+          .from("fan_edits")
+          .select("id", { count: "exact", head: true })
+          .eq("view_tracking_status", "active")
+          .eq("platform", platform)
+          .gte("last_refreshed_at", cutoff24h);
+        const { count: activeCount } = await supabase
+          .from("fan_edits")
+          .select("id", { count: "exact", head: true })
+          .eq("view_tracking_status", "active")
+          .eq("platform", platform);
+        if (!deathProceeds(successes24h ?? 0, activeCount ?? 0)) {
+          console.warn(
+            `[view-tracking] DEATH_SUPPRESSED platform=${platform} successes_24h=${
+              successes24h ?? 0
+            } active=${activeCount ?? 0} candidates=${platCandidates.length}`,
+          );
+          continue;
+        }
+        for (const c of platCandidates) {
+          try {
+            await markRefreshFailed(supabase, c.id);
+            counters.rows_marked_failed += 1;
+            console.log(
+              `[view-tracking] MARKED_FAILED fan_edit_id=${c.id} platform=${c.platform} reason=${c.reason}`,
+            );
+          } catch (err) {
+            console.error(
+              `[view-tracking] markRefreshFailed failed for ${c.id}: ${
+                err instanceof Error ? err.message : err
+              }`,
+            );
+          }
+        }
+      }
     }
 
     if (earlyExitReason) {

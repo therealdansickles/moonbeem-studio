@@ -20,6 +20,7 @@
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { rehostThumbnail } from "./r2-upload.ts";
+import { ladderBackoffMs } from "./backoff.ts";
 
 export type SnapshotMetrics = {
   view_count: number | null;
@@ -113,6 +114,9 @@ export async function writeSnapshotAndUpdateFanEdit(
     view_tracking_failure_count: 0,
     last_refresh_error: null,
     last_refresh_error_at: null,
+    // Step 1.5: a successful refresh clears BOTH failure counters + the backoff.
+    refresh_failure_count: 0,
+    refresh_backoff_until: null,
   };
   if (shouldUpdateThumb && metrics.thumbnail_url) {
     // Re-host on R2 so we own the asset. Platform CDN URLs (Instagram
@@ -203,20 +207,38 @@ export async function handleFailure(
   return { markedDead: shouldMarkDead, newFailureCount: newCount };
 }
 
-// Records a per-row error on fan_edits for the silent-skip failure
-// paths (parse_error, transient) and the write_failed catch — none of
-// which previously touched fan_edits state. last_refreshed_at is
-// intentionally NOT updated here so the picker keeps re-trying the
-// row on every tick (its position in the ASC NULLS FIRST queue is
-// preserved). Best-effort: caller catches and logs without throwing.
+// Records a ladder failure (parse_error / transient / write_failed). Increments the
+// DEDICATED refresh_failure_count (never view_tracking_failure_count — that stays
+// handleFailure's not_found/private evidence, so a stray 404 can't instant-kill a
+// high-parse_error row), sets an escalating refresh_backoff_until so the picker stops
+// re-trying every tick, and retains the error string. last_refreshed_at is
+// intentionally NOT touched — freshness keeps meaning "stats successfully refreshed".
+// Returns the new count so the orchestrator can decide parse_error death candidacy.
+// Best-effort: caller catches on throw.
 export async function recordRefreshError(
   supabase: SupabaseClient,
   fanEditId: string,
   errorString: string,
-): Promise<void> {
+): Promise<{ newCount: number }> {
+  const read = await supabase
+    .from("fan_edits")
+    .select("refresh_failure_count")
+    .eq("id", fanEditId)
+    .single();
+  if (read.error || !read.data) {
+    throw new Error(
+      `[view-tracking] failed to read refresh_failure_count for ${fanEditId}: ${
+        read.error?.message ?? "no row"
+      }`,
+    );
+  }
+  const newCount = (read.data.refresh_failure_count as number) + 1;
+  const backoffUntil = new Date(Date.now() + ladderBackoffMs(newCount)).toISOString();
   const upd = await supabase
     .from("fan_edits")
     .update({
+      refresh_failure_count: newCount,
+      refresh_backoff_until: backoffUntil,
       last_refresh_error: errorString,
       last_refresh_error_at: new Date().toISOString(),
     })
@@ -224,6 +246,44 @@ export async function recordRefreshError(
   if (upd.error) {
     throw new Error(
       `[view-tracking] recordRefreshError update failed for ${fanEditId}: ${upd.error.message}`,
+    );
+  }
+  return { newCount };
+}
+
+// rate_limited is inert (spec §2): only a short backoff so the throttled row isn't
+// first to re-hit next run. No counter, no error stamp, no death.
+export async function setShortBackoff(
+  supabase: SupabaseClient,
+  fanEditId: string,
+  ms: number,
+): Promise<void> {
+  const upd = await supabase
+    .from("fan_edits")
+    .update({ refresh_backoff_until: new Date(Date.now() + ms).toISOString() })
+    .eq("id", fanEditId);
+  if (upd.error) {
+    console.error(
+      `[view-tracking] setShortBackoff failed for ${fanEditId}: ${upd.error.message}`,
+    );
+  }
+}
+
+// Marks a chronically-parse_error row dead (spec §3), reusing the existing 'failed'
+// status — excluded from the due query, admin-reversible (set 'active' + null both
+// counters). The reason stays in last_refresh_error. Called only from the death sweep,
+// after the trailing-success breaker passes.
+export async function markRefreshFailed(
+  supabase: SupabaseClient,
+  fanEditId: string,
+): Promise<void> {
+  const upd = await supabase
+    .from("fan_edits")
+    .update({ view_tracking_status: "failed" })
+    .eq("id", fanEditId);
+  if (upd.error) {
+    throw new Error(
+      `[view-tracking] markRefreshFailed update failed for ${fanEditId}: ${upd.error.message}`,
     );
   }
 }

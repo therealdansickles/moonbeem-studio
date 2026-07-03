@@ -39,6 +39,11 @@ export type RunCounters = {
   fan_edits_succeeded: number;
   fan_edits_failed: number;
   fan_edits_dead_marked: number;
+  // Step 1.5 observability: rows that entered/advanced the error backoff this run,
+  // and rows marked 'failed' by the parse_error death sweep. Spread into the
+  // view_tracking_runs record by updateRunProgress/finalizeRun.
+  rows_backed_off: number;
+  rows_marked_failed: number;
 };
 
 export type LoadResult = {
@@ -56,6 +61,8 @@ const ZERO_COUNTERS: RunCounters = {
   fan_edits_succeeded: 0,
   fan_edits_failed: 0,
   fan_edits_dead_marked: 0,
+  rows_backed_off: 0,
+  rows_marked_failed: 0,
 };
 
 export async function loadOrStartRun(
