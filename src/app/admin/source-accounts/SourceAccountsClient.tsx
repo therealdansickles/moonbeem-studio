@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
+import TitlePicker, { type TitleHit } from "@/components/admin/TitlePicker";
 
 export type MatchView = {
   id: string;
@@ -69,6 +70,12 @@ function count(n: number | null): string {
   return String(n);
 }
 
+function filterCls(active: boolean): string {
+  return active
+    ? "rounded-md border border-moonbeem-pink bg-moonbeem-pink/15 px-3 py-1 text-body-sm text-moonbeem-pink"
+    : "rounded-md border border-white/15 px-3 py-1 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink";
+}
+
 export default function SourceAccountsClient({
   accounts: initial,
 }: {
@@ -84,6 +91,8 @@ export default function SourceAccountsClient({
   const [addBusy, setAddBusy] = useState(false);
   const [addMsg, setAddMsg] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [correctingMatchId, setCorrectingMatchId] = useState<string | null>(null);
 
   // Sync from the server whenever router.refresh() (after a scrape) delivers fresh
   // props. useState(initial) alone seeds ONCE at mount, so without this the client
@@ -227,6 +236,41 @@ export default function SourceAccountsClient({
     }
   }
 
+  async function confirmOverride(
+    account: AccountView,
+    group: PostGroup,
+    match: MatchView,
+    hit: TitleHit,
+  ) {
+    if (busyMatch) return;
+    setBusyMatch(match.id);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/source-accounts/matches/${match.id}/confirm`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title_id: hit.id }),
+        },
+      );
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        setError(json.error ?? "Could not correct the title.");
+        return;
+      }
+      setCorrectingMatchId(null);
+      removeMatch(account.id, group.id, match.id);
+    } finally {
+      setBusyMatch(null);
+    }
+  }
+
+  const totalPending = accounts.reduce((s, a) => s + a.pending_matches, 0);
+  const queueItems = accounts
+    .filter((a) => selectedAccountId == null || a.id === selectedAccountId)
+    .flatMap((a) => a.groups.map((group) => ({ account: a, group })));
+
   return (
     <div className="min-h-screen px-6 py-12 text-moonbeem-ink">
       <div className="mx-auto flex max-w-5xl flex-col gap-8">
@@ -302,133 +346,164 @@ export default function SourceAccountsClient({
           </div>
         )}
 
-        {accounts.length === 0 && (
-          <p className="rounded-md border border-white/10 bg-white/[0.02] p-6 text-body-sm text-moonbeem-ink-muted">
-            No source accounts seeded yet.
-          </p>
-        )}
-
-        {accounts.map((account) => (
-          <section key={account.id} className="flex flex-col gap-4">
-            {/* Account header */}
-            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-moonbeem-violet/20 px-2.5 py-0.5 text-caption font-medium text-moonbeem-violet-soft">
-                      {account.platform}
-                    </span>
-                    <span className="text-body font-medium text-moonbeem-ink">
-                      @{account.handle}
-                    </span>
-                    {!account.active && (
-                      <span className="rounded-full bg-white/10 px-2 py-0.5 text-caption text-moonbeem-ink-subtle">
-                        inactive
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-caption text-moonbeem-ink-subtle">
-                    user id {account.external_user_id ?? "unresolved"} · last scraped{" "}
-                    {timeAgo(account.last_scraped_at)} · cursor{" "}
-                    {unixDate(account.cursor_max_taken_at)} · {account.total_posts} posts
-                    scraped
-                  </p>
-                  <p className="text-body-sm text-moonbeem-ink-muted">
-                    {account.pending_matches} pending match
-                    {account.pending_matches === 1 ? "" : "es"} across{" "}
-                    {account.pending_posts} post
-                    {account.pending_posts === 1 ? "" : "s"}
-                  </p>
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-2">
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => scrape(account, "backfill")}
-                      disabled={scrapingId === account.id}
-                      className="rounded-md border border-moonbeem-pink/40 bg-moonbeem-pink/10 px-3 py-1.5 text-body-sm text-moonbeem-pink hover:bg-moonbeem-pink/20 disabled:opacity-40"
-                    >
-                      {scrapingId === account.id ? "Scraping…" : "Backfill (all)"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => scrape(account, "incremental")}
-                      disabled={scrapingId === account.id}
-                      className="rounded-md border border-white/15 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink disabled:opacity-40"
-                    >
-                      Scrape new
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => toggleActive(account)}
-                      disabled={togglingId === account.id}
-                      className="rounded-md border border-white/15 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink disabled:opacity-40"
-                    >
-                      {togglingId === account.id
-                        ? "Saving…"
-                        : account.active
-                          ? "Deactivate"
-                          : "Activate"}
-                    </button>
-                  </div>
-                  {scrapeMsg[account.id] && (
-                    <p className="max-w-xs text-right text-caption text-moonbeem-ink-subtle">
-                      {scrapeMsg[account.id]}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Review queue, grouped by post */}
-            {account.groups.length === 0 ? (
-              <p className="rounded-md border border-white/10 bg-white/[0.02] p-5 text-body-sm text-moonbeem-ink-muted">
-                No pending matches. Run a scrape to populate the queue.
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-3">
-                {account.groups.map((group) => (
-                  <li
-                    key={group.id}
-                    className="flex flex-col gap-3 rounded-md border border-white/10 bg-white/[0.02] p-4"
-                  >
-                    {/* Post header (rendered once) */}
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0 flex-1">
-                        <p className="flex flex-wrap items-center gap-2 text-caption uppercase tracking-wider text-moonbeem-ink-subtle">
-                          {group.is_pinned && (
-                            <span className="rounded-full bg-moonbeem-violet/20 px-2 py-0.5 text-moonbeem-violet-soft normal-case">
-                              pinned
-                            </span>
-                          )}
-                          <span>{group.media_type ?? "post"}</span>
-                          <span>· {unixDate(group.taken_at)}</span>
-                          <span>· {count(group.video_view_count)} views</span>
-                          <span>· {count(group.like_count)} likes</span>
-                        </p>
-                        {group.caption && (
-                          <p className="mt-1 line-clamp-3 whitespace-pre-line text-body-sm text-moonbeem-ink-muted">
-                            {group.caption}
-                          </p>
+        {/* Roster — compact account cards */}
+        <section className="flex flex-col gap-3">
+          <h2 className="m-0 text-heading-sm text-moonbeem-ink">Roster</h2>
+          {accounts.length === 0 ? (
+            <p className="rounded-md border border-white/10 bg-white/[0.02] p-6 text-body-sm text-moonbeem-ink-muted">
+              No source accounts yet. Add one above.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {accounts.map((account) => (
+                <div
+                  key={account.id}
+                  className="rounded-2xl border border-white/10 bg-white/[0.02] p-5"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full bg-moonbeem-violet/20 px-2.5 py-0.5 text-caption font-medium text-moonbeem-violet-soft">
+                          {account.platform}
+                        </span>
+                        <span className="text-body font-medium text-moonbeem-ink">
+                          @{account.handle}
+                        </span>
+                        {!account.active && (
+                          <span className="rounded-full bg-white/10 px-2 py-0.5 text-caption text-moonbeem-ink-subtle">
+                            inactive
+                          </span>
                         )}
-                        <a
-                          href={group.post_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-1 inline-block truncate text-caption text-moonbeem-ink-subtle hover:text-moonbeem-pink"
-                        >
-                          {group.post_url}
-                        </a>
                       </div>
+                      <p className="text-caption text-moonbeem-ink-subtle">
+                        user id {account.external_user_id ?? "unresolved"} · last scraped{" "}
+                        {timeAgo(account.last_scraped_at)} · cursor{" "}
+                        {unixDate(account.cursor_max_taken_at)} · {account.total_posts}{" "}
+                        posts scraped
+                      </p>
+                      <p className="text-body-sm text-moonbeem-ink-muted">
+                        {account.pending_matches} pending match
+                        {account.pending_matches === 1 ? "" : "es"} across{" "}
+                        {account.pending_posts} post
+                        {account.pending_posts === 1 ? "" : "s"}
+                      </p>
                     </div>
-
-                    {/* Candidate titles */}
-                    <ul className="flex flex-col divide-y divide-white/5 border-t border-white/5">
-                      {group.matches.map((match) => (
-                        <li
-                          key={match.id}
-                          className="flex items-center justify-between gap-3 py-2"
+                    <div className="flex shrink-0 flex-col items-end gap-2">
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => scrape(account, "backfill")}
+                          disabled={scrapingId === account.id}
+                          className="rounded-md border border-moonbeem-pink/40 bg-moonbeem-pink/10 px-3 py-1.5 text-body-sm text-moonbeem-pink hover:bg-moonbeem-pink/20 disabled:opacity-40"
                         >
+                          {scrapingId === account.id ? "Scraping…" : "Backfill (all)"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => scrape(account, "incremental")}
+                          disabled={scrapingId === account.id}
+                          className="rounded-md border border-white/15 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink disabled:opacity-40"
+                        >
+                          Scrape new
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleActive(account)}
+                          disabled={togglingId === account.id}
+                          className="rounded-md border border-white/15 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink disabled:opacity-40"
+                        >
+                          {togglingId === account.id
+                            ? "Saving…"
+                            : account.active
+                              ? "Deactivate"
+                              : "Activate"}
+                        </button>
+                      </div>
+                      {scrapeMsg[account.id] && (
+                        <p className="max-w-xs text-right text-caption text-moonbeem-ink-subtle">
+                          {scrapeMsg[account.id]}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Review queue — post-grouped, filterable by account (defaults to All) */}
+        <section className="flex flex-col gap-3">
+          <h2 className="m-0 text-heading-sm text-moonbeem-ink">Review queue</h2>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedAccountId(null)}
+              className={filterCls(selectedAccountId === null)}
+            >
+              All ({totalPending})
+            </button>
+            {accounts
+              .filter((a) => a.pending_matches > 0)
+              .map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => setSelectedAccountId(a.id)}
+                  className={filterCls(selectedAccountId === a.id)}
+                >
+                  @{a.handle} ({a.pending_matches})
+                </button>
+              ))}
+          </div>
+          {queueItems.length === 0 ? (
+            <p className="rounded-md border border-white/10 bg-white/[0.02] p-5 text-body-sm text-moonbeem-ink-muted">
+              No pending matches{selectedAccountId ? " for this account" : ""}. Run a
+              scrape to populate the queue.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {queueItems.map(({ account, group }) => (
+                <li
+                  key={group.id}
+                  className="flex flex-col gap-3 rounded-md border border-white/10 bg-white/[0.02] p-4"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="flex flex-wrap items-center gap-2 text-caption uppercase tracking-wider text-moonbeem-ink-subtle">
+                        <span className="rounded-full bg-moonbeem-violet/20 px-2 py-0.5 text-moonbeem-violet-soft normal-case">
+                          @{account.handle}
+                        </span>
+                        {group.is_pinned && (
+                          <span className="rounded-full bg-moonbeem-violet/20 px-2 py-0.5 text-moonbeem-violet-soft normal-case">
+                            pinned
+                          </span>
+                        )}
+                        <span>{group.media_type ?? "post"}</span>
+                        <span>· {unixDate(group.taken_at)}</span>
+                        <span>· {count(group.video_view_count)} views</span>
+                        <span>· {count(group.like_count)} likes</span>
+                      </p>
+                      {group.caption && (
+                        <p className="mt-1 line-clamp-3 whitespace-pre-line text-body-sm text-moonbeem-ink-muted">
+                          {group.caption}
+                        </p>
+                      )}
+                      <a
+                        href={group.post_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 inline-block truncate text-caption text-moonbeem-ink-subtle hover:text-moonbeem-pink"
+                      >
+                        {group.post_url}
+                      </a>
+                    </div>
+                  </div>
+
+                  <ul className="flex flex-col divide-y divide-white/5 border-t border-white/5">
+                    {group.matches.map((match) => (
+                      <li key={match.id} className="flex flex-col gap-2 py-2">
+                        <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0 flex-1">
                             <Link
                               href={`/t/${match.title.slug}`}
@@ -462,6 +537,18 @@ export default function SourceAccountsClient({
                             </button>
                             <button
                               type="button"
+                              onClick={() =>
+                                setCorrectingMatchId(
+                                  correctingMatchId === match.id ? null : match.id,
+                                )
+                              }
+                              disabled={busyMatch === match.id}
+                              className="rounded-md border border-white/15 px-3 py-1 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink disabled:opacity-40"
+                            >
+                              {correctingMatchId === match.id ? "Close" : "Correct title"}
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => decide(account, group, match, "reject")}
                               disabled={busyMatch === match.id}
                               className="rounded-md border border-white/15 px-3 py-1 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-magenta hover:text-moonbeem-magenta disabled:opacity-40"
@@ -469,15 +556,22 @@ export default function SourceAccountsClient({
                               Reject
                             </button>
                           </div>
-                        </li>
-                      ))}
-                    </ul>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        ))}
+                        </div>
+                        {correctingMatchId === match.id && (
+                          <TitlePicker
+                            busy={busyMatch === match.id}
+                            onCancel={() => setCorrectingMatchId(null)}
+                            onPick={(hit) => confirmOverride(account, group, match, hit)}
+                          />
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </div>
     </div>
   );

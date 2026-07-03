@@ -11,9 +11,13 @@ import { requireSuperAdmin } from "@/lib/dal";
 import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { insertFanEditCandidate, type FanEditCandidate } from "@/lib/fan-edits-insert";
+import {
+  resolveConfirmTarget,
+  isWellFormedTitleId,
+} from "@/lib/source-accounts/confirm-target";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ matchId: string }> },
 ) {
   const session = await requireSuperAdmin();
@@ -51,6 +55,36 @@ export async function POST(
     .maybeSingle();
   if (!account) return NextResponse.json({ error: "account_not_found" }, { status: 404 });
 
+  // Correct-the-title override (Review Queue v2): an optional body { title_id }
+  // replaces the extractor's suggested match. Empty/absent body = confirm as
+  // suggested (back-compat). Existence is checked in the catalog only for a
+  // well-formed override; matched_title_id is NEVER overwritten (the suggestion
+  // stays recorded for extractor-quality measurement).
+  let overrideId: unknown = undefined;
+  try {
+    const body = (await request.json()) as { title_id?: unknown };
+    overrideId = body?.title_id;
+  } catch {
+    // no/invalid JSON body -> confirm as suggested
+  }
+  let overrideExists = false;
+  if (isWellFormedTitleId(overrideId)) {
+    const { data: t } = await supabase
+      .from("titles")
+      .select("id")
+      .eq("id", overrideId)
+      .maybeSingle();
+    overrideExists = !!t;
+  }
+  const target = resolveConfirmTarget(
+    overrideId,
+    match.matched_title_id,
+    () => overrideExists,
+  );
+  if (!target.ok) {
+    return NextResponse.json({ error: target.error }, { status: 400 });
+  }
+
   const candidate: FanEditCandidate = {
     // v1 source accounts are Instagram-only (source_account_platform enum). When
     // TikTok is added, map account.platform -> the fan_edits platform here.
@@ -70,7 +104,7 @@ export async function POST(
 
   const outcome = await insertFanEditCandidate(
     supabase,
-    match.matched_title_id,
+    target.titleId,
     candidate,
     { dedupeScope: "title" },
   );
@@ -84,7 +118,11 @@ export async function POST(
 
   const { error: updErr } = await supabase
     .from("source_account_post_matches")
-    .update({ status: "confirmed", confirmed_fan_edit_id: fanEditId })
+    .update({
+      status: "confirmed",
+      confirmed_fan_edit_id: fanEditId,
+      title_overridden: target.titleOverridden,
+    })
     .eq("id", matchId);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
 
@@ -92,5 +130,6 @@ export async function POST(
     ok: true,
     fan_edit_id: fanEditId,
     duplicate: !outcome.ok,
+    title_overridden: target.titleOverridden,
   });
 }
