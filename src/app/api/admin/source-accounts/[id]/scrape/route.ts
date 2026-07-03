@@ -15,13 +15,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireSuperAdmin } from "@/lib/dal";
 import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { getUsedUnits } from "@/lib/source-accounts/ensembledata";
+import { describeBudgetAbort } from "@/lib/source-accounts/budget";
 import {
   scrapeSourceAccount,
-  BACKFILL_PAGE_DEPTH,
-  BACKFILL_MAX_CALLS,
-  INCREMENTAL_PAGE_DEPTH,
-  INCREMENTAL_MAX_CALLS,
   type ScrapeMode,
   type SourceAccountRow,
 } from "@/lib/source-accounts/pipeline";
@@ -58,33 +54,10 @@ export async function POST(
     return NextResponse.json({ error: "account_inactive" }, { status: 400 });
   }
 
-  // Budget guard. Ceiling = pages * ~10 units/page, + resolve/overhead.
-  const maxPages =
-    mode === "backfill"
-      ? BACKFILL_PAGE_DEPTH * BACKFILL_MAX_CALLS
-      : INCREMENTAL_PAGE_DEPTH * INCREMENTAL_MAX_CALLS;
-  const projected = maxPages * 10 + 10;
-  const today = new Date().toISOString().slice(0, 10);
-  const units = await getUsedUnits(today);
-  const budgetEnv = process.env.ENSEMBLEDATA_DAILY_UNIT_BUDGET;
-  const dailyBudget =
-    budgetEnv && budgetEnv.trim() !== "" ? Number(budgetEnv) : null;
-  if (units.ok && dailyBudget != null && Number.isFinite(dailyBudget)) {
-    const remaining = dailyBudget - units.total;
-    if (remaining < projected) {
-      return NextResponse.json(
-        {
-          error: "budget_exceeded",
-          message: `Projected ~${projected} EnsembleData units, but only ${remaining} of today's ${dailyBudget}-unit budget remain (view-tracking shares this pool). Try later or raise ENSEMBLEDATA_DAILY_UNIT_BUDGET.`,
-          today_used: units.total,
-          projected,
-          budget: dailyBudget,
-        },
-        { status: 429 },
-      );
-    }
-  }
-
+  // The ED-unit budget guard lives INSIDE scrapeSourceAccount (the single
+  // chokepoint the cron shares), so it runs per account before any spend. Here we
+  // only map its outcome: a budget refusal is a clean, labeled 429 (never-silent),
+  // NOT a failure.
   let result;
   try {
     result = await scrapeSourceAccount(supabase, account as SourceAccountRow, {
@@ -101,6 +74,23 @@ export async function POST(
     );
   }
   if (!result.ok) {
+    if (result.stage === "budget") {
+      const d = result.decision;
+      return NextResponse.json(
+        {
+          error: "budget_exceeded",
+          reason: d.reason,
+          message: describeBudgetAbort(d, result.retryAfterUtc),
+          today_used: d.unitsToday,
+          projected: d.projected,
+          ceiling: d.scrapeCeiling,
+          budget: d.budget,
+          reserved_view_tracking: d.reservedVt,
+          retry_after_utc: result.retryAfterUtc,
+        },
+        { status: 429 },
+      );
+    }
     // Park-don't-corrupt: resolve/fetch failures wrote nothing.
     return NextResponse.json(
       {
@@ -112,10 +102,5 @@ export async function POST(
     );
   }
 
-  return NextResponse.json({
-    ...result,
-    budget: units.ok
-      ? { today_used: units.total, projected, cap: dailyBudget }
-      : { note: "meter_unavailable", projected },
-  });
+  return NextResponse.json(result);
 }

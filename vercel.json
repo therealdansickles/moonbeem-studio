@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/settle-transactions",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/scrape-source-accounts",
+      "schedule": "0 8 * * 1"
     }
   ]
 }

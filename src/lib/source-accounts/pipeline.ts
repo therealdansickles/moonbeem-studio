@@ -14,13 +14,25 @@
 // (upserts + a gated matched_at), so a mid-run failure re-completes on the next run.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { fetchInstagramPosts, resolveInstagramUserId } from "./ensembledata";
+import {
+  fetchInstagramPosts,
+  resolveInstagramUserId,
+  getUsedUnits,
+} from "./ensembledata";
 import {
   computeIncrementalCursor,
   extractTitleCandidates,
   type NormalizedPost,
 } from "./normalize";
 import { topMatchesPerGroup } from "./matcher";
+import {
+  resolveBudgetConfig,
+  scrapeBudgetDecision,
+  hoursRemainingInUtcDay,
+  nextUtcMidnight,
+  projectedUnits,
+  type BudgetDecision,
+} from "./budget";
 
 export type SourceAccountRow = {
   id: string;
@@ -56,6 +68,16 @@ export type ScrapeError = {
   detail: string;
 };
 
+// A clean, labeled refusal — NOT a failure. Only scrapes can hit this; the guard
+// runs per account before any spend. Callers render it as a normal held state
+// (never-silent) and, for the cron, stop the run (budget reached, rest deferred).
+export type ScrapeBudgetAbort = {
+  ok: false;
+  stage: "budget";
+  decision: BudgetDecision;
+  retryAfterUtc: string;
+};
+
 // EnsembleData's `depth` caps at ~8 pages (~80 posts) per call; backfill drains the
 // rest via start_cursor across up to MAX_CALLS calls (docstowatch = 153 -> 2 calls).
 // Incremental relies on oldest_timestamp to stop server-side, so it needs few calls.
@@ -76,7 +98,36 @@ export async function scrapeSourceAccount(
   supabase: SupabaseClient,
   account: SourceAccountRow,
   opts: { mode: ScrapeMode },
-): Promise<ScrapeSummary | ScrapeError> {
+): Promise<ScrapeSummary | ScrapeError | ScrapeBudgetAbort> {
+  // 0. Budget guard (ruling X, 2026-07-03). ONLY scrapes abort on units;
+  //    view-tracking never consults this (it is wall-clock bounded). The guard
+  //    lives HERE, at the single chokepoint, so the admin route AND the step-3
+  //    cron both inherit it — and the meter is re-read on every call, so the cron
+  //    re-checks before EACH account (no burst-lag window). The meter is
+  //    EnsembleData's own get-used-units — the billing truth for the shared token,
+  //    already counting view-tracking + scrapes incl. failed-but-charged calls.
+  //    FAIL-CLOSED: an unreadable meter refuses the scrape (see budget.ts).
+  const now = new Date();
+  const projected = projectedUnits(
+    opts.mode === "backfill" ? BACKFILL_PAGE_DEPTH : INCREMENTAL_PAGE_DEPTH,
+    opts.mode === "backfill" ? BACKFILL_MAX_CALLS : INCREMENTAL_MAX_CALLS,
+  );
+  const meter = await getUsedUnits(now.toISOString().slice(0, 10));
+  const decision = scrapeBudgetDecision({
+    config: resolveBudgetConfig(),
+    hoursRemaining: hoursRemainingInUtcDay(now),
+    unitsToday: meter.ok ? meter.total : null,
+    projected,
+  });
+  if (!decision.allow) {
+    return {
+      ok: false,
+      stage: "budget",
+      decision,
+      retryAfterUtc: nextUtcMidnight(now).toISOString(),
+    };
+  }
+
   // 1. Resolve user id if we don't have it yet; cache it on the account row.
   let userId = account.external_user_id;
   if (!userId) {
