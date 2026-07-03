@@ -157,6 +157,31 @@ eq(
   "identical title+year (case-insensitive) dedups to one candidate",
 );
 
+// --- candidate hygiene: length cap (60) + stopword-only drop (2026-07-03) --------
+// LONG side (the chrovies timeout cause): a >60-char prose lead-in is dropped.
+eq(
+  extractTitleCandidates(
+    "This is a very long caption sentence with lots of trivia words before the actual film Interstellar (2014)",
+  ),
+  [],
+  "over-60 prose lead-in dropped (the ~1s/candidate timeout garbage)",
+);
+// LONG boundary KEPT: a real 59-char title (<=60) survives the cap.
+eq(
+  extractTitleCandidates(
+    "The Assassination of Jesse James by the Coward Robert Ford (2007)",
+  ),
+  [{ name: "The Assassination of Jesse James by the Coward Robert Ford", year: 2007 }],
+  "59-char real title kept (<=60 cap boundary)",
+);
+// SHORT garbage dropped: a pure function word is never a title.
+eq(extractTitleCandidates("The (2020)"), [], "stopword-only name 'The' dropped");
+eq(extractTitleCandidates("And (2019)"), [], "stopword-only name 'And' dropped");
+// SHORT real titles KEPT: strong-signal short titles (year-carrying) are retained.
+eq(extractTitleCandidates("Pi (1998)"), [{ name: "Pi", year: 1998 }], "short real title 'Pi' kept");
+eq(extractTitleCandidates("Us (2019)"), [{ name: "Us", year: 2019 }], "short real title 'Us' kept (not treated as a stopword)");
+eq(extractTitleCandidates("Her (2013)"), [{ name: "Her", year: 2013 }], "short real title 'Her' kept");
+
 // --- summary -------------------------------------------------------------------
 
 console.log(`\n${passed} passed, ${failed} failed`);

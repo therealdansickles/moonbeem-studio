@@ -176,6 +176,31 @@ const YEAR_PAREN_RE =
   // title text (non-greedy, same line) + "(" + optional "director, " + YYYY + ")"
   /([^\n(]{1,120}?)\s*\((?:[^()]*?,\s*)?((?:19|20)\d{2})\)/g;
 
+// Real film titles are short. A captured name longer than this is caption PROSE
+// that leaked into the (non-greedy) lead-in capture — not a title. Such a candidate
+// is doubly bad: (a) at ~1 trigram/char its pg_trgm `%` scan reads a posting list
+// per trigram — a 120-char candidate measured ~1.0s, so a chunk of them trips the
+// 8s service-role statement_timeout (chrovies backfill, 2026-07-03); and (b) the
+// real title is buried mid-string, diluted below the 0.6 floor, so it matches
+// NOTHING (EXPLAIN ANALYZE rows=0). Dropping over-length candidates fixes the
+// timeout and orphaned NO match on the chrovies corpus (every dropped candidate
+// returned 0 rows). KNOWN LIMITATION (v1, tunable): legitimate titles over 60 chars
+// exist (e.g. "Dr. Strangelove…" 68, "Borat Subsequent Moviefilm…" 84) and are
+// dropped here too — this is NOT a universal zero-orphan guarantee, only a
+// corpus-specific one. The tail-extraction follow-up (capture the trailing title,
+// not the whole lead-in) recovers long titles AND the prose-buried ones properly.
+export const MAX_CANDIDATE_NAME_LEN = 60;
+
+// Pure function words that no film is titled outright — dropped as a cheap defense
+// against garbage candidates. Deliberately EXCLUDES real short titles that happen to
+// be common words (It, Us, Up, Her, We, Me, Pi, Room, etc.): those carry the
+// parenthetical-year signal and are retained. Only articles / conjunctions / bare
+// prepositions are here.
+const STOPWORD_ONLY_NAMES = new Set([
+  "the", "a", "an", "and", "or", "of", "to", "in", "on", "at",
+  "by", "for", "with", "from", "as", "but", "nor", "so", "yet",
+]);
+
 const LEADING_LIST_NUMBER_RE = /^\s*\d{1,3}[.)\-:]\s*/;
 // Strip leading non-letter/digit clutter (emojis, bullets, quotes, whitespace).
 const LEADING_CLUTTER_RE = /^[^\p{L}\p{N}]+/u;
@@ -200,6 +225,8 @@ export function extractTitleCandidates(caption: string | null): TitleCandidate[]
     const name = cleanTitle(m[1]);
     const year = Number.parseInt(m[2], 10);
     if (name.length < 2) continue; // reject noise fragments
+    if (name.length > MAX_CANDIDATE_NAME_LEN) continue; // caption prose, not a title (timeout + non-match; see const)
+    if (STOPWORD_ONLY_NAMES.has(name.toLowerCase())) continue; // pure function word, never a standalone title
     if (!Number.isFinite(year)) continue;
     const key = `${name.toLowerCase()}|${year}`;
     if (seen.has(key)) continue;

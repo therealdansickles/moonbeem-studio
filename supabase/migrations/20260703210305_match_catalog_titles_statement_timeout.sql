@@ -1,0 +1,12 @@
+-- Backstop for the Source Accounts catalog matcher (chrovies timeout, 2026-07-03).
+-- The primary fixes are the MAX_CANDIDATE_NAME_LEN=60 cap (normalize.ts) and
+-- MATCH_CHUNK=10 (matcher.ts). This per-function statement_timeout lets a borderline
+-- chunk complete under 20s instead of aborting the whole backfill at the 8s
+-- service-role default. statement_timeout is a STANDARD GUC (not an extension GUC),
+-- so a per-function SET is honored for the non-superuser service_role owner -- unlike
+-- pg_trgm.similarity_threshold, which is why that one stays a runtime set_config in
+-- the body. Function body + grants unchanged.
+--
+-- Applied to prod via apply_migration (recorded version 20260703210305); this file's
+-- prefix is aligned to that version so `db push` will not re-run it.
+alter function public.match_catalog_titles(jsonb, numeric) set statement_timeout = '20s';

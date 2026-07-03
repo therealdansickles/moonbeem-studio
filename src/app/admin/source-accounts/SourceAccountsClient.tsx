@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 export type MatchView = {
   id: string;
@@ -80,6 +80,10 @@ export default function SourceAccountsClient({
   const [scrapingId, setScrapingId] = useState<string | null>(null);
   const [scrapeMsg, setScrapeMsg] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [addHandle, setAddHandle] = useState("");
+  const [addBusy, setAddBusy] = useState(false);
+  const [addMsg, setAddMsg] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   // Sync from the server whenever router.refresh() (after a scrape) delivers fresh
   // props. useState(initial) alone seeds ONCE at mount, so without this the client
@@ -176,6 +180,53 @@ export default function SourceAccountsClient({
     }
   }
 
+  async function createAccount(e: FormEvent) {
+    e.preventDefault();
+    if (addBusy) return;
+    const handle = addHandle.trim().replace(/^@+/, "");
+    if (!handle) return;
+    setAddBusy(true);
+    setAddMsg(null);
+    try {
+      const res = await fetch("/api/admin/source-accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handle }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAddMsg(json.message ?? json.error ?? "Could not add account.");
+        return;
+      }
+      setAddHandle("");
+      setAddMsg(`Added @${handle}. Run backfill to seed it.`);
+      router.refresh();
+    } finally {
+      setAddBusy(false);
+    }
+  }
+
+  async function toggleActive(account: AccountView) {
+    if (togglingId) return;
+    setTogglingId(account.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/source-accounts/${account.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: !account.active }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        setError(json.error ?? "Could not update account.");
+        return;
+      }
+      router.refresh();
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
   return (
     <div className="min-h-screen px-6 py-12 text-moonbeem-ink">
       <div className="mx-auto flex max-w-5xl flex-col gap-8">
@@ -198,6 +249,52 @@ export default function SourceAccountsClient({
             ← Admin
           </Link>
         </div>
+
+        <form
+          onSubmit={createAccount}
+          className="flex flex-col gap-2 rounded-2xl border border-white/10 bg-white/[0.02] p-5"
+        >
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-caption uppercase tracking-wider text-moonbeem-ink-subtle">
+                Platform
+              </span>
+              <select
+                disabled
+                value="instagram"
+                className="rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted"
+              >
+                <option value="instagram">instagram</option>
+              </select>
+            </label>
+            <label className="flex flex-1 flex-col gap-1">
+              <span className="text-caption uppercase tracking-wider text-moonbeem-ink-subtle">
+                Handle
+              </span>
+              <input
+                type="text"
+                value={addHandle}
+                onChange={(e) => setAddHandle(e.target.value)}
+                placeholder="curatorhandle"
+                className="rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-body-sm text-moonbeem-ink placeholder:text-moonbeem-ink-subtle"
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={addBusy || addHandle.trim() === ""}
+              className="rounded-md border border-moonbeem-pink/40 bg-moonbeem-pink/10 px-3 py-1.5 text-body-sm text-moonbeem-pink hover:bg-moonbeem-pink/20 disabled:opacity-40"
+            >
+              {addBusy ? "Adding…" : "Add account"}
+            </button>
+          </div>
+          <p className="m-0 text-caption text-moonbeem-ink-subtle">
+            New accounts need one Backfill (all) to seed the cursor before the weekly
+            cron maintains them.
+          </p>
+          {addMsg && (
+            <p className="m-0 text-caption text-moonbeem-ink-muted">{addMsg}</p>
+          )}
+        </form>
 
         {error && (
           <div className="rounded-md border border-moonbeem-magenta/40 bg-moonbeem-magenta/10 px-3 py-2 text-body-sm text-moonbeem-magenta">
@@ -260,6 +357,18 @@ export default function SourceAccountsClient({
                       className="rounded-md border border-white/15 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink disabled:opacity-40"
                     >
                       Scrape new
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleActive(account)}
+                      disabled={togglingId === account.id}
+                      className="rounded-md border border-white/15 px-3 py-1.5 text-body-sm text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink disabled:opacity-40"
+                    >
+                      {togglingId === account.id
+                        ? "Saving…"
+                        : account.active
+                          ? "Deactivate"
+                          : "Activate"}
                     </button>
                   </div>
                   {scrapeMsg[account.id] && (

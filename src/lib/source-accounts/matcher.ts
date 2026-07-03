@@ -5,6 +5,16 @@
 // match_letterboxd_films, extended to RETURN the similarity as match_confidence).
 // Calls are chunked so a large backfill never trips the ~8s service-role
 // statement_timeout: each RPC call carries at most MATCH_CHUNK candidates.
+//
+// Sizing (chrovies backfill, 2026-07-03): the per-candidate `%` scan cost scales
+// with candidate length (~1 posting-list read per trigram). The primary guard is
+// the MAX_CANDIDATE_NAME_LEN=60 cap in normalize.ts (a 120-char prose candidate
+// measured ~1.0s and matched nothing); MATCH_CHUNK is the secondary bound so even
+// a chunk of capped candidates stays well under the 8s limit, and the function's
+// SET statement_timeout='20s' (migration 20260703…) is the backstop. KNOWN
+// LIMITATION carried from normalize.ts: real titles over 60 chars are dropped by
+// the cap — the tail-extraction follow-up recovers them (chrovies is the fixture
+// corpus).
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { TitleCandidate } from "./normalize";
@@ -18,7 +28,7 @@ export type CatalogMatch = {
   confidence: number;
 };
 
-const MATCH_CHUNK = 40;
+const MATCH_CHUNK = 10;
 
 type RpcRow = {
   idx: number | null;
