@@ -33,3 +33,20 @@ export function isEntitlementActive(
   const purchasedMs = new Date(e.purchased_at).getTime();
   return nowMs < purchasedMs + RENTAL_START_WINDOW_DAYS * DAY_MS;
 }
+
+// The derived instant a row stops being active, or null for a purchase (never
+// expires). Reuses the SAME two constants as isEntitlementActive so the countdown
+// shown in the Library and the boolean gate can never drift: a rental is active
+// while now < entitlementExpiresAt(row). Started rentals expire 48h after first
+// play; unstarted rentals expire 30 days after purchase.
+export function entitlementExpiresAt(e: EntitlementWindowRow): Date | null {
+  if (e.kind === "purchase") return null;
+  if (e.first_played_at) {
+    return new Date(
+      new Date(e.first_played_at).getTime() + RENTAL_PLAY_WINDOW_HOURS * HOUR_MS,
+    );
+  }
+  return new Date(
+    new Date(e.purchased_at).getTime() + RENTAL_START_WINDOW_DAYS * DAY_MS,
+  );
+}

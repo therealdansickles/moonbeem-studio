@@ -51,6 +51,82 @@ export async function getActiveEntitlement(
   return null;
 }
 
+// The buyer's WHOLE library (Library v1) — every entitlement for the user, joined
+// to its title for display. Unlike getActiveEntitlement this deliberately does NOT
+// filter revoked_at (the Library classifies a refunded row as an access-ended
+// state rather than dropping it) and does NOT filter by title_id (keyed on user_id
+// alone, using the leftmost column of idx_entitlements_user_title). Expect >1 row
+// per (user, title) from legit re-rents and rent-then-buy coexistence; the render
+// layer groups by title with precedence purchase > active rental > expired rental.
+// Join shape mirrors getTopTitlesForUser (a to-one FK embed → titles object).
+// is_public is selected per the v1 spec though v1 renders no visibility badge (any
+// authenticated owner may view a non-public title — see canViewTitle); it's carried
+// for a possible future "unlisted" indicator. Service-role because entitlements has
+// RLS with no policies; the caller MUST pass a session-resolved userId (never
+// client-supplied). Degrades to [] on error (display read), logging loudly.
+export type LibraryTitle = {
+  id: string;
+  slug: string;
+  title: string;
+  poster_url: string | null;
+  is_public: boolean;
+  transact_enabled: boolean;
+  transact_price_cents: number | null;
+};
+
+export type LibraryEntitlement = {
+  id: string;
+  kind: string;
+  purchased_at: string;
+  first_played_at: string | null;
+  price_paid_cents: number;
+  revoked_at: string | null;
+  title: LibraryTitle;
+};
+
+type LibraryJoinRow = {
+  id: string;
+  kind: string;
+  purchased_at: string;
+  first_played_at: string | null;
+  price_paid_cents: number;
+  revoked_at: string | null;
+  titles: LibraryTitle | null;
+};
+
+export async function getMyEntitlements(
+  userId: string,
+): Promise<LibraryEntitlement[]> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("entitlements")
+    .select(
+      "id, kind, purchased_at, first_played_at, price_paid_cents, revoked_at, titles:title_id(id, slug, title, poster_url, is_public, transact_enabled, transact_price_cents)",
+    )
+    .eq("user_id", userId)
+    .order("purchased_at", { ascending: false });
+  if (error) {
+    console.error(
+      `[entitlements] getMyEntitlements failed for ${userId}: ${error.message}`,
+    );
+    return [];
+  }
+  return ((data ?? []) as unknown as LibraryJoinRow[])
+    // A hard-deleted title CASCADE-removes its entitlement row, so a null title
+    // should not occur; filtered defensively so a Library never renders a card
+    // with no title.
+    .filter((r) => r.titles)
+    .map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      purchased_at: r.purchased_at,
+      first_played_at: r.first_played_at,
+      price_paid_cents: r.price_paid_cents,
+      revoked_at: r.revoked_at,
+      title: r.titles!,
+    }));
+}
+
 // Stamp first_played_at exactly-once, at DB time, arming the 48h rental clock.
 // Idempotent: the RPC's conditional UPDATE (WHERE first_played_at IS NULL) stamps
 // on the first play and no-ops (0 rows) on every later play. DB now() (NOT a JS
