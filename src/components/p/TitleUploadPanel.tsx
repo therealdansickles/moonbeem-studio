@@ -23,6 +23,7 @@ import PosterEditor from "@/components/PosterEditor";
 import RentalPricingCard from "@/components/p/RentalPricingCard";
 import PurchasePricingCard from "@/components/p/PurchasePricingCard";
 import AffiliatePricingCard from "@/components/p/AffiliatePricingCard";
+import SubtitlesCard from "@/components/p/SubtitlesCard";
 import { fractionToExactBps } from "@/lib/affiliate/rate";
 
 // MuxUploader is a web component (registers a custom element, touches
@@ -80,6 +81,7 @@ export default function TitleUploadPanel({
   purchasePriceCents,
   creatorSharePct,
   externalPriceUsd,
+  subtitlesBurnedIn,
 }: {
   titleId: string;
   titleSlug: string;
@@ -100,6 +102,7 @@ export default function TitleUploadPanel({
   purchasePriceCents: number | null;
   creatorSharePct: number | null;
   externalPriceUsd: number | null;
+  subtitlesBurnedIn: boolean;
 }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>("idle");
@@ -114,6 +117,26 @@ export default function TitleUploadPanel({
   const [confirmPublic, setConfirmPublic] = useState(false);
   const [makingPublic, setMakingPublic] = useState(false);
   const [publicError, setPublicError] = useState<string | null>(null);
+  const [burnedIn, setBurnedIn] = useState(subtitlesBurnedIn);
+  const [savingBurnedIn, setSavingBurnedIn] = useState(false);
+
+  async function toggleBurnedIn(next: boolean) {
+    if (savingBurnedIn) return;
+    setSavingBurnedIn(true);
+    setBurnedIn(next); // optimistic
+    try {
+      const res = await fetch(`/api/titles/${titleId}/subtitles-burned-in`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ burned_in: next }),
+      });
+      if (!res.ok) setBurnedIn(!next); // revert on failure
+    } catch {
+      setBurnedIn(!next);
+    } finally {
+      setSavingBurnedIn(false);
+    }
+  }
 
   // Poll the status route while the asset encodes (processing -> ready/errored).
   useEffect(() => {
@@ -297,6 +320,46 @@ export default function TitleUploadPanel({
               );
             })}
           </ul>
+        </div>
+      )}
+
+      {/* Subtitles — optional per-episode sidecar tracks + the burned-in marker.
+          Only for titles with a Mux asset (a track attaches to the asset). Silent by
+          default: no track -> no player captions menu. Burned-in and sidecar tracks
+          are mutually exclusive in the UI. */}
+      {episodes.some((e) => e.source === "mux") && (
+        <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="m-0 text-caption uppercase tracking-wide text-moonbeem-ink-muted">
+              Subtitles
+            </p>
+            <label className="flex items-center gap-2 text-body-sm text-moonbeem-ink-muted">
+              <input
+                type="checkbox"
+                checked={burnedIn}
+                disabled={savingBurnedIn}
+                onChange={(e) => toggleBurnedIn(e.target.checked)}
+              />
+              Subtitles are burned into the video
+            </label>
+          </div>
+          {burnedIn ? (
+            <p className="m-0 text-caption text-moonbeem-ink-subtle">
+              Marked as burned-in. Captions are part of the picture, so no sidecar
+              tracks are needed and the player shows no captions menu.
+            </p>
+          ) : (
+            episodes
+              .filter((e) => e.source === "mux")
+              .map((ep) => (
+                <SubtitlesCard
+                  key={ep.id}
+                  titleId={titleId}
+                  episodeId={ep.id}
+                  episodeLabel={ep.label ?? `Episode ${ep.episode_number}`}
+                />
+              ))
+          )}
         </div>
       )}
 

@@ -91,6 +91,21 @@ export function buildPosterKey(titleSlug: string, ext: string): string {
   return `posters/${titleSlug}/${Date.now()}.${safeExt(ext)}`;
 }
 
+// subtitles/<titleSlug>/<episodeId>-<lang>-<ms>.<ext> — a sidecar VTT/SRT the
+// admin uploads for Mux to ingest. Mux COPIES the file at createTrack (the object
+// only needs to be live until Track.status==='ready'), so the ms suffix just avoids
+// collisions on re-upload; orphans are swept by the same reconciliation cron as
+// posters/logos. lang is folded into the key for at-a-glance debugging.
+export function buildSubtitleKey(
+  titleSlug: string,
+  episodeId: string,
+  languageCode: string,
+  ext: string,
+): string {
+  const lang = languageCode.toLowerCase().replace(/[^a-z0-9-]/g, "") || "xx";
+  return `subtitles/${titleSlug}/${episodeId}-${lang}-${Date.now()}.${safeExt(ext)}`;
+}
+
 // episodes/<titleSlug>/<shortcode>.jpg — a per-episode cover thumbnail re-hosted
 // from Instagram. STABLE key (the IG shortcode is immutable and its cover doesn't
 // change), so a re-host overwrites the same object idempotently — no orphan

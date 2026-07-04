@@ -60,7 +60,7 @@ export default async function PartnerTitlePage({ params }: PageProps) {
   const { data: title } = await supabase
     .from("titles")
     .select(
-      "id, slug, title, poster_url, media_type, content_kind, is_public, partner_id, allowed_territories, territory_worldwide, transact_enabled, transact_price_cents, purchase_enabled, purchase_price_cents, creator_share_pct",
+      "id, slug, title, poster_url, media_type, content_kind, is_public, partner_id, allowed_territories, territory_worldwide, transact_enabled, transact_price_cents, purchase_enabled, purchase_price_cents, creator_share_pct, subtitles_burned_in",
     )
     .eq("id", titleId)
     .maybeSingle();
@@ -136,6 +136,7 @@ export default async function PartnerTitlePage({ params }: PageProps) {
             }
             creatorSharePct={(title.creator_share_pct as number | null) ?? null}
             externalPriceUsd={externalPriceUsd}
+            subtitlesBurnedIn={(title.subtitles_burned_in as boolean | null) ?? false}
           />
         </div>
       </div>
