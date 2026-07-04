@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { PUBLICLY_READABLE_FAN_EDIT_STATUSES } from "@/lib/fan-edits/status";
@@ -389,11 +390,19 @@ export type Still = {
   width: number | null;
   height: number | null;
   file_size_bytes: number | null;
+  content_type: string | null;
   display_order: number;
 };
 
-export async function getActiveClipsForTitle(titleId: string): Promise<Clip[]> {
-  const supabase = await createClient();
+// Client-agnostic listing layer — the single source for a title's clips and
+// stills. Both consumers pass their own supabase client: the web SSR path uses
+// the anon/authed client (getActive* wrappers below), and a future token-authed
+// panel clip-browser passes the service-role client after Bearer auth. One
+// query shape, reused verbatim — designed once for both consumers.
+export async function listClipsForTitle(
+  supabase: SupabaseClient,
+  titleId: string,
+): Promise<Clip[]> {
   const { data, error } = await supabase
     .from("clips")
     .select(
@@ -406,20 +415,32 @@ export async function getActiveClipsForTitle(titleId: string): Promise<Clip[]> {
   return data as Clip[];
 }
 
-export async function getActiveStillsForTitle(
+export async function listStillsForTitle(
+  supabase: SupabaseClient,
   titleId: string,
 ): Promise<Still[]> {
-  const supabase = await createClient();
   const { data, error } = await supabase
     .from("stills")
     .select(
-      "id, title_id, file_url, thumbnail_url, alt_text, photographer_credit, width, height, file_size_bytes, display_order",
+      "id, title_id, file_url, thumbnail_url, alt_text, photographer_credit, width, height, file_size_bytes, content_type, display_order",
     )
     .eq("title_id", titleId)
     .is("deleted_at", null)
     .order("display_order", { ascending: true });
   if (error || !data) return [];
   return data as Still[];
+}
+
+// SSR entry points — unchanged signatures; delegate to the listing layer with
+// the request-scoped anon/authed client.
+export async function getActiveClipsForTitle(titleId: string): Promise<Clip[]> {
+  return listClipsForTitle(await createClient(), titleId);
+}
+
+export async function getActiveStillsForTitle(
+  titleId: string,
+): Promise<Still[]> {
+  return listStillsForTitle(await createClient(), titleId);
 }
 
 export type FanEdit = {

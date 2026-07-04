@@ -14,6 +14,7 @@ import type { Clip } from "@/lib/queries/titles";
 import type { Tier } from "@/lib/gating/types";
 import { gateMap } from "@/lib/gating/gate-map";
 import GateModal from "@/components/gating/GateModal";
+import { triggerAnchorDownload } from "@/lib/downloads/trigger";
 
 type GateReason =
   | "auth_required"
@@ -22,11 +23,13 @@ type GateReason =
 
 type Props = {
   clips: Clip[];
+  titleId: string;
   // Effective tier for the quota affordance — the page coerces
   // super-admins to "verified" here (server still bypasses for real).
   tier: Tier;
   clipDownloadUsage: number;
 };
+
 
 // The signed_in lifetime clip-download quota, read from the gate map
 // so this stays in sync with the single source of truth.
@@ -53,7 +56,12 @@ function fileNameFromUrl(url: string): string {
   }
 }
 
-export default function VideosTab({ clips, tier, clipDownloadUsage }: Props) {
+export default function VideosTab({
+  clips,
+  titleId,
+  tier,
+  clipDownloadUsage,
+}: Props) {
   const [usage, setUsage] = useState(clipDownloadUsage);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errorId, setErrorId] = useState<string | null>(null);
@@ -62,6 +70,61 @@ export default function VideosTab({ clips, tier, clipDownloadUsage }: Props) {
     limit?: number;
     used?: number;
   } | null>(null);
+  // "Download all clips" — sequential direct-from-R2 (no zip: clip sets reach
+  // ~2.2 GB, and mp4 is already compressed so a zip buys ~0%). The authorize
+  // route gates (verified-only) + logs per item, then hands back the public
+  // R2 URLs; we fire them staggered so the browser's multi-download prompt
+  // shows once.
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkLabel, setBulkLabel] = useState("");
+  const [bulkError, setBulkError] = useState(false);
+  const [showMultiNote, setShowMultiNote] = useState(false);
+
+  async function handleDownloadAll() {
+    if (bulkBusy) return;
+    setBulkBusy(true);
+    setBulkError(false);
+    setShowMultiNote(false);
+    setBulkLabel("Preparing…");
+    try {
+      const res = await fetch(`/api/titles/${titleId}/download-all`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "clips" }),
+      });
+      if (res.status === 403) {
+        const json = (await res.json().catch(() => ({}))) as {
+          error?: GateReason;
+        };
+        setGate({ reason: json.error ?? "auth_required" });
+        return;
+      }
+      if (!res.ok) {
+        setBulkError(true);
+        return;
+      }
+      const { items } = (await res.json()) as {
+        items: { url: string; filename: string }[];
+      };
+      if (!items || items.length === 0) {
+        setBulkError(true);
+        return;
+      }
+      setShowMultiNote(items.length > 1);
+      for (let i = 0; i < items.length; i++) {
+        setBulkLabel(`Downloading ${i + 1} of ${items.length}…`);
+        triggerAnchorDownload(items[i].url, items[i].filename);
+        if (i < items.length - 1) {
+          await new Promise((r) => setTimeout(r, 800));
+        }
+      }
+    } catch {
+      setBulkError(true);
+    } finally {
+      setBulkBusy(false);
+      setBulkLabel("");
+    }
+  }
 
   // Quota label — only the signed_in tier carries a clip quota.
   // 0 used or quota reached -> plain "Download" (a reached-quota
@@ -129,6 +192,31 @@ export default function VideosTab({ clips, tier, clipDownloadUsage }: Props) {
 
   return (
     <>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="m-0 text-body-sm text-moonbeem-ink-muted">
+          {clips.length} clip{clips.length === 1 ? "" : "s"}
+        </p>
+        <button
+          type="button"
+          onClick={handleDownloadAll}
+          disabled={bulkBusy}
+          className="shrink-0 rounded-md border border-white/10 px-3 py-1.5 text-body-sm text-moonbeem-pink transition-colors hover:border-moonbeem-pink disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {bulkBusy ? bulkLabel || "Preparing…" : "Download all clips"}
+        </button>
+      </div>
+      {showMultiNote && (
+        <p className="mb-4 -mt-2 text-caption text-moonbeem-ink-subtle">
+          Your browser may ask permission to download multiple files —
+          that&rsquo;s expected; allow it to get every clip.
+        </p>
+      )}
+      {bulkError && (
+        <p className="mb-4 -mt-2 text-caption text-moonbeem-magenta">
+          Couldn&rsquo;t start the download. Try again.
+        </p>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {clips.map((clip) => {
           if (!clip.file_url) return null;

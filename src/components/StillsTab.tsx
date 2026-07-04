@@ -29,9 +29,16 @@ import "react-photo-album/rows.css";
 import Lightbox from "yet-another-react-lightbox";
 import Download from "yet-another-react-lightbox/plugins/download";
 import "yet-another-react-lightbox/styles.css";
+import { zipSync } from "fflate";
 import type { Still } from "@/lib/queries/titles";
 import type { Tier } from "@/lib/gating/types";
 import { gateMap } from "@/lib/gating/gate-map";
+import GateModal from "@/components/gating/GateModal";
+import { dedupeName, shouldZipStillsInMemory } from "@/lib/downloads/bundle";
+import {
+  triggerAnchorDownload,
+  triggerBlobDownload,
+} from "@/lib/downloads/trigger";
 
 type GateReason =
   | "auth_required"
@@ -40,6 +47,8 @@ type GateReason =
 
 type Props = {
   stills: Still[];
+  titleId: string;
+  titleSlug: string;
   // Effective tier for the quota affordance — the page coerces
   // super-admins to "verified" here (server still bypasses for real).
   tier: Tier;
@@ -57,6 +66,8 @@ const SIGNED_IN_STILL_LIMIT = (() => {
 
 export default function StillsTab({
   stills,
+  titleId,
+  titleSlug,
   tier,
   stillDownloadUsage,
 }: Props) {
@@ -64,6 +75,87 @@ export default function StillsTab({
   const [index, setIndex] = useState(-1);
   const [usage, setUsage] = useState(stillDownloadUsage);
   const [gateReason, setGateReason] = useState<GateReason | null>(null);
+  // "Download all stills" — header action (outside the lightbox, so it CAN use
+  // the GateModal). Client-side fflate zip for normal sets; a size guard falls
+  // back to sequential downloads above ~500 MB so a large set can't OOM the tab.
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkLabel, setBulkLabel] = useState("");
+  const [bulkError, setBulkError] = useState(false);
+  const [showMultiNote, setShowMultiNote] = useState(false);
+  const [bulkGate, setBulkGate] = useState<{ reason: GateReason } | null>(null);
+
+  async function handleDownloadAllStills() {
+    if (bulkBusy) return;
+    setBulkBusy(true);
+    setBulkError(false);
+    setShowMultiNote(false);
+    setBulkLabel("Preparing…");
+    try {
+      const res = await fetch(`/api/titles/${titleId}/download-all`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "stills" }),
+      });
+      if (res.status === 403) {
+        const json = (await res.json().catch(() => ({}))) as {
+          error?: GateReason;
+        };
+        setBulkGate({ reason: json.error ?? "auth_required" });
+        return;
+      }
+      if (!res.ok) {
+        setBulkError(true);
+        return;
+      }
+      const { items } = (await res.json()) as {
+        items: { url: string; filename: string; size: number | null }[];
+      };
+      if (!items || items.length === 0) {
+        setBulkError(true);
+        return;
+      }
+
+      const totalBytes = items.reduce((sum, it) => sum + (it.size ?? 0), 0);
+      if (!shouldZipStillsInMemory(totalBytes)) {
+        // Large set — sequential fallback (same mechanism as clips), no
+        // in-memory zip. Covers the ~595 MB / 103-image outlier.
+        setShowMultiNote(items.length > 1);
+        for (let i = 0; i < items.length; i++) {
+          setBulkLabel(`Downloading ${i + 1} of ${items.length}…`);
+          triggerAnchorDownload(items[i].url, items[i].filename);
+          if (i < items.length - 1) {
+            await new Promise((r) => setTimeout(r, 800));
+          }
+        }
+        return;
+      }
+
+      // In-memory zip via fflate. Fetch each object (CORS-permitted on prod),
+      // dedupe entry names, then store (level 0 — jpeg/png/webp are already
+      // compressed, so deflate burns CPU for ~0 gain).
+      const files: Record<string, Uint8Array> = {};
+      const used = new Set<string>();
+      for (let i = 0; i < items.length; i++) {
+        setBulkLabel(`Fetching ${i + 1} of ${items.length}…`);
+        const r = await fetch(items[i].url);
+        if (!r.ok) throw new Error("fetch_failed");
+        files[dedupeName(items[i].filename, used)] = new Uint8Array(
+          await r.arrayBuffer(),
+        );
+      }
+      setBulkLabel("Zipping…");
+      const zipped = zipSync(files, { level: 0 });
+      triggerBlobDownload(
+        new Blob([zipped], { type: "application/zip" }),
+        `${titleSlug}-stills.zip`,
+      );
+    } catch {
+      setBulkError(true);
+    } finally {
+      setBulkBusy(false);
+      setBulkLabel("");
+    }
+  }
 
   if (!stills || stills.length === 0) {
     return (
@@ -170,6 +262,30 @@ export default function StillsTab({
 
   return (
     <>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="m-0 text-body-sm text-moonbeem-ink-muted">
+          {withFiles.length} still{withFiles.length === 1 ? "" : "s"}
+        </p>
+        <button
+          type="button"
+          onClick={handleDownloadAllStills}
+          disabled={bulkBusy}
+          className="shrink-0 rounded-md border border-white/10 px-3 py-1.5 text-body-sm text-moonbeem-pink transition-colors hover:border-moonbeem-pink disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {bulkBusy ? bulkLabel || "Preparing…" : "Download all stills"}
+        </button>
+      </div>
+      {showMultiNote && (
+        <p className="mb-4 -mt-2 text-caption text-moonbeem-ink-subtle">
+          Your browser may ask permission to download multiple files —
+          that&rsquo;s expected; allow it to get every still.
+        </p>
+      )}
+      {bulkError && (
+        <p className="mb-4 -mt-2 text-caption text-moonbeem-magenta">
+          Couldn&rsquo;t start the download. Try again.
+        </p>
+      )}
       <RowsPhotoAlbum
         photos={photos}
         targetRowHeight={220}
@@ -208,6 +324,13 @@ export default function StillsTab({
             "close",
           ],
         }}
+      />
+      <GateModal
+        open={!!bulkGate}
+        onClose={() => setBulkGate(null)}
+        reason={bulkGate?.reason ?? "auth_required"}
+        capabilityType="stills"
+        returnTo={pathname || "/"}
       />
     </>
   );
