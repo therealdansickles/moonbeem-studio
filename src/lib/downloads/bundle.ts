@@ -8,10 +8,11 @@
 //      authorize route to name each manifest entry (the stills zip needs real
 //      per-file names because R2's Content-Disposition is NOT CORS-exposed, so
 //      the browser can't read the original name off the fetched bytes).
-//   2. shouldZipStillsInMemory — the size guard. Stills are zipped in the
-//      browser with fflate's in-memory zipSync; above the cap we fall back to
-//      sequential downloads so a large set (e.g. the 103-image / ~595 MB
-//      outlier) can't OOM the tab.
+//   2. shouldZipInMemory — the size guard for the zip-vs-sequential branch,
+//      shared by BOTH clips and stills. At or under the cap the browser fetches
+//      the set and fflate-zips it into one archive; over it we fall back to
+//      sequential downloads so a large set (e.g. a multi-hundred-MB clips set,
+//      or the 103-image / ~595 MB stills outlier) can't OOM the tab.
 
 const EXT_BY_CONTENT_TYPE: Record<string, string> = {
   "video/mp4": "mp4",
@@ -70,12 +71,21 @@ export function dedupeName(name: string, used: Set<string>): string {
   return candidate;
 }
 
-// Above this total the stills set is streamed as sequential downloads instead
-// of an in-memory zip. ~500 MB: in-memory zipSync holds both the fetched bytes
-// and the output archive, so the peak is ~2× this — comfortable on desktop,
-// and it puts the known ~595 MB / 103-image outlier onto the sequential path.
-export const STILLS_ZIP_MAX_BYTES = 500 * 1024 * 1024;
+// The single zip-vs-sequential threshold for BOTH clips and stills. At or under
+// this total the set is fetched and zipped into one archive; over it, sequential
+// downloads. ~500 MiB (524,288,000 bytes). MEMORY: the in-memory zip path holds
+// the fetched bytes AND the output archive AND (briefly) the Blob copy of that
+// archive, so the transient peak is up to ~3× this total for already-compressed
+// media (the hook drops the input buffers before the Blob to shave it toward
+// ~2×). Fine on desktop; a near-cap set can still OOM a mobile tab. One knob.
+//
+// TUNING NOTES (open, per Dan's re-review): (a) the motivating Erupcja clips set
+// is 525,488,587 B (~501 MB) — ~1.14 MB OVER this cap, so it sequences; raising
+// the cap to 512 MiB (536,870,912) would zip it. (b) Mobile multi-download
+// behavior + tighter memory may argue for a LOWER mobile cap (or a streaming/
+// worker zip) than desktop — the shared hook is the one place to change it.
+export const BUNDLE_ZIP_MAX_BYTES = 500 * 1024 * 1024;
 
-export function shouldZipStillsInMemory(totalBytes: number): boolean {
-  return totalBytes <= STILLS_ZIP_MAX_BYTES;
+export function shouldZipInMemory(totalBytes: number): boolean {
+  return totalBytes <= BUNDLE_ZIP_MAX_BYTES;
 }

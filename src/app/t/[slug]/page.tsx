@@ -583,6 +583,7 @@ export default async function TitlePage({ params }: PageProps) {
                 <VideosTab
                   clips={clips}
                   titleId={title.id}
+                  titleSlug={title.slug}
                   tier={effectiveTier}
                   clipDownloadUsage={clipDownloadUsage}
                 />

@@ -4,8 +4,8 @@ import {
   extForContentType,
   filenameForItem,
   dedupeName,
-  shouldZipStillsInMemory,
-  STILLS_ZIP_MAX_BYTES,
+  shouldZipInMemory,
+  BUNDLE_ZIP_MAX_BYTES,
 } from "./bundle";
 
 let passed = 0;
@@ -48,12 +48,23 @@ console.log("dedupeName:");
   eq(dedupeName("noext", used), "noext-2", "no-ext collision suffixes at end");
 }
 
-console.log("shouldZipStillsInMemory:");
-eq(shouldZipStillsInMemory(0), true, "empty -> zip");
-eq(shouldZipStillsInMemory(50 * 1024 * 1024), true, "50MB -> zip");
-eq(shouldZipStillsInMemory(STILLS_ZIP_MAX_BYTES), true, "exactly the cap -> zip");
-eq(shouldZipStillsInMemory(STILLS_ZIP_MAX_BYTES + 1), false, "one over cap -> sequential");
-eq(shouldZipStillsInMemory(595 * 1024 * 1024), false, "the ~595MB dina outlier -> sequential");
+console.log("shouldZipInMemory (size-based branch — both media types):");
+const MB = 1024 * 1024;
+// boundary
+eq(shouldZipInMemory(0), true, "empty -> zip");
+eq(shouldZipInMemory(BUNDLE_ZIP_MAX_BYTES), true, "exactly the cap -> zip");
+eq(shouldZipInMemory(BUNDLE_ZIP_MAX_BYTES + 1), false, "one over cap -> sequential");
+// CLIPS — both directions
+eq(shouldZipInMemory(300 * MB), true, "clips: a 300MB set -> zip");
+eq(
+  shouldZipInMemory(525488587),
+  false,
+  "clips: Erupcja 525,488,587B (~501MB, ~1.1MB over the 500MiB cap) -> sequential",
+);
+eq(shouldZipInMemory(2194 * MB), false, "clips: bob-trevino ~2.2GB -> sequential");
+// STILLS — both directions
+eq(shouldZipInMemory(40 * MB), true, "stills: a 40MB set -> zip");
+eq(shouldZipInMemory(595 * MB), false, "stills: dina ~595MB/103 -> sequential");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
