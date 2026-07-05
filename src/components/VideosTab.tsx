@@ -18,6 +18,7 @@ import { shouldZipBundle } from "@/lib/downloads/bundle";
 import {
   useBundleDownload,
   useDeviceMemory,
+  useIsIOS,
 } from "@/lib/downloads/useBundleDownload";
 
 type GateReason =
@@ -91,15 +92,17 @@ export default function VideosTab({
     onGate: (reason) => setGate({ reason }),
   });
   const deviceMem = useDeviceMemory();
+  const isIos = useIsIOS();
   // Downloadable clips only — the authorize route bundles rows with a file_url
   // (it skips null-file_url), so the count + mode note derive from the SAME set
   // the route sums, not the raw clips array.
   const downloadableClips = clips.filter((c) => c.file_url);
-  // Which mode WILL run — size + device-memory, the same decision run() makes.
-  // SSR-safe: deviceMem is undefined until mounted (size governs), then resolves.
+  // Which mode WILL run — iOS + device-memory + size, the same decision run()
+  // makes. SSR-safe: isIos=false / deviceMem=undefined until mounted, then resolve.
   const willZipClips = shouldZipBundle(
     downloadableClips.reduce((sum, c) => sum + (c.file_size_bytes ?? 0), 0),
     deviceMem,
+    isIos,
   );
 
   // Quota label — only the signed_in tier carries a clip quota.

@@ -89,15 +89,24 @@ export function shouldZipInMemory(totalBytes: number): boolean {
   return totalBytes <= BUNDLE_ZIP_MAX_BYTES;
 }
 
-// Full branch decision: the size threshold PLUS a device-memory capability gate.
-// A low-memory device (navigator.deviceMemory <= 4 GiB, where the ~2-3× in-memory
-// zip peak risks an OOM tab crash) is forced to SEQUENTIAL regardless of size.
-// When deviceMemory is unavailable (Safari/Firefox don't expose it) the size
-// threshold alone governs — graceful degradation, never a hard block.
+// Full branch decision: an iOS short-circuit, THEN the device-memory gate, THEN
+// the size threshold.
+//   - isIOS: every iOS browser is WebKit, with a low, uncatchable per-tab memory
+//     ceiling AND no navigator.deviceMemory, so the in-memory zip OOM-kills the
+//     tab on large sets (observed: Erupcja ~501 MB died at ~11/91 fetches, silent
+//     tab reload). Force SEQUENTIAL regardless of size — this MUST come first,
+//     ahead of the deviceMemory/size logic, because deviceMemory can't catch iOS.
+//   - deviceMemory <= 4 GiB: low-memory device (the ~2-3× in-memory zip peak
+//     risks an OOM tab crash) -> sequential regardless of size.
+//   - deviceMemory absent on a NON-iOS browser (desktop Safari/Firefox, ample
+//     RAM): the size threshold alone governs — graceful degradation, never a
+//     hard block.
 export function shouldZipBundle(
   totalBytes: number,
   deviceMemoryGiB: number | undefined,
+  isIOS: boolean,
 ): boolean {
+  if (isIOS) return false;
   if (typeof deviceMemoryGiB === "number" && deviceMemoryGiB <= 4) return false;
   return shouldZipInMemory(totalBytes);
 }

@@ -37,6 +37,7 @@ import { shouldZipBundle } from "@/lib/downloads/bundle";
 import {
   useBundleDownload,
   useDeviceMemory,
+  useIsIOS,
 } from "@/lib/downloads/useBundleDownload";
 
 type GateReason =
@@ -89,9 +90,10 @@ export default function StillsTab({
     type: "stills",
     onGate: (reason) => setBulkGate({ reason }),
   });
-  // Read once here (unconditional hook, before the early return) so the plain
+  // Read once here (unconditional hooks, before the early return) so the plain
   // shouldZipBundle call below — after the return — never violates hook rules.
   const deviceMem = useDeviceMemory();
+  const isIos = useIsIOS();
 
   if (!stills || stills.length === 0) {
     return (
@@ -104,10 +106,11 @@ export default function StillsTab({
   }
 
   const withFiles = stills.filter((s) => !!s.file_url);
-  // Which mode WILL run — size + device-memory, the same decision run() makes.
+  // Which mode WILL run — iOS + device-memory + size, the same decision run() makes.
   const willZipStills = shouldZipBundle(
     withFiles.reduce((sum, s) => sum + (s.file_size_bytes ?? 0), 0),
     deviceMem,
+    isIos,
   );
   const photos: Photo[] = withFiles.map((s) => ({
     src: s.file_url!,

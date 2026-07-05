@@ -67,23 +67,24 @@ eq(shouldZipInMemory(2194 * MB), false, "clips: bob-trevino ~2.2GB -> sequential
 eq(shouldZipInMemory(40 * MB), true, "stills: a 40MB set -> zip");
 eq(shouldZipInMemory(595 * MB), false, "stills: dina ~595MB/103 -> sequential");
 
-console.log("shouldZipBundle (size + device-memory gate):");
-// absent deviceMemory (Safari/Firefox) -> size threshold alone governs
-eq(shouldZipBundle(300 * MB, undefined), true, "no deviceMemory + 300MB -> zip (size governs)");
-eq(
-  shouldZipBundle(525488587, undefined),
-  true,
-  "no deviceMemory + Erupcja ~501MB -> zip (under 512MiB)",
-);
-eq(shouldZipBundle(700 * MB, undefined), false, "no deviceMemory + 700MB -> sequential (over cap)");
-// high-memory device (>4 GiB) -> size threshold governs
-eq(shouldZipBundle(525488587, 8), true, "8GiB + Erupcja -> zip (size governs)");
-eq(shouldZipBundle(700 * MB, 8), false, "8GiB + 700MB -> sequential (over cap even on high-mem)");
-// low-memory device (<=4 GiB) -> forced sequential regardless of size
-eq(shouldZipBundle(525488587, 4), false, "4GiB + Erupcja -> sequential (device-memory gate)");
-eq(shouldZipBundle(100 * MB, 4), false, "4GiB + tiny 100MB -> sequential (gate overrides size)");
-eq(shouldZipBundle(100 * MB, 2), false, "2GiB + tiny -> sequential");
-eq(shouldZipBundle(100 * MB, 6), true, "6GiB + tiny -> zip (>4, size governs)");
+console.log("shouldZipBundle (iOS short-circuit + device-memory gate + size):");
+// iOS (every iOS browser is WebKit) -> ALWAYS sequential, regardless of size or
+// deviceMemory (which iOS never reports) — the OOM hotfix.
+eq(shouldZipBundle(525488587, undefined, true), false, "iOS + Erupcja ~501MB -> sequential (WebKit OOM guard)");
+eq(shouldZipBundle(40 * MB, undefined, true), false, "iOS + tiny 40MB -> sequential (iOS never zips)");
+eq(shouldZipBundle(40 * MB, 8, true), false, "iOS + tiny + phantom 8GiB -> sequential (iOS short-circuits FIRST)");
+// desktop Safari/Firefox: NOT iOS, absent deviceMemory -> size threshold governs
+eq(shouldZipBundle(40 * MB, undefined, false), true, "desktop Safari (no deviceMemory, not iOS) + 40MB -> zip");
+eq(shouldZipBundle(525488587, undefined, false), true, "desktop Safari + Erupcja ~501MB -> zip (under 512MiB)");
+eq(shouldZipBundle(700 * MB, undefined, false), false, "desktop Safari + 700MB -> sequential (over cap)");
+// high-memory Chromium (>4 GiB) -> size threshold governs
+eq(shouldZipBundle(525488587, 8, false), true, "8GiB + Erupcja -> zip (size governs)");
+eq(shouldZipBundle(700 * MB, 8, false), false, "8GiB + 700MB -> sequential (over cap even on high-mem)");
+// low-memory Chromium (<=4 GiB) -> forced sequential regardless of size
+eq(shouldZipBundle(525488587, 4, false), false, "4GiB + Erupcja -> sequential (device-memory gate)");
+eq(shouldZipBundle(100 * MB, 4, false), false, "4GiB + tiny 100MB -> sequential (gate overrides size)");
+eq(shouldZipBundle(100 * MB, 2, false), false, "2GiB + tiny -> sequential");
+eq(shouldZipBundle(100 * MB, 6, false), true, "6GiB + tiny -> zip (>4, size governs)");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

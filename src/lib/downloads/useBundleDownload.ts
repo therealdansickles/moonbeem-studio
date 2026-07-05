@@ -34,6 +34,28 @@ export function useDeviceMemory(): number | undefined {
   return dm;
 }
 
+// True on iOS — where EVERY browser is WebKit (App Store policy) with a low,
+// uncatchable per-tab memory ceiling and no navigator.deviceMemory, so the
+// in-memory zip path OOM-kills the tab. Detection: the classic iPhone/iPad/iPod
+// UA/platform match PLUS the iPadOS-13+ desktop-masquerade (reports "MacIntel"
+// with a touch screen). Client-only; returns false during SSR.
+function isIOS(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const platform = navigator.platform || "";
+  if (/iP(hone|ad|od)/.test(ua) || /iP(hone|ad|od)/.test(platform)) return true;
+  return platform === "MacIntel" && navigator.maxTouchPoints > 1;
+}
+
+// After-mount iOS read for the up-front mode note — SSR-safe (false until
+// mounted, matching the server render, so no hydration mismatch), then resolves
+// so the note tells iOS users the truth: multiple files, allow the prompt.
+export function useIsIOS(): boolean {
+  const [ios, setIos] = useState(false);
+  useEffect(() => setIos(isIOS()), []);
+  return ios;
+}
+
 type BundleType = "clips" | "stills";
 type GateReason = "auth_required" | "verification_required" | "limit_reached";
 type BundleItem = { url: string; filename: string; size: number | null };
@@ -77,8 +99,9 @@ export function useBundleDownload(opts: {
       }
 
       const totalBytes = items.reduce((sum, it) => sum + (it.size ?? 0), 0);
-      // Size threshold + device-memory gate (low-mem devices force sequential).
-      if (shouldZipBundle(totalBytes, deviceMemoryGiB())) {
+      // iOS short-circuit + device-memory gate + size threshold. iOS always
+      // sequences (WebKit OOMs the in-memory zip); low-mem devices too.
+      if (shouldZipBundle(totalBytes, deviceMemoryGiB(), isIOS())) {
         // Zip path — fetch each object (needs R2 GET CORS, prod-only today),
         // dedupe entry names, store (level 0 — mp4/jpeg/png are already
         // compressed, so deflate burns CPU for ~0 gain).
