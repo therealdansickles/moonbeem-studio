@@ -11,10 +11,28 @@
 // over the cap, fire staggered direct-from-R2 downloads (the objects'
 // Content-Disposition forces an attachment save; the browser prompts once).
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { zipSync } from "fflate";
-import { dedupeName, shouldZipInMemory } from "./bundle";
+import { dedupeName, shouldZipBundle } from "./bundle";
 import { triggerAnchorDownload, triggerBlobDownload } from "./trigger";
+
+// navigator.deviceMemory (coarse GiB) if the browser exposes it (Chromium),
+// else undefined (Safari/Firefox). Client-only; not in the standard DOM lib.
+function deviceMemoryGiB(): number | undefined {
+  if (typeof navigator === "undefined") return undefined;
+  const dm = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  return typeof dm === "number" ? dm : undefined;
+}
+
+// After-mount device-memory read for the up-front mode note. SSR-safe: the
+// initial value is undefined (so the server render + first client render agree —
+// no hydration mismatch), then resolves post-mount so the note matches the
+// decision run() will actually make.
+export function useDeviceMemory(): number | undefined {
+  const [dm, setDm] = useState<number | undefined>(undefined);
+  useEffect(() => setDm(deviceMemoryGiB()), []);
+  return dm;
+}
 
 type BundleType = "clips" | "stills";
 type GateReason = "auth_required" | "verification_required" | "limit_reached";
@@ -59,7 +77,8 @@ export function useBundleDownload(opts: {
       }
 
       const totalBytes = items.reduce((sum, it) => sum + (it.size ?? 0), 0);
-      if (shouldZipInMemory(totalBytes)) {
+      // Size threshold + device-memory gate (low-mem devices force sequential).
+      if (shouldZipBundle(totalBytes, deviceMemoryGiB())) {
         // Zip path — fetch each object (needs R2 GET CORS, prod-only today),
         // dedupe entry names, store (level 0 — mp4/jpeg/png are already
         // compressed, so deflate burns CPU for ~0 gain).

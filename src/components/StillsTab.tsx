@@ -33,8 +33,11 @@ import type { Still } from "@/lib/queries/titles";
 import type { Tier } from "@/lib/gating/types";
 import { gateMap } from "@/lib/gating/gate-map";
 import GateModal from "@/components/gating/GateModal";
-import { shouldZipInMemory } from "@/lib/downloads/bundle";
-import { useBundleDownload } from "@/lib/downloads/useBundleDownload";
+import { shouldZipBundle } from "@/lib/downloads/bundle";
+import {
+  useBundleDownload,
+  useDeviceMemory,
+} from "@/lib/downloads/useBundleDownload";
 
 type GateReason =
   | "auth_required"
@@ -86,6 +89,9 @@ export default function StillsTab({
     type: "stills",
     onGate: (reason) => setBulkGate({ reason }),
   });
+  // Read once here (unconditional hook, before the early return) so the plain
+  // shouldZipBundle call below — after the return — never violates hook rules.
+  const deviceMem = useDeviceMemory();
 
   if (!stills || stills.length === 0) {
     return (
@@ -98,9 +104,10 @@ export default function StillsTab({
   }
 
   const withFiles = stills.filter((s) => !!s.file_url);
-  // Which mode WILL run, from the SSR sizes (same rows the route sums).
-  const willZipStills = shouldZipInMemory(
+  // Which mode WILL run — size + device-memory, the same decision run() makes.
+  const willZipStills = shouldZipBundle(
     withFiles.reduce((sum, s) => sum + (s.file_size_bytes ?? 0), 0),
+    deviceMem,
   );
   const photos: Photo[] = withFiles.map((s) => ({
     src: s.file_url!,

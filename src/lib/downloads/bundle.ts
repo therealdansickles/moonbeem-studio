@@ -71,21 +71,33 @@ export function dedupeName(name: string, used: Set<string>): string {
   return candidate;
 }
 
-// The single zip-vs-sequential threshold for BOTH clips and stills. At or under
-// this total the set is fetched and zipped into one archive; over it, sequential
-// downloads. ~500 MiB (524,288,000 bytes). MEMORY: the in-memory zip path holds
-// the fetched bytes AND the output archive AND (briefly) the Blob copy of that
-// archive, so the transient peak is up to ~3× this total for already-compressed
-// media (the hook drops the input buffers before the Blob to shave it toward
-// ~2×). Fine on desktop; a near-cap set can still OOM a mobile tab. One knob.
+// The single zip-vs-sequential threshold for BOTH clips and stills, both form
+// factors. At or under this total the set is fetched and zipped into one
+// archive; over it, sequential downloads. 512 MiB (536,870,912 bytes) — set
+// deliberately just above the motivating Erupcja clips set (525,488,587 B /
+// ~501 MB) so it zips to one file by design, not by luck.
 //
-// TUNING NOTES (open, per Dan's re-review): (a) the motivating Erupcja clips set
-// is 525,488,587 B (~501 MB) — ~1.14 MB OVER this cap, so it sequences; raising
-// the cap to 512 MiB (536,870,912) would zip it. (b) Mobile multi-download
-// behavior + tighter memory may argue for a LOWER mobile cap (or a streaming/
-// worker zip) than desktop — the shared hook is the one place to change it.
-export const BUNDLE_ZIP_MAX_BYTES = 500 * 1024 * 1024;
+// MEMORY: the in-memory zip path holds the fetched bytes AND the output archive
+// AND (briefly) the Blob copy, so the transient peak is up to ~3× this total for
+// already-compressed media (the hook frees the input buffers before the Blob to
+// shave it toward ~2×). A near-cap set can still OOM a low-memory mobile tab —
+// which is what shouldZipBundle's device-memory gate below guards against.
+export const BUNDLE_ZIP_MAX_BYTES = 512 * 1024 * 1024;
 
+// Size-only decision (pure, size-testable).
 export function shouldZipInMemory(totalBytes: number): boolean {
   return totalBytes <= BUNDLE_ZIP_MAX_BYTES;
+}
+
+// Full branch decision: the size threshold PLUS a device-memory capability gate.
+// A low-memory device (navigator.deviceMemory <= 4 GiB, where the ~2-3× in-memory
+// zip peak risks an OOM tab crash) is forced to SEQUENTIAL regardless of size.
+// When deviceMemory is unavailable (Safari/Firefox don't expose it) the size
+// threshold alone governs — graceful degradation, never a hard block.
+export function shouldZipBundle(
+  totalBytes: number,
+  deviceMemoryGiB: number | undefined,
+): boolean {
+  if (typeof deviceMemoryGiB === "number" && deviceMemoryGiB <= 4) return false;
+  return shouldZipInMemory(totalBytes);
 }

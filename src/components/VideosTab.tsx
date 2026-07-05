@@ -14,8 +14,11 @@ import type { Clip } from "@/lib/queries/titles";
 import type { Tier } from "@/lib/gating/types";
 import { gateMap } from "@/lib/gating/gate-map";
 import GateModal from "@/components/gating/GateModal";
-import { shouldZipInMemory } from "@/lib/downloads/bundle";
-import { useBundleDownload } from "@/lib/downloads/useBundleDownload";
+import { shouldZipBundle } from "@/lib/downloads/bundle";
+import {
+  useBundleDownload,
+  useDeviceMemory,
+} from "@/lib/downloads/useBundleDownload";
 
 type GateReason =
   | "auth_required"
@@ -87,14 +90,16 @@ export default function VideosTab({
     type: "clips",
     onGate: (reason) => setGate({ reason }),
   });
+  const deviceMem = useDeviceMemory();
   // Downloadable clips only — the authorize route bundles rows with a file_url
   // (it skips null-file_url), so the count + mode note derive from the SAME set
   // the route sums, not the raw clips array.
   const downloadableClips = clips.filter((c) => c.file_url);
-  // Which mode WILL run, from the SSR sizes (same rows the route sums) — drives
-  // the up-front mode note. The hook re-decides from the route sizes at run time.
-  const willZipClips = shouldZipInMemory(
+  // Which mode WILL run — size + device-memory, the same decision run() makes.
+  // SSR-safe: deviceMem is undefined until mounted (size governs), then resolves.
+  const willZipClips = shouldZipBundle(
     downloadableClips.reduce((sum, c) => sum + (c.file_size_bytes ?? 0), 0),
+    deviceMem,
   );
 
   // Quota label — only the signed_in tier carries a clip quota.
