@@ -15,6 +15,7 @@ import type { Tier } from "@/lib/gating/types";
 import { gateMap } from "@/lib/gating/gate-map";
 import GateModal from "@/components/gating/GateModal";
 import { shouldZipBundle } from "@/lib/downloads/bundle";
+import { saveBlobToDevice } from "@/lib/downloads/trigger";
 import {
   useBundleDownload,
   useDeviceMemory,
@@ -142,14 +143,22 @@ export default function VideosTab({
         return;
       }
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${clip.label || "clip"}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      const filename = `${clip.label || "clip"}.mp4`;
+      if (isIos) {
+        // iOS: native share sheet ("Save to Files"), anchor fallback. Avoids the
+        // WebKit download-manager interrupt and is the platform-preferred save.
+        await saveBlobToDevice(blob, filename);
+      } else {
+        // Desktop + Android Chromium — unchanged anchor download.
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
       // Bump the local quota so the label updates without a reload.
       setUsage((u) => u + 1);
     } catch {
@@ -171,34 +180,39 @@ export default function VideosTab({
 
   return (
     <>
-      {downloadableClips.length > 0 && (
-        <>
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <p className="m-0 text-body-sm text-moonbeem-ink-muted">
-              {downloadableClips.length} clip
-              {downloadableClips.length === 1 ? "" : "s"}
-            </p>
-            <button
-              type="button"
-              onClick={handleDownloadAll}
-              disabled={bulkBusy}
-              className="shrink-0 rounded-md border border-white/10 px-3 py-1.5 text-body-sm text-moonbeem-pink transition-colors hover:border-moonbeem-pink disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {bulkBusy ? bulkLabel || "Preparing…" : "Download all clips"}
-            </button>
-          </div>
-          {willZipClips ? (
-            <p className="mb-4 -mt-2 text-caption text-moonbeem-ink-subtle">
-              Downloads as a single .zip file.
-            </p>
-          ) : downloadableClips.length > 1 ? (
-            <p className="mb-4 -mt-2 text-caption text-moonbeem-ink-subtle">
-              Your browser may ask permission to download multiple files —
-              that&rsquo;s expected; allow it to get every clip.
-            </p>
-          ) : null}
-        </>
-      )}
+      {downloadableClips.length > 0 &&
+        (isIos ? (
+          <p className="mb-4 text-caption text-moonbeem-ink-subtle">
+            Save clips one at a time on iPhone, full sets download on desktop.
+          </p>
+        ) : (
+          <>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="m-0 text-body-sm text-moonbeem-ink-muted">
+                {downloadableClips.length} clip
+                {downloadableClips.length === 1 ? "" : "s"}
+              </p>
+              <button
+                type="button"
+                onClick={handleDownloadAll}
+                disabled={bulkBusy}
+                className="shrink-0 rounded-md border border-white/10 px-3 py-1.5 text-body-sm text-moonbeem-pink transition-colors hover:border-moonbeem-pink disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {bulkBusy ? bulkLabel || "Preparing…" : "Download all clips"}
+              </button>
+            </div>
+            {willZipClips ? (
+              <p className="mb-4 -mt-2 text-caption text-moonbeem-ink-subtle">
+                Downloads as a single .zip file.
+              </p>
+            ) : downloadableClips.length > 1 ? (
+              <p className="mb-4 -mt-2 text-caption text-moonbeem-ink-subtle">
+                Your browser may ask permission to download multiple files —
+                that&rsquo;s expected; allow it to get every clip.
+              </p>
+            ) : null}
+          </>
+        ))}
       {bulkError && (
         <p className="mb-4 -mt-2 text-caption text-moonbeem-magenta">
           Couldn&rsquo;t start the download. Try again.

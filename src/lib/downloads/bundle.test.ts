@@ -6,6 +6,7 @@ import {
   dedupeName,
   shouldZipInMemory,
   shouldZipBundle,
+  chooseSavePath,
   BUNDLE_ZIP_MAX_BYTES,
 } from "./bundle";
 
@@ -85,6 +86,12 @@ eq(shouldZipBundle(525488587, 4, false), false, "4GiB + Erupcja -> sequential (d
 eq(shouldZipBundle(100 * MB, 4, false), false, "4GiB + tiny 100MB -> sequential (gate overrides size)");
 eq(shouldZipBundle(100 * MB, 2, false), false, "2GiB + tiny -> sequential");
 eq(shouldZipBundle(100 * MB, 6, false), true, "6GiB + tiny -> zip (>4, size governs)");
+
+console.log("chooseSavePath (iOS per-item save):");
+eq(chooseSavePath(true, true), "share", "iOS + canShare(files) -> native share sheet");
+eq(chooseSavePath(true, false), "anchor", "iOS + no canShare -> single anchor fallback");
+eq(chooseSavePath(false, true), "anchor", "desktop/Android (not iOS) -> anchor, UNCHANGED");
+eq(chooseSavePath(false, false), "anchor", "desktop, no canShare -> anchor");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

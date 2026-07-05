@@ -34,6 +34,7 @@ import type { Tier } from "@/lib/gating/types";
 import { gateMap } from "@/lib/gating/gate-map";
 import GateModal from "@/components/gating/GateModal";
 import { shouldZipBundle } from "@/lib/downloads/bundle";
+import { saveBlobToDevice } from "@/lib/downloads/trigger";
 import {
   useBundleDownload,
   useDeviceMemory,
@@ -181,14 +182,21 @@ export default function StillsTab({
       }
       if (!res.ok) return;
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${still.alt_text || "still"}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      const filename = `${still.alt_text || "still"}`;
+      if (isIos) {
+        // iOS: native share sheet ("Save to Files"), anchor fallback.
+        await saveBlobToDevice(blob, filename);
+      } else {
+        // Desktop + Android Chromium — unchanged anchor download.
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
       setUsage((u) => u + 1);
     } catch {
       // Network failure — leave the lightbox as is; the user can retry.
@@ -206,33 +214,38 @@ export default function StillsTab({
 
   return (
     <>
-      {withFiles.length > 0 && (
-        <>
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <p className="m-0 text-body-sm text-moonbeem-ink-muted">
-              {withFiles.length} still{withFiles.length === 1 ? "" : "s"}
-            </p>
-            <button
-              type="button"
-              onClick={handleDownloadAllStills}
-              disabled={bulkBusy}
-              className="shrink-0 rounded-md border border-white/10 px-3 py-1.5 text-body-sm text-moonbeem-pink transition-colors hover:border-moonbeem-pink disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {bulkBusy ? bulkLabel || "Preparing…" : "Download all stills"}
-            </button>
-          </div>
-          {willZipStills ? (
-            <p className="mb-4 -mt-2 text-caption text-moonbeem-ink-subtle">
-              Downloads as a single .zip file.
-            </p>
-          ) : withFiles.length > 1 ? (
-            <p className="mb-4 -mt-2 text-caption text-moonbeem-ink-subtle">
-              Your browser may ask permission to download multiple files —
-              that&rsquo;s expected; allow it to get every still.
-            </p>
-          ) : null}
-        </>
-      )}
+      {withFiles.length > 0 &&
+        (isIos ? (
+          <p className="mb-4 text-caption text-moonbeem-ink-subtle">
+            Save stills one at a time on iPhone, full sets download on desktop.
+          </p>
+        ) : (
+          <>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="m-0 text-body-sm text-moonbeem-ink-muted">
+                {withFiles.length} still{withFiles.length === 1 ? "" : "s"}
+              </p>
+              <button
+                type="button"
+                onClick={handleDownloadAllStills}
+                disabled={bulkBusy}
+                className="shrink-0 rounded-md border border-white/10 px-3 py-1.5 text-body-sm text-moonbeem-pink transition-colors hover:border-moonbeem-pink disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {bulkBusy ? bulkLabel || "Preparing…" : "Download all stills"}
+              </button>
+            </div>
+            {willZipStills ? (
+              <p className="mb-4 -mt-2 text-caption text-moonbeem-ink-subtle">
+                Downloads as a single .zip file.
+              </p>
+            ) : withFiles.length > 1 ? (
+              <p className="mb-4 -mt-2 text-caption text-moonbeem-ink-subtle">
+                Your browser may ask permission to download multiple files —
+                that&rsquo;s expected; allow it to get every still.
+              </p>
+            ) : null}
+          </>
+        ))}
       {bulkError && (
         <p className="mb-4 -mt-2 text-caption text-moonbeem-magenta">
           Couldn&rsquo;t start the download. Try again.

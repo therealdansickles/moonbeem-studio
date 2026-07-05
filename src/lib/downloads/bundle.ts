@@ -110,3 +110,18 @@ export function shouldZipBundle(
   if (typeof deviceMemoryGiB === "number" && deviceMemoryGiB <= 4) return false;
   return shouldZipInMemory(totalBytes);
 }
+
+// iOS per-item SAVE path. On iOS every browser is WebKit, and a batch of
+// programmatic downloads triggers a native "Start new download?" interrupt on
+// EVERY item (browser chrome, unsuppressible) — so iOS gets no bulk download;
+// each item is saved on its own. Where the browser can share files
+// (navigator.canShare) we hand the file to the native share sheet ("Save to
+// Files" / AirDrop / Messages); otherwise a single same-gesture anchor download.
+// Non-iOS (desktop + Android Chromium) is NEVER routed here — it keeps its
+// existing anchor download unchanged.
+export function chooseSavePath(
+  isIOS: boolean,
+  canShareFiles: boolean,
+): "share" | "anchor" {
+  return isIOS && canShareFiles ? "share" : "anchor";
+}
