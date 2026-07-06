@@ -32,6 +32,10 @@ export type HostedTitle = {
   id: string;
   title: string;
   episodes: HostedEpisode[];
+  // Server-derived status of the latest non-ready ingest job for this title
+  // (null = none). Makes an in-flight encode visible after a reload — without
+  // it the card would show a fresh uploader and invite a duplicate upload.
+  jobStatus: { status: "processing" | "errored"; error: string | null } | null;
 };
 
 type Phase = "idle" | "uploading" | "processing" | "ready" | "errored";
@@ -132,6 +136,17 @@ function HostedTitleCard({ hostedTitle }: { hostedTitle: HostedTitle }) {
   const [slowEncode, setSlowEncode] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Server-derived in-flight state (from the last non-ready ingest job).
+  // Only consulted when THIS tab isn't mid-lifecycle (phase 'idle') — a live
+  // upload/encode in this tab always wins. A job encoding in another tab (or
+  // after a reload) surfaces here as processing, suppressing the uploader so
+  // the creator doesn't start a duplicate upload; an errored prior job shows
+  // its message but still lets them try again.
+  const serverProcessing =
+    phase === "idle" && hostedTitle.jobStatus?.status === "processing";
+  const serverErrored =
+    phase === "idle" && hostedTitle.jobStatus?.status === "errored";
+
   // Poll the status route while the asset encodes (processing →
   // ready/errored). Inherited whole from TitleUploadPanel — same cadence,
   // same slow-encode stop-without-erroring.
@@ -223,7 +238,35 @@ function HostedTitleCard({ hostedTitle }: { hostedTitle: HostedTitle }) {
         </ul>
       )}
 
-      {(phase === "idle" || phase === "uploading") && (
+      {/* An encode is in flight (this title has a non-ready job) but this tab
+          isn't the one running it — after a reload, or a second tab. Show it
+          as processing and DON'T offer the uploader, so no duplicate upload. */}
+      {serverProcessing && (
+        <div className="mt-4 flex flex-col gap-2">
+          <p className="text-body-sm font-medium text-moonbeem-ink m-0">
+            Processing…
+          </p>
+          <p className="text-caption text-moonbeem-ink-subtle m-0">
+            A video for this film is still encoding (upload done ≠ ready). This
+            can take several minutes for a long film — reload in a bit to see it
+            once it&apos;s hosted.
+          </p>
+        </div>
+      )}
+
+      {/* A prior ingest job errored and this tab isn't mid-lifecycle — surface
+          it, but still offer the uploader below so they can try again. */}
+      {serverErrored && (
+        <p className="mt-4 text-caption text-moonbeem-magenta m-0">
+          The last upload for this film didn&apos;t finish
+          {hostedTitle.jobStatus?.error
+            ? `: ${hostedTitle.jobStatus.error}`
+            : "."}{" "}
+          You can upload again below.
+        </p>
+      )}
+
+      {((phase === "idle" && !serverProcessing) || phase === "uploading") && (
         <div className="mt-4">
           <MuxUploader
             endpoint={async () => {

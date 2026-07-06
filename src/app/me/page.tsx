@@ -15,6 +15,7 @@ import { getWatchedCountForCreator } from "@/lib/queries/watched";
 import { SignOutButton } from "@/components/SignOutButton";
 import PlatformIcon from "@/components/PlatformIcon";
 import { isR2ThumbnailUrl } from "@/lib/fan-edits/thumbnail-url";
+import { chunkedIn } from "@/lib/queries/chunked-in";
 import ClaimStubButton from "@/components/me/ClaimStubButton";
 import PayoutsControls from "@/components/me/PayoutsControls";
 import { getAffiliateBalance } from "@/lib/affiliate/balance";
@@ -239,9 +240,12 @@ export default async function MePage() {
     : 0;
 
   // Hosted films (creator hosting lane, v1 dashboard-only — ruling Q2): the
-  // claimed creator's creator_titles + their hosted assets. Two bounded
-  // queries (own titles, then ONE .in() over their ids) — display reads,
-  // degrade-to-empty.
+  // claimed creator's creator_titles + their hosted assets + any in-flight
+  // ingest jobs. Display reads, degrade-to-empty; the id-keyed reads use
+  // chunkedIn (the 2B trap — a raw .in() over a few hundred title ids
+  // overflows the PostgREST URL cap and fails the whole request, nulling every
+  // card to "no video yet"). A creator's title set is unbounded, so it must
+  // chunk even though most creators have few.
   const { data: hostedTitleRows } = creator
     ? await service
       .from("creator_titles")
@@ -252,32 +256,73 @@ export default async function MePage() {
     : { data: [] };
   const hostedTitleIds = ((hostedTitleRows ?? []) as Array<{ id: string }>)
     .map((t) => t.id);
-  const { data: hostedEpisodeRows } = hostedTitleIds.length > 0
-    ? await service
-      .from("creator_episodes")
-      .select("id, creator_title_id, episode_number, label")
-      .in("creator_title_id", hostedTitleIds)
-      .order("episode_number", { ascending: true })
-    : { data: [] };
+  const hostedEpisodeRows = hostedTitleIds.length > 0
+    ? await chunkedIn<{
+      id: string;
+      creator_title_id: string;
+      episode_number: number;
+      label: string | null;
+    }>(hostedTitleIds, "me/hosting/episodes", (chunk) =>
+      service
+        .from("creator_episodes")
+        .select("id, creator_title_id, episode_number, label")
+        .in("creator_title_id", chunk)
+        .order("episode_number", { ascending: true }),
+    )
+    : [];
+  // In-flight ingest jobs (creating/awaiting_upload/encoding) + the most recent
+  // errored one per title. WITHOUT this the /me page never reads
+  // creator_mux_ingest_jobs, so an encode in progress is invisible on reload —
+  // the card shows "no video yet" + a fresh uploader and a creator re-uploads,
+  // making a second DRM asset they can't delete (no manage surface in v1). We
+  // surface the job's status so an in-flight encode reads as "Processing…"
+  // after reload and the uploader is suppressed while one is active.
+  const activeJobRows = hostedTitleIds.length > 0
+    ? await chunkedIn<{
+      creator_title_id: string;
+      status: string;
+      error: string | null;
+      updated_at: string;
+    }>(hostedTitleIds, "me/hosting/jobs", (chunk) =>
+      service
+        .from("creator_mux_ingest_jobs")
+        .select("creator_title_id, status, error, updated_at")
+        .in("creator_title_id", chunk)
+        .neq("status", "ready")
+        .order("updated_at", { ascending: false }),
+    )
+    : [];
+  // Reduce to ONE status per title: an active encode wins over an errored one
+  // (the creator cares that work is in flight); otherwise the latest errored.
+  const jobByTitle = new Map<
+    string,
+    { status: "processing" | "errored"; error: string | null }
+  >();
+  for (const j of activeJobRows) {
+    const active = j.status !== "errored";
+    const existing = jobByTitle.get(j.creator_title_id);
+    if (active) {
+      jobByTitle.set(j.creator_title_id, { status: "processing", error: null });
+    } else if (!existing) {
+      jobByTitle.set(j.creator_title_id, {
+        status: "errored",
+        error: j.error,
+      });
+    }
+  }
   const hostedTitles: HostedTitle[] = (
     (hostedTitleRows ?? []) as Array<{ id: string; title: string }>
   ).map((t) => ({
     id: t.id,
     title: t.title,
-    episodes: (
-      (hostedEpisodeRows ?? []) as Array<{
-        id: string;
-        creator_title_id: string;
-        episode_number: number;
-        label: string | null;
-      }>
-    )
+    episodes: hostedEpisodeRows
       .filter((e) => e.creator_title_id === t.id)
       .map((e) => ({
         id: e.id,
         episode_number: e.episode_number,
         label: e.label,
       })),
+    jobStatus: jobByTitle.get(t.id) ?? null,
   }));
 
   // Stub creators with edits that look like they belong to this user
