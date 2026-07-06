@@ -79,6 +79,21 @@ export default function LibraryCard({ item }: { item: LibraryItem }) {
           </p>
         )}
 
+        <p className="m-0 text-caption text-moonbeem-ink-subtle">
+          {item.receiptUrl ? (
+            <a
+              href={item.receiptUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-moonbeem-pink transition-opacity hover:opacity-80"
+            >
+              View receipt
+            </a>
+          ) : (
+            "Receipt unavailable"
+          )}
+        </p>
+
         {(state === "owned" || state === "active") && (
           <Link
             href={`/t/${title.slug}#watch`}

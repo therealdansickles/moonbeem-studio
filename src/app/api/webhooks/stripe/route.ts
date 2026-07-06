@@ -50,6 +50,111 @@ import { getStripe } from "@/lib/stripe/server";
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Fetch a charge's hosted receipt_url + the actual Stripe processing fee, via the
+// PaymentIntent's latest_charge. Best-effort — a null on any miss is fine (the
+// receipt lazily backfills on Library click; the absorbed-fee is informational).
+async function fetchChargeReceiptAndFee(
+  stripe: Stripe,
+  piId: string | null,
+): Promise<{
+  receiptUrl: string | null;
+  feeCents: number | null;
+  chargeRefunded: boolean;
+  chargeDisputed: boolean;
+}> {
+  const empty = {
+    receiptUrl: null,
+    feeCents: null,
+    chargeRefunded: false,
+    chargeDisputed: false,
+  };
+  if (!piId) return empty;
+  try {
+    const pi = await stripe.paymentIntents.retrieve(piId, {
+      expand: ["latest_charge.balance_transaction"],
+    });
+    const charge =
+      pi.latest_charge && typeof pi.latest_charge === "object"
+        ? (pi.latest_charge as Stripe.Charge)
+        : null;
+    const receiptUrl = charge?.receipt_url ?? null;
+    const bt =
+      charge && typeof charge.balance_transaction === "object"
+        ? (charge.balance_transaction as Stripe.BalanceTransaction)
+        : null;
+    const feeCents = typeof bt?.fee === "number" ? bt.fee : null;
+    return {
+      receiptUrl,
+      feeCents,
+      chargeRefunded: charge?.refunded === true,
+      chargeDisputed: charge?.disputed === true,
+    };
+  } catch (err) {
+    console.error(
+      `[stripe-webhook] fetchChargeReceiptAndFee failed PI=${piId}: ${err instanceof Error ? err.message : "unknown"}`,
+    );
+    return empty;
+  }
+}
+
+// Clawback a TIP's settlement (policy C, keyed on tip_id) + mark the tip status,
+// when a refund/dispute charge maps to a tip instead of an entitlement. Mirrors
+// the entitlement clawback: paid -> reversed (absorb), held -> refunded/disputed.
+// {ok:false} on a real DB error so the caller 500s (Stripe retries). No tip match
+// = a genuinely non-transaction charge -> {ok:true}.
+async function clawbackTip(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  piId: string,
+  event: "refund" | "dispute",
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data: tip, error: tipErr } = await supabase
+    .from("tips")
+    .select("id, status")
+    .eq("stripe_payment_intent_id", piId)
+    .maybeSingle();
+  if (tipErr) return { ok: false, error: `tip lookup: ${tipErr.message}` };
+  if (!tip) return { ok: true };
+
+  const nowIso = new Date().toISOString();
+  const tipTerminal = event === "refund" ? "refunded" : "disputed";
+  // Mark the tip status (refund wins over dispute; idempotent once terminal).
+  const { error: statusErr } = await supabase
+    .from("tips")
+    .update({ status: tipTerminal })
+    .eq("id", tip.id as string)
+    .not(
+      "status",
+      "in",
+      event === "refund" ? "(refunded)" : "(refunded,disputed)",
+    );
+  if (statusErr) return { ok: false, error: `tip status: ${statusErr.message}` };
+
+  // A: a PAID cut -> reversed (absorb; no Stripe reversal).
+  const { error: revErr } = await supabase
+    .from("transaction_settlements")
+    .update({ payout_status: "reversed", reversed_at: nowIso })
+    .eq("tip_id", tip.id as string)
+    .eq("payout_status", "paid");
+  if (revErr) return { ok: false, error: `settlement reverse: ${revErr.message}` };
+
+  // B: a not-yet-paid cut (held) -> refunded/disputed.
+  const patch =
+    event === "refund"
+      ? { payout_status: "refunded", refunded_at: nowIso }
+      : { payout_status: "disputed", disputed_at: nowIso };
+  const excluded =
+    event === "refund"
+      ? "(refunded,reversed,paid)"
+      : "(refunded,reversed,disputed,paid)";
+  const { error: setErr } = await supabase
+    .from("transaction_settlements")
+    .update(patch)
+    .eq("tip_id", tip.id as string)
+    .not("payout_status", "in", excluded);
+  if (setErr) return { ok: false, error: `settlement block: ${setErr.message}` };
+  return { ok: true };
+}
+
 // ─── Stage 1: v2 thin-event support (ADDITIVE + INERT) ───────────────────────
 // Accounts created via stripe.accounts.create at the pinned apiVersion are
 // v2-managed and emit v2.core.account.* THIN events, not v1 account.updated — so
@@ -447,9 +552,100 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "grant_failed" }, { status: 500 });
           }
           // 'granted' (new) or 'already_granted' (idempotent replay) — ack 200.
+          // RECEIPT (Option A): capture the Stripe receipt_url so the Library
+          // click path stays Stripe-free. Best-effort — a miss leaves NULL,
+          // lazily backfilled on click. Idempotent via the receipt_url IS NULL
+          // guard. Runs AFTER the grant (a receipt failure never blocks it).
+          {
+            const { receiptUrl } = await fetchChargeReceiptAndFee(stripe, piId);
+            if (receiptUrl) {
+              const { error: rErr } = await supabase
+                .from("entitlements")
+                .update({ receipt_url: receiptUrl })
+                .eq("stripe_checkout_session_id", session.id)
+                .is("receipt_url", null);
+              if (rErr) {
+                console.error(
+                  `[stripe-webhook] receipt_url capture failed session=${session.id}: ${rErr.message}`,
+                );
+              }
+            }
+          }
           console.log(
             `[stripe-webhook] grant_entitlement ${grantResult} kind=${moonbeemKind} session=${session.id} user=${userId} title=${titleId}`,
           );
+          break;
+        }
+
+        // Fan-IN (tips): a tip Checkout was paid. grant_tip marks the tip paid +
+        // writes the settlement (creator owed 100%, Stripe fee absorbed),
+        // idempotently. Capture the receipt + absorbed fee on the same event.
+        if (md && moonbeemKind === "tip") {
+          if (session.payment_status !== "paid") {
+            console.log(
+              `[stripe-webhook] tip session not paid (status=${session.payment_status}); session=${session.id} — skipping grant`,
+            );
+            break;
+          }
+          const tipId = md.moonbeem_tip_id ?? "";
+          const amountCents = Number(md.moonbeem_amount_cents);
+          if (
+            !UUID_RE.test(tipId) ||
+            !Number.isInteger(amountCents) ||
+            amountCents <= 0 ||
+            !Number.isSafeInteger(amountCents)
+          ) {
+            console.error(
+              `[stripe-webhook] tip session malformed metadata; session=${session.id} tip=${tipId} amount=${md.moonbeem_amount_cents}`,
+            );
+            break;
+          }
+          const piId =
+            typeof session.payment_intent === "string"
+              ? session.payment_intent
+              : (session.payment_intent?.id ?? null);
+          const { receiptUrl, feeCents, chargeRefunded, chargeDisputed } =
+            await fetchChargeReceiptAndFee(stripe, piId);
+          const { data: grantResult, error: grantErr } = await supabase.rpc(
+            "grant_tip",
+            {
+              p_tip_id: tipId,
+              p_session_id: session.id,
+              p_payment_intent_id: piId,
+              p_receipt_url: receiptUrl,
+              p_stripe_fee_absorbed_cents: feeCents,
+            },
+          );
+          if (grantErr) {
+            console.error(
+              `[stripe-webhook] grant_tip failed; session=${session.id} tip=${tipId}: ${grantErr.message}`,
+            );
+            return NextResponse.json({ error: "grant_failed" }, { status: 500 });
+          }
+          console.log(
+            `[stripe-webhook] grant_tip ${grantResult} tip=${tipId} session=${session.id} amount=${amountCents}`,
+          );
+          // Race guard: if the charge was ALREADY refunded/disputed at grant time
+          // (an out-of-order refund/dispute delivered before this grant), block the
+          // just-written 'held' tip settlement now — grant_tip stamped the PI, so
+          // clawbackTip matches. Idempotent; mirrors the entitlement born-blocked
+          // posture (which the settle cron does via revoked_at).
+          if (piId && (chargeRefunded || chargeDisputed)) {
+            const claw = await clawbackTip(
+              supabase,
+              piId,
+              chargeRefunded ? "refund" : "dispute",
+            );
+            if (!claw.ok) {
+              console.error(
+                `[stripe-webhook] tip born-block clawback failed tip=${tipId}: ${claw.error}`,
+              );
+              return NextResponse.json({ error: "grant_failed" }, { status: 500 });
+            }
+            console.log(
+              `[stripe-webhook] tip born-blocked (charge already ${chargeRefunded ? "refunded" : "disputed"}) tip=${tipId}`,
+            );
+          }
           break;
         }
       }
@@ -642,8 +838,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "refund_lookup_failed" }, { status: 500 });
       }
       if (!ent) {
+        // No entitlement -> maybe a TIP charge. Clawback its settlement (policy
+        // C) + mark the tip refunded. A DB error 500s so Stripe retries.
+        const tipClaw = await clawbackTip(supabase, piId, "refund");
+        if (!tipClaw.ok) {
+          console.error(
+            `[stripe-webhook] [refund] tip clawback failed PI=${piId}: ${tipClaw.error}`,
+          );
+          return NextResponse.json({ error: "refund_block_failed" }, { status: 500 });
+        }
         console.log(
-          `[stripe-webhook] [refund] no entitlement for PI ${piId}, likely non-transaction charge; charge=${charge.id}`,
+          `[stripe-webhook] [refund] non-entitlement charge PI=${piId} (tip clawback applied if matched); charge=${charge.id}`,
         );
         break;
       }
@@ -742,8 +947,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "dispute_lookup_failed" }, { status: 500 });
       }
       if (!ent) {
+        // No entitlement -> maybe a TIP charge. Clawback its settlement (policy
+        // C) + mark the tip disputed. A DB error 500s so Stripe retries.
+        const tipClaw = await clawbackTip(supabase, piId, "dispute");
+        if (!tipClaw.ok) {
+          console.error(
+            `[stripe-webhook] [dispute] tip clawback failed PI=${piId}: ${tipClaw.error}`,
+          );
+          return NextResponse.json({ error: "dispute_block_failed" }, { status: 500 });
+        }
         console.log(
-          `[stripe-webhook] [dispute] no entitlement for PI ${piId}, likely non-transaction charge; dispute=${dispute.id}`,
+          `[stripe-webhook] [dispute] non-entitlement charge PI=${piId} (tip clawback applied if matched); dispute=${dispute.id}`,
         );
         break;
       }

@@ -4,6 +4,8 @@
 
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { isEntitlementActive } from "@/lib/entitlements/window";
+import { getStripe } from "@/lib/stripe/server";
+import type Stripe from "stripe";
 
 export type ActiveEntitlement = {
   id: string;
@@ -81,6 +83,7 @@ export type LibraryEntitlement = {
   first_played_at: string | null;
   price_paid_cents: number;
   revoked_at: string | null;
+  receipt_url: string | null;
   title: LibraryTitle;
 };
 
@@ -91,8 +94,59 @@ type LibraryJoinRow = {
   first_played_at: string | null;
   price_paid_cents: number;
   revoked_at: string | null;
+  receipt_url: string | null;
+  stripe_payment_intent_id: string | null;
   titles: LibraryTitle | null;
 };
+
+// Lazy receipt backfill (Option A): fill a null receipt_url from the stored
+// payment_intent (server Stripe), best-effort — fires only for rows the webhook
+// capture missed (legacy rows / a hiccup), then the column is read on future
+// renders. No click-time fetch; serial + swallow-errors so a Stripe blip never
+// breaks the Library render. Capped per render (below) to bound SSR latency.
+const RECEIPT_BACKFILL_MAX_PER_RENDER = 8;
+
+async function backfillMissingReceipts(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  rows: LibraryJoinRow[],
+): Promise<Map<string, string>> {
+  // Cap the fan-out: at most this many null-receipt rows fetch Stripe on a single
+  // render. New purchases are captured at the webhook, so this is a one-time
+  // legacy safety-net; rows over the cap (or a charge with no receipt_url) render
+  // "Receipt unavailable" and fill on a later render.
+  const need = rows
+    .filter((r) => !r.receipt_url && r.stripe_payment_intent_id)
+    .slice(0, RECEIPT_BACKFILL_MAX_PER_RENDER);
+  const filled = new Map<string, string>();
+  if (need.length === 0) return filled;
+  const stripe = getStripe();
+  for (const r of need) {
+    try {
+      const pi = await stripe.paymentIntents.retrieve(
+        r.stripe_payment_intent_id as string,
+        { expand: ["latest_charge"] },
+      );
+      const charge =
+        pi.latest_charge && typeof pi.latest_charge === "object"
+          ? (pi.latest_charge as Stripe.Charge)
+          : null;
+      const url = charge?.receipt_url ?? null;
+      if (url) {
+        await supabase
+          .from("entitlements")
+          .update({ receipt_url: url })
+          .eq("id", r.id)
+          .is("receipt_url", null);
+        filled.set(r.id, url);
+      }
+    } catch (err) {
+      console.error(
+        `[entitlements] receipt backfill failed ent=${r.id}: ${err instanceof Error ? err.message : "unknown"}`,
+      );
+    }
+  }
+  return filled;
+}
 
 export async function getMyEntitlements(
   userId: string,
@@ -101,7 +155,7 @@ export async function getMyEntitlements(
   const { data, error } = await supabase
     .from("entitlements")
     .select(
-      "id, kind, purchased_at, first_played_at, price_paid_cents, revoked_at, titles:title_id(id, slug, title, poster_url, is_public, transact_enabled, transact_price_cents)",
+      "id, kind, purchased_at, first_played_at, price_paid_cents, revoked_at, receipt_url, stripe_payment_intent_id, titles:title_id(id, slug, title, poster_url, is_public, transact_enabled, transact_price_cents)",
     )
     .eq("user_id", userId)
     .order("purchased_at", { ascending: false });
@@ -111,20 +165,23 @@ export async function getMyEntitlements(
     );
     return [];
   }
-  return ((data ?? []) as unknown as LibraryJoinRow[])
-    // A hard-deleted title CASCADE-removes its entitlement row, so a null title
-    // should not occur; filtered defensively so a Library never renders a card
-    // with no title.
-    .filter((r) => r.titles)
-    .map((r) => ({
-      id: r.id,
-      kind: r.kind,
-      purchased_at: r.purchased_at,
-      first_played_at: r.first_played_at,
-      price_paid_cents: r.price_paid_cents,
-      revoked_at: r.revoked_at,
-      title: r.titles!,
-    }));
+  // A hard-deleted title CASCADE-removes its entitlement row, so a null title
+  // should not occur; filtered defensively so a Library never renders a card
+  // with no title.
+  const rows = ((data ?? []) as unknown as LibraryJoinRow[]).filter(
+    (r) => r.titles,
+  );
+  const filled = await backfillMissingReceipts(supabase, rows);
+  return rows.map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    purchased_at: r.purchased_at,
+    first_played_at: r.first_played_at,
+    price_paid_cents: r.price_paid_cents,
+    revoked_at: r.revoked_at,
+    receipt_url: filled.get(r.id) ?? r.receipt_url,
+    title: r.titles!,
+  }));
 }
 
 // Stamp first_played_at exactly-once, at DB time, arming the 48h rental clock.

@@ -8,6 +8,7 @@ import {
 import PlatformIcon from "@/components/PlatformIcon";
 import AvatarCircle from "./AvatarCircle";
 import FollowButton from "./FollowButton";
+import TipButton from "./TipButton";
 import FollowStatLinks from "./FollowStatLinks";
 import type { FollowState } from "@/lib/follows/server";
 import Top12Grid from "./Top12Grid";
@@ -109,15 +110,18 @@ export default function ProfileView({
       />
     </div>
   ) : (
-    <FollowButton
-      targetCreatorId={profile.creator_id}
-      handle={profile.handle}
-      initialIsFollowing={isFollowing}
-      initialFollowerCount={profile.follower_count}
-      followingCount={profile.following_count}
-      followState={followState}
-      returnTo={`/c/${profile.handle}`}
-    />
+    <div className="flex shrink-0 flex-col items-center gap-3 sm:items-end">
+      <FollowButton
+        targetCreatorId={profile.creator_id}
+        handle={profile.handle}
+        initialIsFollowing={isFollowing}
+        initialFollowerCount={profile.follower_count}
+        followingCount={profile.following_count}
+        followState={followState}
+        returnTo={`/c/${profile.handle}`}
+      />
+      <TipButton creatorId={profile.creator_id} creatorName={displayName} />
+    </div>
   );
 
   return (

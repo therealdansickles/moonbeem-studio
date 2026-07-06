@@ -44,6 +44,7 @@ function row(
     first_played_at: opts.playedHoursAgo != null ? iso(opts.playedHoursAgo * HOUR) : null,
     price_paid_cents: 399,
     revoked_at: opts.revokedDaysAgo != null ? iso(opts.revokedDaysAgo * DAY) : null,
+    receipt_url: null,
     title: title(titleId),
   };
 }

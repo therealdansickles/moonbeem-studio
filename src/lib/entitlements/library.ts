@@ -28,6 +28,7 @@ export type LibraryItem = {
   firstPlayedAt: string | null; // drives the two expired-copy flavors
   expiresAt: string | null; // ISO; null for a purchase
   refundedAt: string | null; // ISO revoked_at when state === 'refunded'
+  receiptUrl: string | null; // Stripe hosted receipt; a link when present
 };
 
 // Precedence rank for picking one row per title. Higher wins.
@@ -53,6 +54,7 @@ function toItem(e: LibraryEntitlement, now: Date): LibraryItem {
     firstPlayedAt: e.first_played_at,
     expiresAt: expiry ? expiry.toISOString() : null,
     refundedAt: e.revoked_at,
+    receiptUrl: e.receipt_url,
   };
 }
 
