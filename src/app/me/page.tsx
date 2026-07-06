@@ -19,6 +19,9 @@ import ClaimStubButton from "@/components/me/ClaimStubButton";
 import PayoutsControls from "@/components/me/PayoutsControls";
 import { getAffiliateBalance } from "@/lib/affiliate/balance";
 import WelcomeBanner from "@/components/me/WelcomeBanner";
+import HostingSection, {
+  type HostedTitle,
+} from "@/components/me/HostingSection";
 import ProfileFanEditCard from "@/components/profile/ProfileFanEditCard";
 import AvatarCircle from "@/components/profile/AvatarCircle";
 import Top12Grid from "@/components/profile/Top12Grid";
@@ -234,6 +237,48 @@ export default async function MePage() {
   const watchedCount = creator
     ? await getWatchedCountForCreator(creator.id)
     : 0;
+
+  // Hosted films (creator hosting lane, v1 dashboard-only — ruling Q2): the
+  // claimed creator's creator_titles + their hosted assets. Two bounded
+  // queries (own titles, then ONE .in() over their ids) — display reads,
+  // degrade-to-empty.
+  const { data: hostedTitleRows } = creator
+    ? await service
+      .from("creator_titles")
+      .select("id, title")
+      .eq("creator_id", creator.id)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: true })
+    : { data: [] };
+  const hostedTitleIds = ((hostedTitleRows ?? []) as Array<{ id: string }>)
+    .map((t) => t.id);
+  const { data: hostedEpisodeRows } = hostedTitleIds.length > 0
+    ? await service
+      .from("creator_episodes")
+      .select("id, creator_title_id, episode_number, label")
+      .in("creator_title_id", hostedTitleIds)
+      .order("episode_number", { ascending: true })
+    : { data: [] };
+  const hostedTitles: HostedTitle[] = (
+    (hostedTitleRows ?? []) as Array<{ id: string; title: string }>
+  ).map((t) => ({
+    id: t.id,
+    title: t.title,
+    episodes: (
+      (hostedEpisodeRows ?? []) as Array<{
+        id: string;
+        creator_title_id: string;
+        episode_number: number;
+        label: string | null;
+      }>
+    )
+      .filter((e) => e.creator_title_id === t.id)
+      .map((e) => ({
+        id: e.id,
+        episode_number: e.episode_number,
+        label: e.label,
+      })),
+  }));
 
   // Stub creators with edits that look like they belong to this user
   // (handle match or already-verified-social match). Surfaces an
@@ -601,6 +646,20 @@ export default async function MePage() {
             </section>
           )}
         </div>
+
+        {/* ───────── HOSTING TIER (wide) — creator self-serve hosting lane,
+            v1 dashboard-only (ruling Q2): create → upload → encode → hosted.
+            No public page or publish/visibility controls yet (Phase 6). Only
+            claimed creators see it; the /api/me/hosting routes enforce the
+            same claimed-creator gate server-side. */}
+        {creator && (
+          <section className="flex flex-col gap-5">
+            <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-pink uppercase m-0">
+              Hosting
+            </h2>
+            <HostingSection hostedTitles={hostedTitles} />
+          </section>
+        )}
 
         {/* ───────── LIBRARY TIER (wide, grouped cluster) ───────── */}
         <section className="flex flex-col gap-5">

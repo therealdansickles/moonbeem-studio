@@ -16,6 +16,7 @@
 //   chattyAuthUser — 500 req/min per user — same surface but logged-in
 //   userWrites     — 30 req/min per user — profile/me/notify mutations
 //   partnerWrites  — 60 req/min per user — partner dashboard writes
+//   creatorWrites  — 60 req/min per user — creator hosting-lane writes
 //   admin          — 300 req/min per user — super-admin endpoints
 
 import { Ratelimit } from "@upstash/ratelimit";
@@ -46,6 +47,7 @@ export const limiters = {
   chattyAuthUser: makeLimiter(500, "chat-u"),
   userWrites: makeLimiter(30, "user-w"),
   partnerWrites: makeLimiter(60, "partner-w"),
+  creatorWrites: makeLimiter(60, "creator-w"),
   admin: makeLimiter(300, "admin"),
 } as const;
 
