@@ -393,6 +393,22 @@ export default function HostingSection({
       {hostedTitles.map((t) => (
         <HostedTitleCard key={t.id} hostedTitle={t} />
       ))}
+
+      {/* Deferred-remedy honesty: v1 has no self-serve delete (Phase 6 ships
+          it — Q2 dashboard-only). Until then, a hosted film can only be taken
+          down by us, so we say so plainly and give the contact path. */}
+      {hostedTitles.length > 0 && (
+        <p className="text-caption text-moonbeem-ink-subtle m-0">
+          Need to remove a hosted film? Email{" "}
+          <a
+            href="mailto:hello@moonbeem.xyz?subject=Remove%20a%20hosted%20film"
+            className="text-moonbeem-ink-muted hover:text-moonbeem-pink"
+          >
+            hello@moonbeem.xyz
+          </a>{" "}
+          — self-serve deletion is on the way.
+        </p>
+      )}
     </div>
   );
 }
