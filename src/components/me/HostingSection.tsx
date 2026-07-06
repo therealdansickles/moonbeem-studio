@@ -372,10 +372,23 @@ function HostedTitleCard({ hostedTitle }: { hostedTitle: HostedTitle }) {
   );
 }
 
+// Sentence-case minutes-hosted line (ruling D4): plain text, NO progress bar —
+// a bar implies a limit, and limits are a Phase-3 product decision. Rounds the
+// encode-minutes (the unit Mux bills storage in) to whole minutes, with an
+// honest sub-minute case.
+function storageLine(encodeMinutes: number): string {
+  if (encodeMinutes <= 0) return "You haven't hosted any video yet.";
+  if (encodeMinutes < 1) return "You've hosted less than a minute of video.";
+  const mins = Math.round(encodeMinutes);
+  return `You've hosted ${mins} ${mins === 1 ? "minute" : "minutes"} of video.`;
+}
+
 export default function HostingSection({
   hostedTitles,
+  encodeMinutes,
 }: {
   hostedTitles: HostedTitle[];
+  encodeMinutes: number;
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -386,6 +399,9 @@ export default function HostingSection({
         <p className="mt-3 text-body-sm text-moonbeem-ink-muted m-0">
           Upload your films to Moonbeem — encoded and stored with DRM
           protection. Create the film, then upload its video below.
+        </p>
+        <p className="mt-2 text-caption text-moonbeem-ink-subtle m-0 tabular-nums">
+          {storageLine(encodeMinutes)}
         </p>
         <HostFilmForm />
       </div>

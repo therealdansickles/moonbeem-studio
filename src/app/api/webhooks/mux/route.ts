@@ -237,14 +237,28 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ received: true });
         }
 
+        // Storage-meter capture (Phase 2): the asset.ready payload already
+        // carries the encode metrics, so we persist them onto the episode at
+        // finalize for FREE (no assets.retrieve backfill). Unit = encode-minutes
+        // (derived from duration_seconds downstream). max_stored_resolution is
+        // the coarse resolution band. Both are optional in the payload → null
+        // when absent (the backfill sweep fills any nulls).
+        const creatorDurationSeconds =
+          typeof event.data.duration === "number" ? event.data.duration : null;
+        const creatorMaxStoredResolution =
+          event.data.max_stored_resolution ?? null;
+
         // ATOMIC finalize — mux_finalize_creator_asset_ready mirrors the
         // partner RPC: flip the job to ready AND insert the creator_episodes
-        // row in one transaction, exactly-once under at-least-once delivery.
+        // row (now including the two storage-meter columns) in one transaction,
+        // exactly-once under at-least-once delivery.
         const { data: creatorOutcome, error: creatorRpcErr } =
           await supabase.rpc("mux_finalize_creator_asset_ready", {
             p_job_id: creatorJob.id,
             p_asset_id: assetId,
             p_drm_playback_id: creatorDrmId,
+            p_duration_seconds: creatorDurationSeconds,
+            p_max_stored_resolution: creatorMaxStoredResolution,
           });
         if (creatorRpcErr) {
           // Same 23505 policy as the partner rail: a FIXED intended number

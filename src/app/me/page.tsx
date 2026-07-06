@@ -23,6 +23,7 @@ import WelcomeBanner from "@/components/me/WelcomeBanner";
 import HostingSection, {
   type HostedTitle,
 } from "@/components/me/HostingSection";
+import { getCreatorStorageUsage } from "@/lib/creator-titles/storage";
 import ProfileFanEditCard from "@/components/profile/ProfileFanEditCard";
 import AvatarCircle from "@/components/profile/AvatarCircle";
 import Top12Grid from "@/components/profile/Top12Grid";
@@ -324,6 +325,13 @@ export default async function MePage() {
       })),
     jobStatus: jobByTitle.get(t.id) ?? null,
   }));
+
+  // Storage meter (Phase 2): per-creator encode-minutes from the
+  // creator_storage_usage view (the single on-read rollup home). Display-only
+  // in v1 — no cap (tiers are Phase 3).
+  const storageEncodeMinutes = creator
+    ? (await getCreatorStorageUsage(creator.id)).encodeMinutes
+    : 0;
 
   // Stub creators with edits that look like they belong to this user
   // (handle match or already-verified-social match). Surfaces an
@@ -702,7 +710,10 @@ export default async function MePage() {
             <h2 className="font-wordmark text-caption tracking-[0.2em] text-moonbeem-pink uppercase m-0">
               Hosting
             </h2>
-            <HostingSection hostedTitles={hostedTitles} />
+            <HostingSection
+              hostedTitles={hostedTitles}
+              encodeMinutes={storageEncodeMinutes}
+            />
           </section>
         )}
 
