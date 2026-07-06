@@ -13,6 +13,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import HostingTierControls from "./HostingTierControls";
 
 // MuxUploader is a web component (registers a custom element, touches
 // customElements/HTMLElement) — load it client-only via dynamic ssr:false,
@@ -128,7 +129,13 @@ function HostFilmForm() {
 // One hosted film: its hosted assets + the whole inherited uploader lifecycle
 // (idle → uploading X% → processing → hosted). "Ready" here means HOSTED —
 // encoded and stored with DRM — there is no publish step in v1.
-function HostedTitleCard({ hostedTitle }: { hostedTitle: HostedTitle }) {
+function HostedTitleCard({
+  hostedTitle,
+  atCeiling,
+}: {
+  hostedTitle: HostedTitle;
+  atCeiling: boolean;
+}) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState(0);
@@ -266,7 +273,16 @@ function HostedTitleCard({ hostedTitle }: { hostedTitle: HostedTitle }) {
         </p>
       )}
 
-      {((phase === "idle" && !serverProcessing) || phase === "uploading") && (
+      {/* At the plan ceiling: block starting a new upload on this title too,
+          with the same honest upgrade nudge. Existing playback is untouched. */}
+      {atCeiling && phase === "idle" && !serverProcessing && (
+        <p className="mt-4 text-caption text-moonbeem-pink m-0">
+          You&apos;re at your plan&apos;s minute limit — upgrade to upload more.
+        </p>
+      )}
+
+      {((phase === "idle" && !serverProcessing && !atCeiling) ||
+        phase === "uploading") && (
         <div className="mt-4">
           <MuxUploader
             endpoint={async () => {
@@ -372,23 +388,40 @@ function HostedTitleCard({ hostedTitle }: { hostedTitle: HostedTitle }) {
   );
 }
 
-// Sentence-case minutes-hosted line (ruling D4): plain text, NO progress bar —
-// a bar implies a limit, and limits are a Phase-3 product decision. Rounds the
-// encode-minutes (the unit Mux bills storage in) to whole minutes, with an
-// honest sub-minute case.
-function storageLine(encodeMinutes: number): string {
-  if (encodeMinutes <= 0) return "You haven't hosted any video yet.";
-  if (encodeMinutes < 1) return "You've hosted less than a minute of video.";
-  const mins = Math.round(encodeMinutes);
-  return `You've hosted ${mins} ${mins === 1 ? "minute" : "minutes"} of video.`;
+// The tier + usage line (Phase 3). Sentence case, NO progress bar (ruling D4 —
+// a bar implies a hard cap; the ceiling is soft). Shows the plan and the
+// billable minutes (used minus the permanent-zero grandfathered floor) against
+// the allotment, with an honest note for grandfathered minutes.
+export type HostingStatusProps = {
+  tier: "free" | "solo" | "studio" | "pro";
+  allotmentMinutes: number;
+  billableMinutes: number;
+  grandfatheredFloorMinutes: number;
+  atCeiling: boolean;
+};
+
+const TIER_LABEL: Record<HostingStatusProps["tier"], string> = {
+  free: "Free",
+  solo: "Solo",
+  studio: "Studio",
+  pro: "Pro",
+};
+
+function tierLine(s: HostingStatusProps): string {
+  const used = Math.round(s.billableMinutes);
+  const base = `You're on the ${TIER_LABEL[s.tier]} plan — ${used} of ${s.allotmentMinutes} minutes used.`;
+  const gf = Math.round(s.grandfatheredFloorMinutes);
+  return gf > 0
+    ? `${base} Your ${gf} earlier ${gf === 1 ? "minute" : "minutes"} are grandfathered free.`
+    : base;
 }
 
 export default function HostingSection({
   hostedTitles,
-  encodeMinutes,
+  status,
 }: {
   hostedTitles: HostedTitle[];
-  encodeMinutes: number;
+  status: HostingStatusProps;
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -397,17 +430,33 @@ export default function HostingSection({
           Host a film
         </p>
         <p className="mt-3 text-body-sm text-moonbeem-ink-muted m-0">
-          Upload your films to Moonbeem — encoded and stored with DRM
-          protection. Create the film, then upload its video below.
+          Upload your films to Moonbeem — encoded and stored with protected,
+          DRM-backed playback. Create the film, then upload its video below.
         </p>
         <p className="mt-2 text-caption text-moonbeem-ink-subtle m-0 tabular-nums">
-          {storageLine(encodeMinutes)}
+          {tierLine(status)}
         </p>
-        <HostFilmForm />
+        <HostingTierControls tier={status.tier} />
+
+        {status.atCeiling ? (
+          // Soft ceiling (ruling D4): new uploads are blocked with an honest
+          // upgrade prompt — existing films keep playing, nothing is taken down.
+          <p className="mt-4 text-caption text-moonbeem-pink m-0">
+            You&apos;ve reached your {TIER_LABEL[status.tier]} plan&apos;s{" "}
+            {status.allotmentMinutes}-minute limit. Upgrade above to host more —
+            your existing films keep playing.
+          </p>
+        ) : (
+          <HostFilmForm />
+        )}
       </div>
 
       {hostedTitles.map((t) => (
-        <HostedTitleCard key={t.id} hostedTitle={t} />
+        <HostedTitleCard
+          key={t.id}
+          hostedTitle={t}
+          atCeiling={status.atCeiling}
+        />
       ))}
 
       {/* Deferred-remedy honesty: v1 has no self-serve delete (Phase 6 ships

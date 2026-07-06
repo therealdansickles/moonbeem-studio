@@ -23,7 +23,7 @@ import WelcomeBanner from "@/components/me/WelcomeBanner";
 import HostingSection, {
   type HostedTitle,
 } from "@/components/me/HostingSection";
-import { getCreatorStorageUsage } from "@/lib/creator-titles/storage";
+import { getCreatorHostingStatus } from "@/lib/creator-titles/tiers";
 import ProfileFanEditCard from "@/components/profile/ProfileFanEditCard";
 import AvatarCircle from "@/components/profile/AvatarCircle";
 import Top12Grid from "@/components/profile/Top12Grid";
@@ -326,12 +326,13 @@ export default async function MePage() {
     jobStatus: jobByTitle.get(t.id) ?? null,
   }));
 
-  // Storage meter (Phase 2): per-creator encode-minutes from the
-  // creator_storage_usage view (the single on-read rollup home). Display-only
-  // in v1 — no cap (tiers are Phase 3).
-  const storageEncodeMinutes = creator
-    ? (await getCreatorStorageUsage(creator.id)).encodeMinutes
-    : 0;
+  // Hosting tier + usage (Phase 3): tier (from creator_subscriptions), the
+  // billable minutes (used − grandfathered floor) vs the tier allotment, and
+  // the soft-ceiling flag. Single source read by both the dashboard and the
+  // upload gate.
+  const hostingStatus = creator
+    ? await getCreatorHostingStatus(creator.id)
+    : null;
 
   // Stub creators with edits that look like they belong to this user
   // (handle match or already-verified-social match). Surfaces an
@@ -712,7 +713,15 @@ export default async function MePage() {
             </h2>
             <HostingSection
               hostedTitles={hostedTitles}
-              encodeMinutes={storageEncodeMinutes}
+              status={
+                hostingStatus ?? {
+                  tier: "free",
+                  allotmentMinutes: 120,
+                  billableMinutes: 0,
+                  grandfatheredFloorMinutes: 0,
+                  atCeiling: false,
+                }
+              }
             />
           </section>
         )}

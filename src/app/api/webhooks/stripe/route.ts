@@ -303,6 +303,79 @@ async function handleV2AccountEvent(
   return NextResponse.json({ received: true });
 }
 
+// ── Creator hosting subscriptions (Phase 3) ─────────────────────────────────
+// Reflect a Stripe subscription object into creator_subscriptions (the tier
+// source of truth). Our hosting subscriptions carry moonbeem_creator_id +
+// moonbeem_tier in metadata (set by the subscribe route, kept in sync on tier
+// change), so we only ever write rows we own. Idempotent: update-by-
+// stripe_subscription_id first, insert on miss, ack a 23505 race. NOT a
+// supabase-js upsert — the unique index on stripe_subscription_id is PARTIAL,
+// which ON CONFLICT can't infer.
+// Tier is derived from the price's stable lookup_key, NOT subscription metadata:
+// the Stripe billing portal changes the price on upgrade/downgrade but does NOT
+// touch metadata, so the price is the only authoritative tier signal. creator_id
+// still comes from metadata (it never changes across a subscription's life).
+const HOSTING_LOOKUP_TO_TIER: Record<string, string> = {
+  hosting_solo: "solo",
+  hosting_studio: "studio",
+  hosting_pro: "pro",
+};
+async function reflectCreatorSubscription(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  sub: Stripe.Subscription,
+): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+  const creatorId = sub.metadata?.moonbeem_creator_id ?? "";
+  const lookupKey =
+    (sub.items?.data?.[0]?.price as Stripe.Price | undefined)?.lookup_key ?? "";
+  const tier = HOSTING_LOOKUP_TO_TIER[lookupKey] ?? "";
+  if (!UUID_RE.test(creatorId) || !tier) {
+    // Not one of our hosting subscriptions (or malformed) — ack, write nothing.
+    return { ok: true, skipped: true };
+  }
+  const customerId =
+    typeof sub.customer === "string" ? sub.customer : (sub.customer?.id ?? null);
+  const priceId = sub.items?.data?.[0]?.price?.id ?? null;
+  // current_period_end moved to the subscription ITEM in recent API versions;
+  // read whichever is present. Informational (display), not gate-critical.
+  const periodEndUnix =
+    (sub.items?.data?.[0] as { current_period_end?: number } | undefined)
+      ?.current_period_end ??
+    (sub as { current_period_end?: number }).current_period_end ??
+    null;
+  const mutable = {
+    tier,
+    status: sub.status,
+    stripe_customer_id: customerId,
+    stripe_price_id: priceId,
+    current_period_end:
+      periodEndUnix != null ? new Date(periodEndUnix * 1000).toISOString() : null,
+    cancel_at_period_end: !!sub.cancel_at_period_end,
+    updated_at: new Date().toISOString(),
+  };
+  // Update the existing row for this subscription id (upgrade/downgrade/cancel).
+  const { data: updated, error: uErr } = await supabase
+    .from("creator_subscriptions")
+    .update(mutable)
+    .eq("stripe_subscription_id", sub.id)
+    .select("id");
+  if (uErr) return { ok: false, error: uErr.message };
+  if (updated && updated.length > 0) return { ok: true };
+  // No existing row → first delivery for this subscription → insert.
+  const { error: iErr } = await supabase.from("creator_subscriptions").insert({
+    creator_id: creatorId,
+    stripe_subscription_id: sub.id,
+    ...mutable,
+  });
+  if (iErr) {
+    // 23505: a concurrent event inserted first (stripe_subscription_id unique),
+    // or the one-live partial unique tripped (an existing active sub for this
+    // creator). Either way the intended state is already present — ack.
+    if (iErr.code === "23505") return { ok: true };
+    return { ok: false, error: iErr.message };
+  }
+  return { ok: true };
+}
+
 export async function POST(request: NextRequest) {
   const signature = request.headers.get("stripe-signature");
   // Two Stripe endpoints point at THIS same URL, each with its own signing
@@ -1012,6 +1085,51 @@ export async function POST(request: NextRequest) {
       }
       console.log(
         `[stripe-webhook] [dispute] blocked payout (access continues) ent=${ent.id} PI=${piId} dispute=${dispute.id}`,
+      );
+      break;
+    }
+
+    // ── Creator hosting subscriptions (Phase 3) ──
+    case "customer.subscription.created":
+    case "customer.subscription.updated": {
+      // Subscribe / upgrade / downgrade / cancel-flag / renew — Stripe sends the
+      // full subscription object with its current status + price. Reflect it into
+      // creator_subscriptions so getCreatorTier() sees the live tier. Idempotent.
+      const sub = event.data.object as Stripe.Subscription;
+      const r = await reflectCreatorSubscription(supabase, sub);
+      if (!r.ok) {
+        console.error(
+          `[stripe-webhook] subscription reflect failed sub=${sub.id}: ${r.error}`,
+        );
+        return NextResponse.json(
+          { error: "subscription_reflect_failed" },
+          { status: 500 },
+        );
+      }
+      console.log(
+        `[stripe-webhook] ${event.type} sub=${sub.id} status=${sub.status}${r.skipped ? " (not-ours)" : ""}`,
+      );
+      break;
+    }
+
+    case "customer.subscription.deleted": {
+      // Subscription fully ended (canceled + period elapsed). Reflect the final
+      // 'canceled' status — it's not in the active|trialing set getCreatorTier
+      // queries, so the creator drops to 'free' (existing content keeps playing;
+      // only new uploads gate — ruling D4). Idempotent.
+      const sub = event.data.object as Stripe.Subscription;
+      const r = await reflectCreatorSubscription(supabase, sub);
+      if (!r.ok) {
+        console.error(
+          `[stripe-webhook] subscription delete reflect failed sub=${sub.id}: ${r.error}`,
+        );
+        return NextResponse.json(
+          { error: "subscription_reflect_failed" },
+          { status: 500 },
+        );
+      }
+      console.log(
+        `[stripe-webhook] customer.subscription.deleted sub=${sub.id} status=${sub.status}${r.skipped ? " (not-ours)" : ""}`,
       );
       break;
     }

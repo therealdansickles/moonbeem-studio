@@ -22,6 +22,7 @@ import { enforce } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { authorizeCreatorTitleMutation } from "@/lib/auth/creator-title-mutation";
 import { buildCreatorPassthrough } from "@/lib/creator-titles/mux-passthrough";
+import { getCreatorHostingStatus } from "@/lib/creator-titles/tiers";
 import { getMux } from "@/lib/mux";
 
 const UUID_RE =
@@ -55,6 +56,25 @@ export async function POST(
           ? 404
           : 403;
     return NextResponse.json({ error: authz.reason }, { status });
+  }
+
+  // TIER CEILING GATE (Phase 3, soft — ruling D4). Read the creator's hosting
+  // status (tier allotment vs billable = used − grandfathered floor). At the
+  // ceiling we refuse to START a new upload with an honest prompt; existing
+  // content is untouched (playback never stops). We can only gate on CURRENT
+  // usage — the file's duration is unknown until asset.ready, so a single
+  // upload can still cross the cap; the NEXT upload is what's refused.
+  const hostingStatus = await getCreatorHostingStatus(authz.creatorId);
+  if (hostingStatus.atCeiling) {
+    return NextResponse.json(
+      {
+        error: "hosting_quota_exceeded",
+        tier: hostingStatus.tier,
+        used_minutes: Math.round(hostingStatus.billableMinutes),
+        allotment_minutes: hostingStatus.allotmentMinutes,
+      },
+      { status: 402 },
+    );
   }
 
   // Optional client hints. NOT trusted for identity — only the title (path) +
@@ -148,6 +168,10 @@ export async function POST(
           { policy: "drm", drm_configuration_id: drmConfigurationId },
         ],
         video_quality: "plus",
+        // 4K gate (ruling D2): Studio+ may store up to 2160p; Free/Solo cap at
+        // 1080p — a 4K source is stored at 1080p max, so 4K never bills on an
+        // HD tier. Enforced here at asset creation via max_resolution_tier.
+        max_resolution_tier: hostingStatus.allows4k ? "2160p" : "1080p",
         // Load-bearing + NAMESPACED: `creator:<job.id>` ties every webhook for
         // this asset back to THIS creator-lane job — the webhook's lane split.
         passthrough: buildCreatorPassthrough(job.id as string),
