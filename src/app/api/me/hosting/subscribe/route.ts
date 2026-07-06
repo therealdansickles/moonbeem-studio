@@ -35,6 +35,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "no_claimed_creator" }, { status: 403 });
   }
 
+  // ONE-LIVE GUARD (server-side): a creator with a live (active|trialing)
+  // subscription must NOT open a second Checkout — that would create a second
+  // billed Stripe subscription (double-charge) which the webhook's one-live
+  // unique then can't record. Tier changes go through the billing portal. The
+  // UI already hides Subscribe when subscribed; this backstops a stale tab or a
+  // direct POST.
+  const { data: live } = await supabase
+    .from("creator_subscriptions")
+    .select("id")
+    .eq("creator_id", creator.id)
+    .in("status", ["active", "trialing"])
+    .maybeSingle();
+  if (live) {
+    return NextResponse.json({ error: "already_subscribed" }, { status: 409 });
+  }
+
   let body: { tier?: unknown };
   try {
     body = (await request.json()) as { tier?: unknown };

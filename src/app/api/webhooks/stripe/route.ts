@@ -304,26 +304,56 @@ async function handleV2AccountEvent(
 }
 
 // ── Creator hosting subscriptions (Phase 3) ─────────────────────────────────
-// Reflect a Stripe subscription object into creator_subscriptions (the tier
-// source of truth). Our hosting subscriptions carry moonbeem_creator_id +
-// moonbeem_tier in metadata (set by the subscribe route, kept in sync on tier
-// change), so we only ever write rows we own. Idempotent: update-by-
-// stripe_subscription_id first, insert on miss, ack a 23505 race. NOT a
-// supabase-js upsert — the unique index on stripe_subscription_id is PARTIAL,
-// which ON CONFLICT can't infer.
-// Tier is derived from the price's stable lookup_key, NOT subscription metadata:
-// the Stripe billing portal changes the price on upgrade/downgrade but does NOT
-// touch metadata, so the price is the only authoritative tier signal. creator_id
-// still comes from metadata (it never changes across a subscription's life).
+// Reflect the CURRENT state of a Stripe subscription into creator_subscriptions
+// (the tier source of truth). Takes the subscription ID and RE-FETCHES the live
+// object from Stripe rather than trusting the event payload: Stripe does not
+// guarantee webhook ordering and retries for days, so a stale/out-of-order
+// event must NOT be able to resurrect a canceled tier or land a stale tier.
+// Re-fetching means every event simply writes the current truth — idempotent and
+// order-independent.
+//
+// Tier is derived from the price's stable lookup_key (NOT metadata — the billing
+// portal changes the price on upgrade/downgrade but not metadata). creator_id
+// comes from metadata (fixed for the subscription's life). Idempotent: update-by-
+// stripe_subscription_id then insert-on-miss, with the two unique constraints
+// DISAMBIGUATED on 23505 (a stripe_subscription_id race is a benign idempotent
+// ack; a one-live conflict means TWO live subscriptions for one creator — an
+// anomaly the subscribe guard prevents — logged loudly, not silently dropped).
 const HOSTING_LOOKUP_TO_TIER: Record<string, string> = {
   hosting_solo: "solo",
   hosting_studio: "studio",
   hosting_pro: "pro",
 };
 async function reflectCreatorSubscription(
+  stripe: Stripe,
   supabase: ReturnType<typeof createServiceRoleClient>,
-  sub: Stripe.Subscription,
-): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+  subId: string,
+): Promise<{ ok: boolean; skipped?: boolean; anomaly?: boolean; error?: string }> {
+  // Re-fetch the authoritative current state (defeats out-of-order/redelivered
+  // events). A canceled subscription is still retrievable at Stripe.
+  let sub: Stripe.Subscription;
+  try {
+    sub = await stripe.subscriptions.retrieve(subId, {
+      expand: ["items.data.price"],
+    });
+  } catch (err) {
+    const statusCode = (err as { statusCode?: number })?.statusCode ?? null;
+    if (statusCode === 404) {
+      // Gone at Stripe → ensure any local row for this sub reads 'canceled' so
+      // getCreatorTier drops to free. No local row → matches 0, no-op.
+      await supabase
+        .from("creator_subscriptions")
+        .update({ status: "canceled", updated_at: new Date().toISOString() })
+        .eq("stripe_subscription_id", subId);
+      return { ok: true };
+    }
+    // Transient (network/5xx) → surface so Stripe retries.
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "subscription_retrieve_failed",
+    };
+  }
+
   const creatorId = sub.metadata?.moonbeem_creator_id ?? "";
   const lookupKey =
     (sub.items?.data?.[0]?.price as Stripe.Price | undefined)?.lookup_key ?? "";
@@ -358,7 +388,18 @@ async function reflectCreatorSubscription(
     .update(mutable)
     .eq("stripe_subscription_id", sub.id)
     .select("id");
-  if (uErr) return { ok: false, error: uErr.message };
+  if (uErr) {
+    if (uErr.code === "23505" && uErr.message?.includes("one_live")) {
+      // Setting THIS sub live would collide with another live sub for the same
+      // creator — a two-active anomaly (the subscribe guard prevents it). Ack so
+      // Stripe stops retrying; log loudly for reconciliation.
+      console.error(
+        `[stripe-webhook] one-live conflict updating sub=${sub.id} creator=${creatorId} — two live subscriptions; reconcile`,
+      );
+      return { ok: true, anomaly: true };
+    }
+    return { ok: false, error: uErr.message };
+  }
   if (updated && updated.length > 0) return { ok: true };
   // No existing row → first delivery for this subscription → insert.
   const { error: iErr } = await supabase.from("creator_subscriptions").insert({
@@ -367,10 +408,21 @@ async function reflectCreatorSubscription(
     ...mutable,
   });
   if (iErr) {
-    // 23505: a concurrent event inserted first (stripe_subscription_id unique),
-    // or the one-live partial unique tripped (an existing active sub for this
-    // creator). Either way the intended state is already present — ack.
-    if (iErr.code === "23505") return { ok: true };
+    if (iErr.code === "23505") {
+      if (iErr.message?.includes("one_live")) {
+        // Another live subscription already exists for this creator → the NEW
+        // one is not recorded. This is a genuine anomaly (double-subscribe the
+        // guard should have blocked): ack so Stripe stops retrying, but log
+        // loudly so it can be reconciled/refunded rather than silently dropped.
+        console.error(
+          `[stripe-webhook] one-live conflict inserting sub=${sub.id} creator=${creatorId} — a live subscription already exists; NEW sub unrecorded, reconcile/refund`,
+        );
+        return { ok: true, anomaly: true };
+      }
+      // stripe_subscription_id conflict = a concurrent insert of the SAME sub →
+      // idempotent, safe to ack.
+      return { ok: true };
+    }
     return { ok: false, error: iErr.message };
   }
   return { ok: true };
@@ -1096,7 +1148,7 @@ export async function POST(request: NextRequest) {
       // full subscription object with its current status + price. Reflect it into
       // creator_subscriptions so getCreatorTier() sees the live tier. Idempotent.
       const sub = event.data.object as Stripe.Subscription;
-      const r = await reflectCreatorSubscription(supabase, sub);
+      const r = await reflectCreatorSubscription(stripe, supabase, sub.id);
       if (!r.ok) {
         console.error(
           `[stripe-webhook] subscription reflect failed sub=${sub.id}: ${r.error}`,
@@ -1107,18 +1159,17 @@ export async function POST(request: NextRequest) {
         );
       }
       console.log(
-        `[stripe-webhook] ${event.type} sub=${sub.id} status=${sub.status}${r.skipped ? " (not-ours)" : ""}`,
+        `[stripe-webhook] ${event.type} sub=${sub.id}${r.skipped ? " (not-ours)" : r.anomaly ? " (anomaly)" : ""}`,
       );
       break;
     }
 
     case "customer.subscription.deleted": {
-      // Subscription fully ended (canceled + period elapsed). Reflect the final
-      // 'canceled' status — it's not in the active|trialing set getCreatorTier
-      // queries, so the creator drops to 'free' (existing content keeps playing;
-      // only new uploads gate — ruling D4). Idempotent.
+      // Subscription fully ended. Re-fetch confirms 'canceled' — not in the
+      // active|trialing set getCreatorTier queries, so the creator drops to
+      // 'free' (existing content keeps playing; only new uploads gate — D4).
       const sub = event.data.object as Stripe.Subscription;
-      const r = await reflectCreatorSubscription(supabase, sub);
+      const r = await reflectCreatorSubscription(stripe, supabase, sub.id);
       if (!r.ok) {
         console.error(
           `[stripe-webhook] subscription delete reflect failed sub=${sub.id}: ${r.error}`,
@@ -1129,7 +1180,7 @@ export async function POST(request: NextRequest) {
         );
       }
       console.log(
-        `[stripe-webhook] customer.subscription.deleted sub=${sub.id} status=${sub.status}${r.skipped ? " (not-ours)" : ""}`,
+        `[stripe-webhook] customer.subscription.deleted sub=${sub.id}${r.skipped ? " (not-ours)" : ""}`,
       );
       break;
     }
