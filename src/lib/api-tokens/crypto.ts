@@ -15,7 +15,7 @@ export const API_TOKEN_PREFIX = "mbk_live_";
 // Content-only scope vocabulary. There is deliberately NO money scope:
 // a token is structurally incapable of authorizing a payout/earnings
 // action. The DB mirrors this with a CHECK constraint.
-export const CONTENT_SCOPES = ["clip:download", "fan_edit:submit"] as const;
+export const CONTENT_SCOPES = ["clip:download", "clip:list", "fan_edit:submit"] as const;
 export type ApiTokenScope = (typeof CONTENT_SCOPES)[number];
 
 export function isContentScope(s: string): s is ApiTokenScope {
