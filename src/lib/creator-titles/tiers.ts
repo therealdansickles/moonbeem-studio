@@ -42,9 +42,14 @@ export const TIER_ALLOWS_4K: Record<CreatorTier, boolean> = {
   pro: true,
 };
 
-// Protection posture: free tier gets policy-DRM (signed-URL playback) = "protected
-// hosting"; Solo+ get full multi-DRM (Widevine/FairPlay) = "DRM". The copy
-// distinguishes them honestly. This drives the playback policy at upload.
+// ⚠️ PHASE-6 INTENT ONLY — do NOT align the upload/finalize to this constant
+// without a ruling. Protection is UNIVERSAL DRM today (Phase-3 precedent: the
+// mux-upload route always requests advanced_playback_policies:[{policy:"drm"}],
+// and the webhook finalize is DRM-only fail-closed). The intended Phase-6 split
+// — free = policy-DRM (signed-URL "protected hosting"), Solo+ = full multi-DRM
+// (Widevine/FairPlay "DRM") — is DEFERRED; wiring it means branching the upload
+// AND relaxing the hardened DRM-only finalize, which is a separate decision.
+// Nothing reads this map for the upload policy yet; it documents the future gate.
 export const TIER_MULTI_DRM: Record<CreatorTier, boolean> = {
   free: false,
   solo: true,

@@ -14,6 +14,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import HostingTierControls from "./HostingTierControls";
+import CreatorEpisodePreview from "./CreatorEpisodePreview";
 
 // MuxUploader is a web component (registers a custom element, touches
 // customElements/HTMLElement) — load it client-only via dynamic ssr:false,
@@ -142,6 +143,9 @@ function HostedTitleCard({
   const [jobId, setJobId] = useState<string | null>(null);
   const [slowEncode, setSlowEncode] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Which hosted episode is expanded into the self-preview player (fetch-on-play
+  // — a token is minted only when the owner clicks Preview). Null = none open.
+  const [previewEpisodeId, setPreviewEpisodeId] = useState<string | null>(null);
 
   // Server-derived in-flight state (from the last non-ready ingest job).
   // Only consulted when THIS tab isn't mid-lifecycle (phase 'idle') — a live
@@ -231,17 +235,44 @@ function HostedTitleCard({
 
       {hostedTitle.episodes.length > 0 && (
         <ul className="mt-3 flex flex-col gap-2">
-          {hostedTitle.episodes.map((ep) => (
-            <li
-              key={ep.id}
-              className="flex items-center justify-between gap-3 text-body-sm text-moonbeem-ink"
-            >
-              <span className="min-w-0 truncate">
-                {ep.label ?? `Episode ${ep.episode_number}`}
-              </span>
-              <span className="text-caption text-moonbeem-lime">hosted</span>
-            </li>
-          ))}
+          {hostedTitle.episodes.map((ep) => {
+            const previewing = previewEpisodeId === ep.id;
+            return (
+              <li key={ep.id} className="flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-3 text-body-sm text-moonbeem-ink">
+                  <span className="min-w-0 truncate">
+                    {ep.label ?? `Episode ${ep.episode_number}`}
+                  </span>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <span className="text-caption text-moonbeem-lime">
+                      hosted
+                    </span>
+                    {/* Preview — owner-only playback of a ready hosted asset. Every
+                        listed episode is finalized (ready), so the affordance is
+                        always live here; in-flight encodes render as jobStatus, not
+                        as episodes, so no dead-end Preview is ever shown. */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPreviewEpisodeId(previewing ? null : ep.id)
+                      }
+                      className="rounded-md border border-white/15 bg-white/5 px-2.5 py-1 text-caption text-moonbeem-ink-muted transition-colors hover:border-moonbeem-pink hover:text-moonbeem-pink"
+                    >
+                      {previewing ? "Close" : "Preview"}
+                    </button>
+                  </div>
+                </div>
+                {previewing && (
+                  <div className="overflow-hidden rounded-lg bg-black/40">
+                    <CreatorEpisodePreview
+                      titleId={hostedTitle.id}
+                      episodeId={ep.id}
+                    />
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -443,8 +474,9 @@ export default function HostingSection({
           Host a film
         </p>
         <p className="mt-3 text-body-sm text-moonbeem-ink-muted m-0">
-          Upload your films to Moonbeem — encoded and stored with protected,
-          DRM-backed playback. Create the film, then upload its video below.
+          Upload your films to Moonbeem. They&apos;re encoded and stored with
+          protected, DRM-backed playback. Create the film, then upload its video
+          below.
         </p>
         <p className="mt-2 text-caption text-moonbeem-ink-subtle m-0 tabular-nums">
           {tierLine(status)}

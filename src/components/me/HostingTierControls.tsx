@@ -73,7 +73,7 @@ export default function HostingTierControls({ tier }: { tier: Tier }) {
           >
             {busy === p.tier
               ? "Opening…"
-              : `${p.label} — $${p.price}/mo · ${(p.minutes / 60) | 0}h`}
+              : `${p.label} · $${p.price}/mo · ${(p.minutes / 60) | 0}h`}
           </button>
         ))}
       </div>
