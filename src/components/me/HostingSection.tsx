@@ -398,7 +398,20 @@ export type HostingStatusProps = {
   billableMinutes: number;
   grandfatheredFloorMinutes: number;
   atCeiling: boolean;
+  pendingCancel: boolean;
+  cancelAt: string | null;
 };
+
+// Deterministic UTC date for the pending-cancel line (matches Stripe's date,
+// and UTC pins it so SSR and client render identically — no hydration drift).
+function formatCancelDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
 
 const TIER_LABEL: Record<HostingStatusProps["tier"], string> = {
   free: "Free",
@@ -409,7 +422,7 @@ const TIER_LABEL: Record<HostingStatusProps["tier"], string> = {
 
 function tierLine(s: HostingStatusProps): string {
   const used = Math.round(s.billableMinutes);
-  const base = `You're on the ${TIER_LABEL[s.tier]} plan — ${used} of ${s.allotmentMinutes} minutes used.`;
+  const base = `You're on the ${TIER_LABEL[s.tier]} plan. ${used} of ${s.allotmentMinutes} minutes used.`;
   const gf = Math.round(s.grandfatheredFloorMinutes);
   return gf > 0
     ? `${base} Your ${gf} earlier ${gf === 1 ? "minute" : "minutes"} are grandfathered free.`
@@ -436,6 +449,13 @@ export default function HostingSection({
         <p className="mt-2 text-caption text-moonbeem-ink-subtle m-0 tabular-nums">
           {tierLine(status)}
         </p>
+        {status.pendingCancel && (
+          <p className="mt-1 text-caption text-moonbeem-ink-subtle m-0">
+            {status.cancelAt
+              ? `Cancels ${formatCancelDate(status.cancelAt)}.`
+              : "Cancels at the end of the billing period."}
+          </p>
+        )}
         <HostingTierControls tier={status.tier} />
 
         {status.atCeiling ? (

@@ -380,6 +380,14 @@ async function reflectCreatorSubscription(
     current_period_end:
       periodEndUnix != null ? new Date(periodEndUnix * 1000).toISOString() : null,
     cancel_at_period_end: !!sub.cancel_at_period_end,
+    // Flexible billing (our permanent shape): a portal period-end cancel sets
+    // cancel_at and leaves cancel_at_period_end=false. Persist it so the pending
+    // cancellation is visible. Symmetric clear is free — reflect always writes
+    // the re-fetched current truth, so a renege (cancel_at→null) clears it.
+    cancel_at:
+      typeof sub.cancel_at === "number"
+        ? new Date(sub.cancel_at * 1000).toISOString()
+        : null,
     updated_at: new Date().toISOString(),
   };
   // Update the existing row for this subscription id (upgrade/downgrade/cancel).

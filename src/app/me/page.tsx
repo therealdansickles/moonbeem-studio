@@ -720,6 +720,8 @@ export default async function MePage() {
                   billableMinutes: 0,
                   grandfatheredFloorMinutes: 0,
                   atCeiling: false,
+                  pendingCancel: false,
+                  cancelAt: null,
                 }
               }
             />

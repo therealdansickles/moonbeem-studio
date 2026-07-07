@@ -89,6 +89,8 @@ export type CreatorHostingStatus = {
   atCeiling: boolean; // billable >= allotment → block new uploads (soft)
   allows4k: boolean;
   multiDrm: boolean;
+  pendingCancel: boolean; // scheduled to cancel (cancel_at set OR cape true)
+  cancelAt: string | null; // ISO scheduled-cancel timestamp, for the display line
 };
 
 // The single status object the gate + dashboard both read. One service-role
@@ -97,13 +99,21 @@ export async function getCreatorHostingStatus(
   creatorId: string,
 ): Promise<CreatorHostingStatus> {
   const supabase = createServiceRoleClient();
-  const [tier, usage, floorRow] = await Promise.all([
+  const [tier, usage, floorRow, subRow] = await Promise.all([
     getCreatorTier(creatorId),
     getCreatorStorageUsage(creatorId),
     supabase
       .from("creators")
       .select("grandfathered_encode_minutes")
       .eq("id", creatorId)
+      .maybeSingle(),
+    // The live sub's scheduled-cancel signal. Flexible billing sets cancel_at
+    // (a timestamp) and leaves cancel_at_period_end false; either means pending.
+    supabase
+      .from("creator_subscriptions")
+      .select("cancel_at, cancel_at_period_end")
+      .eq("creator_id", creatorId)
+      .in("status", ["active", "trialing"])
       .maybeSingle(),
   ]);
 
@@ -120,6 +130,11 @@ export async function getCreatorHostingStatus(
   );
   const remainingMinutes = Math.max(0, allotmentMinutes - billableMinutes);
 
+  // Pending cancellation: cancel_at set (flexible) OR cancel_at_period_end
+  // (legacy). cancelAt is the scheduled end date for the "Cancels …" line.
+  const cancelAt = (subRow.data?.cancel_at as string | null) ?? null;
+  const pendingCancel = cancelAt != null || !!subRow.data?.cancel_at_period_end;
+
   return {
     tier,
     priceUsd: TIER_PRICE_USD[tier],
@@ -131,5 +146,7 @@ export async function getCreatorHostingStatus(
     atCeiling: billableMinutes >= allotmentMinutes,
     allows4k: TIER_ALLOWS_4K[tier],
     multiDrm: TIER_MULTI_DRM[tier],
+    pendingCancel,
+    cancelAt,
   };
 }
