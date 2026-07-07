@@ -71,6 +71,10 @@ export async function GET(
   // creator's episode by guessing an id (treat a foreign episode as not-found).
   const { data: ep } = await supabase
     .from("creator_episodes")
+    // ⚠️ PHASE-6 DELETE: when per-episode soft-delete lands, this select MUST add
+    // the deleted filter (e.g. .is("deleted_at", null)) — otherwise a deleted
+    // episode still mints a preview token. Owner-only content today, so not yet a
+    // leak, but load-bearing the moment delete ships.
     .select("id, creator_title_id, source, mux_playback_id")
     .eq("id", episodeId)
     .maybeSingle();
