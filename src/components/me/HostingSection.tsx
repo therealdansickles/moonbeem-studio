@@ -518,12 +518,12 @@ export default function HostingSection({
         <p className="text-caption text-moonbeem-ink-subtle m-0">
           Need to remove a hosted film? Email{" "}
           <a
-            href="mailto:hello@moonbeem.xyz?subject=Remove%20a%20hosted%20film"
+            href="mailto:hello@moonbeem.studio?subject=Remove%20a%20hosted%20film"
             className="text-moonbeem-ink-muted hover:text-moonbeem-pink"
           >
-            hello@moonbeem.xyz
-          </a>{" "}
-          — self-serve deletion is on the way.
+            hello@moonbeem.studio
+          </a>
+          . Self-serve deletion is on the way.
         </p>
       )}
     </div>
