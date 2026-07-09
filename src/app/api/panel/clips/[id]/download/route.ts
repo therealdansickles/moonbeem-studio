@@ -16,14 +16,17 @@
 //
 // MONEY BOUNDARY: content-only. This route imports ONLY token auth
 // (verifyApiToken/requireScope), the verification tier check (getUserTier), the
-// traceability logger (logUserEvent), the rate-limiter (enforce/getIp), and the
-// service-role client. It imports NO earnings/metering/withdraw/campaign-billing/
-// stripe code. The token scope is content-only; no money action is reachable here.
+// traceability logger (logUserEvent), the rate-limiter (enforce/getIp), the
+// service-role client, and the pure action-hint parser (resolveActionHint —
+// string comparisons only, zero imports). It imports NO earnings/metering/
+// withdraw/campaign-billing/stripe code. The token scope is content-only; no
+// money action is reachable here.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { verifyApiToken, requireScope } from "@/lib/api-tokens/verify";
 import { getUserTier } from "@/lib/gating/get-user-tier";
 import { logUserEvent } from "@/lib/events/log-event";
+import { resolveActionHint } from "@/lib/panel/action";
 import { enforce, getIp } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 
@@ -87,9 +90,17 @@ export async function GET(
   const campaignId =
     campaignParam && UUID_RE.test(campaignParam) ? campaignParam : null;
 
+  // Optional action hint (E.1): the panel sends ?action=import on the Import
+  // lane, ?action=download on the Download-to-disk lane. Absent/junk resolves
+  // to "unspecified" — old panel builds keep working unattributed-but-honest.
+  // Duplicated params: .get() takes the first value (malformed client).
+  // Unrelated to the auth-flow ?action= deep-link param (/auth/callback, /login).
+  const action = resolveActionHint(request.nextUrl.searchParams.get("action"));
+
   // (6) LOG for IP-owner traceability — reuse logUserEvent (no schema change). The
   // source:"panel" metadata is the discriminator; event_type stays "download_clip"
-  // (NOT a panel-specific type — that would split quota/gating filters). Fail-soft:
+  // (NOT a panel-specific type — that would split quota/gating filters). The
+  // action key discriminates the panel's Import vs Download lanes. Fail-soft:
   // logUserEvent never throws.
   await logUserEvent({
     user_id: auth.userId,
@@ -101,6 +112,7 @@ export async function GET(
     metadata: {
       source: "panel",
       token_id: auth.tokenId,
+      action,
       ...(campaignId ? { campaign_id: campaignId } : {}),
     },
   });
