@@ -134,7 +134,8 @@ export default function ApiTokensCard() {
       </h2>
       <p className="mt-1 text-body-sm text-moonbeem-ink-subtle">
         API tokens let approved tools, like the Moonbeem panel for Premiere,
-        access your permissioned clips on your behalf.
+        access your permissioned clips on your behalf. Generate one below, then
+        paste it into the panel&apos;s sign-in field in Premiere Pro to connect.
       </p>
 
       {/* Create */}
