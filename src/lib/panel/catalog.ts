@@ -39,6 +39,63 @@ export function titleThumbFallback(
   return muxThumbUrl ?? posterUrl ?? null;
 }
 
+// q param (§4 amendment, founder-pass item B): trim; empty/whitespace-only →
+// null. A null return means the route structurally SKIPS the whole search
+// path, so the no-q response stays byte-identical as control flow — not as a
+// hoped-for filter identity.
+export function normalizeSearchQ(v: string | null): string | null {
+  const t = v?.trim() ?? "";
+  return t === "" ? null : t;
+}
+
+// Catalog search (founder-pass item B, ratified contract): case-insensitive
+// LITERAL substring against titles.title OR clips.label, in memory on the
+// bounded set — NO DB ILIKE. RIDER 1 (user input matches literally) holds by
+// construction: 85 of 176 live labels contain %, _ or \ (filename-style),
+// which unescaped ILIKE would corrupt. If this ever moves to DB ILIKE it must
+// escape %, _ AND \ — do NOT copy admin/creators/search/route.ts, which
+// escapes only % and _.
+//
+// Name match → "whole" (wins over label matches; all clips). Label-only
+// match → the Set of matching clip ids. A title is kept iff whole or its Set
+// is non-empty. Input order is preserved. Null labels never match.
+export type CatalogSearchClipRow = {
+  id: string;
+  title_id: string;
+  label: string | null;
+};
+
+export function applyCatalogSearch<T extends { id: string; title: string }>(
+  titles: T[],
+  clipRows: CatalogSearchClipRow[],
+  q: string,
+): { titles: T[]; clipFilter: Map<string, Set<string> | "whole"> } {
+  const needle = q.toLowerCase();
+  const labelMatchesByTitle = new Map<string, Set<string>>();
+  for (const row of clipRows) {
+    if (row.label !== null && row.label.toLowerCase().includes(needle)) {
+      const set = labelMatchesByTitle.get(row.title_id) ?? new Set<string>();
+      set.add(row.id);
+      labelMatchesByTitle.set(row.title_id, set);
+    }
+  }
+  const clipFilter = new Map<string, Set<string> | "whole">();
+  const kept: T[] = [];
+  for (const t of titles) {
+    if (t.title.toLowerCase().includes(needle)) {
+      clipFilter.set(t.id, "whole");
+      kept.push(t);
+    } else {
+      const set = labelMatchesByTitle.get(t.id);
+      if (set && set.size > 0) {
+        clipFilter.set(t.id, set);
+        kept.push(t);
+      }
+    }
+  }
+  return { titles: kept, clipFilter };
+}
+
 // The clip entry on the wire: the shared Clip type MINUS file_url and title_id
 // (spec §6 — downloads must flow through the traceable download route; title_id
 // is redundant under nesting), with thumbnail_url replaced by the composed

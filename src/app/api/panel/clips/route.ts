@@ -12,9 +12,11 @@
 //
 // MONEY BOUNDARY: content-only. Imports ONLY token auth (verifyApiToken/
 // requireScope), the verification tier check (getUserTier), the rate-limiter
-// (enforce/getIp), the service-role client, the shared clip listing layer, and
-// the panel thumbnail composer. NO earnings/metering/withdraw/campaign-billing/
-// stripe code. The token scope is content-only; no money action is reachable.
+// (enforce/getIp), the service-role client, the shared clip listing layer, the
+// panel thumbnail composer, and the pure catalog shaping/search helpers
+// (parse/paginate/search/wire — no I/O). NO earnings/metering/withdraw/
+// campaign-billing/stripe code. The token scope is content-only; no money
+// action is reachable.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { verifyApiToken, requireScope } from "@/lib/api-tokens/verify";
@@ -23,7 +25,15 @@ import { enforce, getIp } from "@/lib/ratelimit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { listClipsForTitle } from "@/lib/queries/titles";
 import { composeTitleThumbnails } from "@/lib/panel/thumbnail";
-import { parsePage, parseLimit, paginate, toClipWire } from "@/lib/panel/catalog";
+import {
+  parsePage,
+  parseLimit,
+  paginate,
+  toClipWire,
+  normalizeSearchQ,
+  applyCatalogSearch,
+  type CatalogSearchClipRow,
+} from "@/lib/panel/catalog";
 
 // Mux thumbnail JWT signing (for DRM titles) runs on Node crypto — pin runtime.
 export const runtime = "nodejs";
@@ -66,6 +76,10 @@ export async function GET(request: NextRequest) {
 
   const page = parsePage(params.get("page"));
   const limit = parseLimit(params.get("limit"));
+  // q (§4 amendment, founder-pass item B): any string is a valid shape; trim,
+  // and treat empty/whitespace-only as absent (the search path is skipped
+  // entirely — no-q responses stay byte-identical by control flow).
+  const q = normalizeSearchQ(params.get("q"));
 
   // viewer block — resolve the token's creator by PK (handle/display_name nullable).
   const { data: creatorRow } = await supabase
@@ -82,9 +96,11 @@ export async function GET(request: NextRequest) {
   // §5 query — NEVER scan titles by is_public (1.43M rows, unindexed → ~25s seq
   // scan). Drive from clips (176 rows): distinct clip title_ids, then titles by
   // PK with is_public/is_active/deleted_at as cheap post-filters on the bounded set.
+  // (id + label ride along for the q search below; they feed nothing else, so
+  // the no-q wire is unchanged.)
   const { data: clipRows } = await supabase
     .from("clips")
-    .select("title_id")
+    .select("id, title_id, label")
     .is("deleted_at", null);
   const clipTitleIds = Array.from(
     new Set((clipRows ?? []).map((r) => r.title_id as string)),
@@ -113,10 +129,26 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "title_not_found" }, { status: 404 });
   }
 
-  // Paginate (title_id variant is always the single element, page 1, no next).
+  // q filters INSIDE the bounded set, AFTER the title_id 404 (identity stays
+  // q-independent: a real title q doesn't match returns 200 with titles: [],
+  // never 404). Name match keeps the title whole; label-only match keeps only
+  // the matching clips (applied at the wire map below). Zero matches flow
+  // through the normal path so the requested page echoes back.
+  const search =
+    q !== null
+      ? applyCatalogSearch(
+          titles as Array<{ id: string; title: string }>,
+          (clipRows ?? []) as CatalogSearchClipRow[],
+          q,
+        )
+      : null;
+  const searchedTitles = search ? (search.titles as typeof titles) : titles;
+
+  // Paginate AFTER filtering (title_id variant is the single element, page 1,
+  // no next).
   const { pageItems, hasNext } = titleIdParam
-    ? { pageItems: titles, hasNext: false }
-    : paginate(titles, page, limit);
+    ? { pageItems: searchedTitles, hasNext: false }
+    : paginate(searchedTitles, page, limit);
 
   // Compose one thumbnail_url per page title (§6a), then the clips per title via
   // the shared listing layer verbatim (Promise.all; ≤50 indexed single-title reads).
@@ -135,7 +167,16 @@ export async function GET(request: NextRequest) {
   const wireTitles = pageItems
     .map((t, i) => {
       const titleThumb = thumbByTitle.get(t.id as string) ?? null;
-      const clips = clipsByTitle[i].map((c) => toClipWire(c, titleThumb));
+      // Label-only q match: keep only the matching clips. The per-title fetch
+      // stays the field/order source of truth; membership is by clip id.
+      // clip_count reflects the filtered count, and the race-to-zero filter
+      // below correctly drops a title whose matched clips just vanished.
+      const clipMode = search?.clipFilter.get(t.id as string);
+      const clipList =
+        clipMode instanceof Set
+          ? clipsByTitle[i].filter((c) => clipMode.has(c.id))
+          : clipsByTitle[i];
+      const clips = clipList.map((c) => toClipWire(c, titleThumb));
       return {
         id: t.id as string,
         slug: t.slug as string,

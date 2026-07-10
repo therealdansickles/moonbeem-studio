@@ -13,6 +13,9 @@ import {
   paginate,
   titleThumbFallback,
   toClipWire,
+  normalizeSearchQ,
+  applyCatalogSearch,
+  type CatalogSearchClipRow,
   type ClipWire,
 } from "./catalog";
 
@@ -112,6 +115,63 @@ const sampleWire: ClipWire[] = [toClipWire(rawClip, erupcjaThumb)];
 const serialized = JSON.stringify({ thumbnail_url: erupcjaThumb, clips: sampleWire });
 ok(!/squarespace/i.test(serialized), "§10: no 'squarespace' anywhere on the wire");
 ok(!/webp/i.test(serialized), "§10: no 'webp' anywhere on the wire");
+
+// --- q search (§4 amendment, founder-pass item B) ---
+
+// normalizeSearchQ: absent/empty/whitespace → null (route skips the filter path)
+eq(normalizeSearchQ(null), null, "q absent → null");
+eq(normalizeSearchQ(""), null, "q empty → null");
+eq(normalizeSearchQ("   "), null, "q whitespace-only → null");
+eq(normalizeSearchQ(" erupcja "), "erupcja", "q trims outer whitespace");
+eq(normalizeSearchQ("a b"), "a b", "interior whitespace preserved");
+
+// applyCatalogSearch fixture — labels deliberately carry _, %, \ (85 of 176
+// live labels contain ILIKE-special characters; literal matching is the
+// contract, RIDER 1).
+const sT1 = { id: "t1", title: "Erupcja" };
+const sT2 = { id: "t2", title: "Videoplayback Collection" };
+const sT3 = { id: "t3", title: "Zebra_Film 100%" };
+const sTitles = [sT1, sT2, sT3];
+const sClips: CatalogSearchClipRow[] = [
+  { id: "c1", title_id: "t1", label: "opening_scene_01" },
+  { id: "c2", title_id: "t1", label: "eruption wide" },
+  { id: "c3", title_id: "t2", label: "beach day" },
+  { id: "c4", title_id: "t2", label: "Erupcja cameo" },
+  { id: "c5", title_id: "t3", label: null },
+  { id: "c6", title_id: "t3", label: "dir\\cut v2" },
+];
+
+const rERUP = applyCatalogSearch(sTitles, sClips, "ERUP");
+eq(rERUP.titles.map((t) => t.id), ["t1", "t2"], "q=ERUP → [t1 (name), t2 (label)] in input order");
+eq(rERUP.clipFilter.get("t1"), "whole", "name match → whole (wins over t1's own label match)");
+ok(rERUP.clipFilter.get("t2") instanceof Set, "label-only match → Set");
+eq(Array.from(rERUP.clipFilter.get("t2") as Set<string>), ["c4"], "t2 Set is exactly {c4} (excludes c3)");
+
+eq(applyCatalogSearch(sTitles, sClips, "zzz").titles, [], "no match → titles []");
+
+// RIDER 1 contract artifacts: ILIKE-special characters match LITERALLY
+eq(applyCatalogSearch(sTitles, sClips, "100%").titles.map((t) => t.id), ["t3"], 'q="100%" literal → t3 by name');
+eq(applyCatalogSearch(sTitles, sClips, "1000%").titles, [], 'q="1000%" → no match (% is not a wildcard)');
+const rUnder = applyCatalogSearch(sTitles, sClips, "_");
+eq(rUnder.titles.map((t) => t.id), ["t1", "t3"], 'q="_" matches only underscore-bearers (NOT everything — the unescaped-ILIKE failure mode, inverted); order preserved past the t2 gap');
+eq(Array.from(rUnder.clipFilter.get("t1") as Set<string>), ["c1"], 'q="_" → t1 via Set{c1}');
+eq(rUnder.clipFilter.get("t3"), "whole", 'q="_" → t3 whole (name has _)');
+const rBack = applyCatalogSearch(sTitles, sClips, "\\");
+eq(rBack.titles.map((t) => t.id), ["t3"], 'q="\\" literal backslash → t3 via label');
+eq(Array.from(rBack.clipFilter.get("t3") as Set<string>), ["c6"], "backslash Set is {c6}; null label c5 never matches, never throws");
+
+// case-insensitive both directions + mid-string
+eq(applyCatalogSearch(sTitles, sClips, "VIDEOPLAYBACK").clipFilter.get("t2"), "whole", "uppercase q matches title name");
+eq(Array.from(applyCatalogSearch(sTitles, sClips, "CAMEO").clipFilter.get("t2") as Set<string>), ["c4"], "uppercase q matches label");
+eq(applyCatalogSearch(sTitles, sClips, "upcj").clipFilter.get("t1"), "whole", "mid-string match (not prefix-anchored)");
+
+// pagination composes AFTER filtering
+const sMany = Array.from({ length: 23 }, (_, i) => ({ id: `m${i}`, title: `Match ${i}` }));
+const rMany = applyCatalogSearch(sMany, [], "match");
+const sp1 = paginate(rMany.titles, 1, 20);
+ok(sp1.pageItems.length === 20 && sp1.hasNext === true, "23 matches page 1 → 20 + has_next");
+const sp2 = paginate(rMany.titles, 2, 20);
+ok(sp2.pageItems.length === 3 && sp2.hasNext === false, "23 matches page 2 → 3 + no next");
 
 console.log(`\n  ${passed}/${passed + failed} passed${failed ? ` — ${failed} FAILED` : ""}`);
 process.exit(failed ? 1 : 0);
