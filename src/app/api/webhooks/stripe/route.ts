@@ -656,12 +656,20 @@ export async function POST(request: NextRequest) {
             typeof session.payment_intent === "string"
               ? session.payment_intent
               : (session.payment_intent?.id ?? null);
-          // Affiliate attribution (Stage 1, INERT): nothing sets
-          // moonbeem_creator_id in checkout metadata yet — Stage 3 (the cookie ->
-          // rent-route -> metadata thread) does — so this is null on every grant
-          // today, and grant_entitlement writes creator_id = NULL, exactly the
-          // pre-attribution behavior. p_creator_id is trailing + defaulted, so a
-          // null value (or an old 6-arg caller during the deploy window) is fine.
+          // Affiliate attribution (Stage 3, LIVE): the rent/buy route sets
+          // moonbeem_creator_id in checkout metadata when the mb_aff cookie
+          // resolves — /go/title sets the cookie {creator_id, title_id, ts}
+          // (httpOnly, 7-day last-click) and titles/[id]/rent/route.ts:171-205
+          // validates it (claimed creator, not the buyer, inside the window),
+          // then :219-221 adds the key ONLY on success; unattributed sales omit
+          // it entirely, so `?? null` keeps them at creator_id = NULL.
+          // Attribution is CREATOR-level and deliberately NOT title-scoped: any
+          // qualifying purchase inside the window credits the curator (the
+          // cookie's title_id is carried but never matched against the bought
+          // title). Downstream, grant_entitlement writes entitlements.creator_id
+          // and the settle cron carves affiliate_cut_cents out of the
+          // distributor share only when creator_id is set. p_creator_id stays
+          // trailing + defaulted on the RPC.
           const creatorId = md.moonbeem_creator_id ?? null;
           const { data: grantResult, error: grantErr } = await supabase.rpc(
             "grant_entitlement",
