@@ -61,3 +61,6 @@ letterboxd-*.zip
 # a recurrence.)
 deno.lock
 scripts/_one_shot_*.mjs
+
+# Sentry Config File
+.env.sentry-build-plugin
