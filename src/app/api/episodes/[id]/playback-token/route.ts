@@ -21,17 +21,45 @@ import {
 // Token signing uses Node crypto.
 export const runtime = "nodejs";
 
-// TOKEN TTL (C1, 2026-07-13: was 12h). A minted token is a bearer pass — anyone
-// holding it can fetch segments for its whole life, and the rights checks below
-// run at MINT time only. So the TTL *is* the enforcement window: it bounds both
-// the shareable-token exposure and how long a LAPSED rental keeps playing.
+// TOKEN TTL (C1, 2026-07-13: was 12h). 4h.
+//
+// ⚠️ READ THIS BEFORE REASONING ABOUT WHAT THE TTL ENFORCES. An earlier version
+// of this comment claimed the TTL bounds "how long a lapsed rental keeps
+// playing." THAT WAS FALSE, and it was false because nobody had probed the edge.
+// Probed 2026-07-14 against a real published DRM asset:
+//
+//   playback token (aud "v") gates the MANIFEST, and ONLY the manifest.
+//     expired token -> master .m3u8 403, variant .m3u8 403.
+//     BUT segment URLs carry NO token at all, and serve HTTP 200 on an expired
+//     token — including segments never fetched before (so it is not caching).
+//   => Once a player holds the variant playlist it needs the token NEVER AGAIN.
+//      An in-flight session runs to the end of the film. A rental that lapses
+//      mid-watch DOES NOT STOP. TTL does not, and cannot, change that.
+//
+// So what is the TTL actually for? The DRM-LICENSE token (aud "d") is the real
+// credential: those freely-fetchable segments are CIPHERTEXT, and decrypting
+// them needs a content key from Mux's license endpoint. That endpoint DOES
+// authenticate the token (probed: valid drm token -> 400 "Invalid Parameters",
+// i.e. past auth and rejected on the challenge; EXPIRED drm token -> 403 "Not
+// Authorized"). An expired drm token therefore cannot acquire a key.
+//
+// THE TTL'S ONE REAL JOB: it cuts — 3x, from 12h to 4h — the window in which a
+// LEAKED token can acquire a decryption key and start a session. Exposure from a
+// leak is ONE SESSION (a new session 403s on both the manifest and the license),
+// not unbounded. That is a genuine, if narrow, rights gain. It is NOT session
+// termination.
 //
 // 4h: the longest currently-playable title runs 91 minutes (prod, 2026-07-13),
-// so 4h is >2.5x the longest watch plus pause slack. It is not shorter because
-// the client refresh path (MuxEpisodePlayer's onError re-mint) is what makes a
-// mid-watch expiry survivable, and a tighter TTL would lean on it harder for no
-// rights gain. Playback and DRM-license tokens MUST stay TTL-synced — they are
-// minted together below and a split would strand one leg.
+// so 4h is >2.5x the longest watch plus pause slack — a session that starts on a
+// fresh token never has to re-acquire anything mid-film.
+//
+// Playback and DRM tokens MUST stay TTL-synced — minted together below; a split
+// would leave one leg usable after the other died.
+//
+// STOPPING a lapsed rental mid-watch is a LICENSE-DURATION problem, not a TTL
+// problem: the levers are the `licenseExpiration` / `playDuration` claims on the
+// drm token (our two-clock rule expressed in the license instead of Postgres).
+// That is C1b — designed, not built. Do not pretend the TTL does it.
 const TOKEN_TTL = "4h";
 
 const UUID_RE =

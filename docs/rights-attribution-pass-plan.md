@@ -23,14 +23,24 @@ Standing constraints that bind this pass:
 
 ## C1. Playback-token binding + TTL reduction
 
-> **STATUS: BUILT 2026-07-13 (one commit). Ruled amendments applied.**
-> Site A TTL 12h→**4h**; Site B TTL 12h→**4h** (NOT 1h — a creator previewing
-> their own episode gains nothing from a tighter expiry, and that mount has no
-> refresh path, so it would only add a second unrecoverable failure surface).
+> **STATUS: BUILT 2026-07-13, then AMENDED 2026-07-14 after the edge probe
+> falsified its central premise.** See the struck paragraph below — the TTL does
+> NOT stop a lapsed rental. What shipped, and why:
+> - TTL 12h→**4h** on both sites. **KEPT**, on a CORRECTED rationale: it cuts 3x
+>   the window in which a **leaked DRM token can acquire a decryption key**.
+>   Exposure from a leak is **one session**, not unbounded (both proven).
+> - Refresh path **KEPT, relabelled**: network-error recovery + 403'd-manifest
+>   recovery, and the hook C1b will need. It does NOT terminate lapsed rentals.
+> - Territory → pure predicate + 10 unit tests. Unaffected, a clean win.
+> - `stampFirstPlay` load-bearing comment. Unaffected.
+> - **The CHANGELOG entry was DELETED** — it claimed "a rental that lapses
+>   mid-session now stops," which is false. It never shipped.
+>
 > Viewer claim **INCLUDED, on `signPlaybackId` only**; the DRM-license leg stays
-> plain. Territory re-fetch folded out (the helper is now pure).
-> **Acceptance criterion 1 amended:** the Mux SDK mints **no `iat` claim** (the
-> payload is `kid`/`sub`/`aud`/`exp`), so TTL is verified as **`exp - now ≈ 4h`**.
+> plain. **Acceptance criterion 1 amended:** the Mux SDK mints **no `iat` claim**
+> (payload is `kid`/`sub`/`aud`/`exp`), so TTL is verified as **`exp - now ≈ 4h`**.
+> Acceptance runs 2 and 3 are **VOID** — they tested a refresh-on-expiry that the
+> edge makes impossible. Run 1 (decoded JWT) passed.
 >
 > **PROBE RESULT (2026-07-13) — the gate the viewer claim rode on.** Signed three
 > playback tokens for a real published DRM asset and fetched the HLS manifest for
@@ -40,19 +50,14 @@ Standing constraints that bind this pass:
 > names the account that minted a leaked token. Enforcement = TTL + the re-mint
 > gate stack.
 >
-> **⚠️ THE ASYMMETRY THAT MAKES THE REFRESH A PREREQUISITE, NOT A COMPANION**
-> — this is why C1 is ONE commit, not two. The two callers mint at different
-> moments:
-> - `HeroPlayer.tsx:28-41` mounts the player **on the play click** — an idle viewer
->   who presses play hours later mints a FRESH token. Safe at any TTL.
-> - `EpisodeModal.tsx:81-83` mounts it **on modal open** — the token is minted when
->   the modal opens, *not* when play is pressed. A viewer who opens the modal, walks
->   away, and presses play 5h later is holding a 5h-old token: fine at 12h,
->   **EXPIRED at 4h**.
->
-> On the series-modal path, cutting the TTL *without* the refresh path hands the
-> viewer a dead player and a generic "can't be played right now". The TTL cut and
-> the `onError` re-mint ship together or not at all.
+> ~~**THE ASYMMETRY THAT MAKES THE REFRESH A PREREQUISITE:** HeroPlayer mints on
+> the play click; EpisodeModal mints on modal open, so an idle modal viewer holds
+> a stale token and a 4h TTL would strand them without a refresh.~~
+> **AMENDED 2026-07-14.** The mount-timing difference is REAL, but the conclusion
+> drawn from it was not: per the probe, an expired token does not strand an
+> in-flight session at all (segments are ungated), so the refresh is not a
+> prerequisite for the TTL cut. The two still ship in one commit — but because
+> they are one coherent change, not because one rescues the other.
 
 ### Current state (recon, exhaustive)
 
@@ -71,12 +76,47 @@ playing until the token dies (≤12h overhang today).
 
 Site C is kind-distinct (image, already 1h) — out of scope for binding.
 
-What "the token dies" actually means (DRM nuance, reviewed): the playback JWT
+~~What "the token dies" actually means (DRM nuance, reviewed): the playback JWT
 gates NEW manifest/segment fetches and the drm token gates NEW license
 requests. An already-granted CDM content key and already-buffered segments
 keep decrypting locally for a short tail past expiry. TTL bounds the window
 for new requests; it is NOT a frame-exact kill switch, and no Mux-side knob
-ties CDM key persistence to the JWT exp.
+ties CDM key persistence to the JWT exp.~~
+
+**⚠️ STRUCK 2026-07-14 — THIS PARAGRAPH WAS FALSE. It was an unprobed assumption
+about Mux's edge, presented as reviewed fact, and it very nearly shipped a false
+user-facing claim.** The probe (real published DRM asset,
+`scripts/_one_shot_expiry_probe.mjs`):
+
+| request, on an EXPIRED playback token | result |
+|---|---|
+| master `.m3u8` | **403** |
+| variant `.m3u8` | **403** |
+| segment #0 (re-fetch) | **200** |
+| segment #1 (**never fetched before**) | **200** |
+| segment URL carries its own `?token=` | **NO** |
+
+**Segment URLs are unauthenticated.** The playback token gates the MANIFEST and
+nothing else. An on-demand player fetches the manifest once, then holds all ~1,096
+segment URLs — so it never needs the token again. It is not "a short tail past
+expiry": **it is the entire film.** A rental that lapses mid-watch does not stop,
+and no TTL value can make it stop.
+
+**What the TTL is actually worth** (corrected rationale, Dan 2026-07-14): those
+freely-fetchable segments are **ciphertext**. The real credential is the
+**DRM-license token** — and the license endpoint DOES authenticate it (probed:
+valid drm token → `400 Invalid Parameters`, i.e. past auth; **expired drm token →
+`403 Not Authorized`**). So an expired token cannot acquire a decryption key.
+Cutting 12h → 4h therefore cuts **3x the window in which a LEAKED token can
+acquire a key and start a session** — and exposure from a leak is **ONE SESSION**,
+not unbounded (a new session 403s on both the manifest and the license). That is a
+real, narrow rights gain. It is **not** session termination.
+
+**The lever that CAN terminate a session** is license duration — the
+`licenseExpiration` / `playDuration` claims on the drm token, i.e. our two-clock
+rule expressed in the license instead of Postgres. Designed in **C1b** below;
+whether those claims work on a NON-persistent streaming license is UNKNOWN and
+must be probed, not assumed.
 
 ### Proposed change
 

@@ -6,40 +6,20 @@ could NOTICE go here — not refactors, not internal cleanups.
 New at the top. Date = the day the change was built; a change is only real once it
 is live on www.moonbeem.studio.
 
-> **Created 2026-07-13.** This file did not exist before C1 — product changes had
-> no recorded home, which is why this entry is the first one rather than a
-> backfill. Earlier changes live in git history and the `docs/` plan files.
-
 ---
 
-## 2026-07-13 — Playback tokens are shorter-lived, and a lapsed rental now stops
+## No entries yet.
 
-**Who notices:** anyone watching a hosted film.
+This file was created on 2026-07-13 for a C1 entry that was **retracted before it
+ever shipped**, and the retraction is worth more than the entry would have been.
 
-**What changed.** A playback token now lasts **4 hours** instead of 12, and the
-player **re-mints it once** if playback fails mid-watch (it resumes at the same
-timestamp, so a refresh should be barely visible).
+The draft entry announced: *"a rental that lapses mid-session now stops at the next
+token refresh."* An edge probe the next day proved that **false** — Mux serves
+video segments on an expired token (segment URLs carry no token at all), so an
+in-flight session always runs to the end of the film and no TTL change can stop it.
+The claim was deleted rather than shipped. See the struck paragraph in
+`docs/rights-attribution-pass-plan.md`.
 
-**The behavior change worth calling out — a rental that lapses mid-session now
-stops at the next token refresh instead of playing out to a 12-hour token.**
-
-Before: rights (entitlement, territory, rental window) were checked only when the
-token was minted. A 12-hour token was, in effect, a 12-hour pass — a 48-hour
-rental that expired at minute 30 of your film kept playing to the end, and beyond.
-
-After: the refresh re-runs the **full** server-side gate stack. If your rental
-window closed while you were watching, the refresh returns 402 and the player
-shows "Rent or buy this film to watch."
-
-**This is correct** — it is what a rental window means — **and it is a change.**
-The old behavior was more generous than the product promised. Nobody is affected
-retroactively: at build time prod carried **zero active entitlements** (4 total, 2
-revoked, 2 expired), which is precisely why this landed now rather than after the
-first real rental.
-
-**Not affected:** the buffered tail. Already-decrypted segments can play out for a
-few seconds past expiry — the token gates *new* fetches, not the CDM's existing
-key. TTL is a window, not a frame-exact kill switch.
-
-Built in `feat(playback)` — C1 of the rights-and-attribution pass
-(`docs/rights-attribution-pass-plan.md`).
+C1 as it actually shipped (shorter token TTL, a network-error retry in the player,
+an internal territory refactor) has **no user-visible behavior change** — which is
+exactly why it gets no entry. The first real entry goes above this line.

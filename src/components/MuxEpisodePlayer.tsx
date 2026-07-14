@@ -22,28 +22,43 @@ const MuxPlayer = dynamic(() => import("@mux/mux-player-react"), {
 // open; the hero mounts it on the play click (fetch-on-play). FanEditModal and
 // the playback-token route are untouched.
 //
-// ── C1 REFRESH PATH (2026-07-13) ────────────────────────────────────────────
-// Tokens are 4h (was 12h). The TTL cut is only safe BECAUSE of the retry below,
-// and the reason is a mount-timing asymmetry between the two callers:
+// ── REFRESH PATH — NETWORK-ERROR RECOVERY ONLY (C1, corrected 2026-07-14) ────
 //
-//   HeroPlayer  — mounts on the PLAY CLICK. A viewer who idles for hours and then
-//                 presses play mints a FRESH token at that moment. Never strands.
-//   EpisodeModal — mounts on MODAL OPEN. The token is minted when the modal opens,
-//                 NOT when play is pressed. A viewer who opens the modal, walks
-//                 away, and presses play 5h later is holding a 5h-old token: fine
-//                 at 12h, EXPIRED at 4h.
+// ⚠️ WHAT THIS IS NOT: it does NOT stop a lapsed rental, and it never did. The
+// first version of this comment claimed a mid-watch token expiry would error the
+// player, fire onError, re-mint, re-check rights, and cut off an expired rental.
+// That rested on an UNPROBED assumption about Mux's edge. The probe (2026-07-14,
+// real published DRM asset) killed it:
 //
-// So on the modal path a 4h TTL without a refresh would hand the viewer a dead
-// player. onError below re-POSTs the token route ONCE, swaps in the new tokens,
-// and resumes at the same timestamp. That re-POST re-runs the FULL server gate
-// stack (entitlement, territory, rental window) — which is why the refresh is a
-// rights GAIN, not just a UX patch: a rental that lapses mid-watch now stops at
-// the next refresh instead of coasting on a long-lived token.
+//   EXPIRED playback token -> master .m3u8 403, variant .m3u8 403
+//   ...but segment URLs carry NO token and serve HTTP 200 anyway — including
+//   segments never fetched before (so it is not a caching artifact).
 //
-// ONE retry, deliberately. A genuinely-expired entitlement must surface as
-// not_entitled, not spin; and misclassifying a transient network blip as expiry
-// costs at most one wasted POST (rate-limited, harmless) — which is why we don't
-// try to parse Mux's error taxonomy to guess WHY playback failed.
+// An on-demand player fetches the manifest ONCE and then holds every segment URL.
+// Nothing errors mid-playback; the session runs to the end of the film. A
+// 6-minute watch on a 2-minute TTL produced ZERO refreshes — not a bug, but the
+// system behaving correctly on a false premise. onError has nothing to catch
+// mid-session, because nothing is denied mid-session.
+//
+// WHAT IT IS FOR:
+//   1. Genuine network / segment failures — one cheap retry.
+//   2. A MANIFEST fetch that 403s — the one thing the playback token DOES gate.
+//      A session STARTING on a stale token hits this, and the re-mint recovers it
+//      properly, re-running the full server gate stack (entitlement, territory,
+//      window). That is a real rights path, just a narrower one than claimed.
+//   3. The HOOK for C1b: license-duration claims (playDuration /
+//      licenseExpiration on the drm token) CAN terminate a session — and when
+//      they do, they surface as a PLAYER ERROR. This handler is where that gets
+//      caught. Keep it for that.
+//
+// ONE retry, deliberately: a genuinely-expired entitlement must surface as
+// not_entitled, not spin. We do NOT parse Mux's error taxonomy to guess WHY
+// playback failed — a 403'd manifest and a flaky segment want the same cheap
+// remedy, and the server is the authority on whether the viewer may continue.
+//
+// (Mount timing, for the record: HeroPlayer mounts on the play click, EpisodeModal
+// on modal open. That governs WHEN a token is minted — it does NOT decide whether
+// an in-flight session survives expiry. Per the probe, it always does.)
 type TokenState =
   | { status: "loading" }
   | {
