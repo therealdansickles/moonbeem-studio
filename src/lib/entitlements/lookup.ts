@@ -12,6 +12,13 @@ export type ActiveEntitlement = {
   kind: string;
   purchased_at: string;
   first_played_at: string | null;
+  // TELEMETRY ONLY (C4): the affiliate curator credited at purchase, or null.
+  // Read by the playback-token route to tag the Mux Data view (custom_1) so a
+  // watch can be joined back to the curator who drove the sale — the one field in
+  // the attribution chain that is otherwise unrecoverable from a view (partner and
+  // hosting-owner are both derivable from title_id). NULL on free plays, and that
+  // is honest: no entitlement, no curator. NO GATE READS THIS.
+  creator_id: string | null;
 };
 
 // The single ACTIVE entitlement for (userId, titleId), or null. There may be >1
@@ -27,7 +34,7 @@ export async function getActiveEntitlement(
   const supabase = createServiceRoleClient();
   const { data, error } = await supabase
     .from("entitlements")
-    .select("id, kind, purchased_at, first_played_at")
+    .select("id, kind, purchased_at, first_played_at, creator_id")
     // Refund revocation (5b feeder c): a revoked entitlement is never active —
     // filter it out at the query so it can't even enter the two-clock loop.
     // isEntitlementActive (the window rule, shared with the double-pay guard) is

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { TitleEpisode } from "@/lib/queries/titles";
 import PlayerLoading from "@/components/PlayerLoading";
+import { useConsent } from "@/components/consent/ConsentProvider";
 
 // Mux player is a client-only web component — load it lazily and never on the
 // server. Its own chunk-load shows the same placeholder.
@@ -59,6 +60,20 @@ const MuxPlayer = dynamic(() => import("@mux/mux-player-react"), {
 // (Mount timing, for the record: HeroPlayer mounts on the play click, EpisodeModal
 // on modal open. That governs WHEN a token is minted — it does NOT decide whether
 // an in-flight session survives expiry. Per the probe, it always does.)
+// ── C4 MUX DATA METADATA (2026-07-14). TELEMETRY ONLY. ──────────────────────
+// The token route resolves these server-side and returns them with the tokens (it
+// already loaded the episode, title, user and entitlement to run its gates), so
+// nothing is threaded through the component tree for telemetry.
+//
+// CONTENT FIELDS ship unconditionally — they are metadata, not personal data.
+// viewer_user_id is the ONE exception and is consent-gated below.
+type ViewMetadata = {
+  video_id: string;
+  video_title: string;
+  custom_1: string | null; // affiliate curator (entitlements.creator_id); null on free plays
+  custom_2: string; // title_id — the join key back to our tables
+};
+
 type TokenState =
   | { status: "loading" }
   | {
@@ -66,6 +81,8 @@ type TokenState =
       playbackId: string;
       playbackToken: string;
       drmToken: string;
+      metadata: ViewMetadata;
+      viewerUserId: string | null;
     }
   | {
       status: "error";
@@ -80,6 +97,10 @@ export default function MuxEpisodePlayer({
   const [tokenState, setTokenState] = useState<TokenState>({
     status: "loading",
   });
+  // C4 consent gate. MIRRORS GoogleAnalytics.tsx:83-88 exactly — including the
+  // isLoaded check FIRST: consent-state-unknown means DO NOT SEND, never
+  // default-allow. This is the acceptance bar for C4.
+  const { isLoaded, state } = useConsent();
   // Bumped once by onError to re-run the mint effect. 0 = first mint, 1 = the
   // single allowed refresh. Never goes higher.
   const [attempt, setAttempt] = useState(0);
@@ -119,12 +140,16 @@ export default function MuxEpisodePlayer({
           playbackId: string;
           playbackToken: string;
           drmToken: string;
+          metadata: ViewMetadata;
+          viewerUserId: string | null;
         };
         setTokenState({
           status: "ready",
           playbackId: data.playbackId,
           playbackToken: data.playbackToken,
           drmToken: data.drmToken,
+          metadata: data.metadata,
+          viewerUserId: data.viewerUserId,
         });
       } catch {
         if (controller.signal.aborted) return; // closed/changed — ignore
@@ -148,6 +173,20 @@ export default function MuxEpisodePlayer({
   }
 
   if (tokenState.status === "ready") {
+    // C4 CONSENT GATE — the acceptance bar. viewer_user_id is attached ONLY when
+    // consent has LOADED and analytics is granted. `isLoaded` is checked first, so
+    // an unresolved consent state sends content fields only (never default-allow),
+    // exactly as GoogleAnalytics.tsx:87-88 does. Content fields (video_id,
+    // video_title, custom_1, custom_2) always ship: metadata, not personal data.
+    //
+    // NOTE: `envKey` is deliberately NOT passed. Beacons already reach the right
+    // Mux environment (inferred from the playback id) — see the token route's C4
+    // comment. Passing one could misroute them.
+    const viewMetadata =
+      isLoaded && state.analytics && tokenState.viewerUserId
+        ? { ...tokenState.metadata, viewer_user_id: tokenState.viewerUserId }
+        : tokenState.metadata;
+
     return (
       <MuxPlayer
         playbackId={tokenState.playbackId}
@@ -155,6 +194,7 @@ export default function MuxEpisodePlayer({
           playback: tokenState.playbackToken,
           drm: tokenState.drmToken,
         }}
+        metadata={viewMetadata}
         streamType="on-demand"
         // ⚠️ MONEY-ADJACENT (2026-07-14). autoPlay is not a convenience — it is
         // what makes "the mint is the stamp" honest. This component's ONLY mount

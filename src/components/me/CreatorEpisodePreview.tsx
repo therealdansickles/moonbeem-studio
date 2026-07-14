@@ -73,6 +73,26 @@ export default function CreatorEpisodePreview({
       <MuxPlayer
         playbackId={tokenState.playbackId}
         tokens={{ playback: tokenState.playbackToken, drm: tokenState.drmToken }}
+        // ⚠️ OWNER PREVIEWS ARE NOT AUDIENCE. EXCLUDE custom_3 = "preview" BY
+        // DEFAULT IN EVERY DOWNSTREAM QUERY, DASHBOARD, AND METRIC.
+        //
+        // This player is a filmmaker scrubbing their OWN upload. Those views were
+        // ALREADY landing in Mux Data — anonymously, in the same pool as real
+        // viewers (this route is FREE-TIER: it gates on ownership only, no tier or
+        // quota check, and free hosts 120 minutes). C4 is the change that makes that
+        // pool joinable and readable, so C4 is the change that decides whether a
+        // partner dashboard counts a creator previewing their own file as audience
+        // engagement. Shipping the join without this marker would bake a fabricated
+        // statistic into the data model — the no-fabricated-numbers rule arriving
+        // through a telemetry field instead of a deck. Hence the marker ships in the
+        // SAME commit as the join (Dan's ruling, 2026-07-14).
+        //
+        // ONE field, deliberately. NO viewer_user_id: the owner is not an audience
+        // member, so there is no person to identify and therefore NO consent surface
+        // here at all — which is why this component, unlike MuxEpisodePlayer, does
+        // not touch useConsent(). NO video_title/custom_2 join keys either: the point
+        // is EXCLUSION, not attribution. Do not expand this.
+        metadata={{ custom_3: "preview" }}
         streamType="on-demand"
         style={{ width: "100%", maxHeight: "70vh" }}
       />

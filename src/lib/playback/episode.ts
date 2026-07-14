@@ -32,6 +32,10 @@ export type EpisodeForPlayback = {
   // titles row for just these two columns. Carrying them here kills that second
   // round-trip on the hot playback path, which C1's refresh makes hotter.
   title: {
+    // TELEMETRY ONLY (C4): the human title, returned to the client so the player
+    // can tag the Mux Data view (video_title). Rides on this SAME row read — no
+    // extra query, no prop threading. NO GATE READS THIS.
+    title: string;
     is_public: boolean;
     partner_id: string | null;
     default_monetization_mode: string;
@@ -64,7 +68,7 @@ export async function getEpisodeForPlayback(
   const { data: title } = await supabase
     .from("titles")
     .select(
-      "is_public, partner_id, default_monetization_mode, transact_enabled, purchase_enabled, transact_price_cents, purchase_price_cents, allowed_territories, territory_worldwide",
+      "title, is_public, partner_id, default_monetization_mode, transact_enabled, purchase_enabled, transact_price_cents, purchase_price_cents, allowed_territories, territory_worldwide",
     )
     .eq("id", row.title_id)
     .is("deleted_at", null)
@@ -74,6 +78,7 @@ export async function getEpisodeForPlayback(
     ...row,
     title:
       (title as {
+        title: string;
         is_public: boolean;
         partner_id: string | null;
         default_monetization_mode: string;

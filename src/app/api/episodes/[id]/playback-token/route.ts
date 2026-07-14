@@ -148,6 +148,11 @@ export async function POST(
     Number.isInteger(t.purchase_price_cents) &&
     t.purchase_price_cents > 0;
   const gated = rentSellable || buySellable;
+  // TELEMETRY ONLY (C4): the affiliate curator credited on the entitlement that
+  // authorized THIS play, or null. Declared out here purely so the mint can read it
+  // — the gate below is byte-for-byte unchanged. Null on a free play (no
+  // entitlement, no curator) and that is honest.
+  let attributedCreatorId: string | null = null;
   if (gated) {
     // The entitlement keys on user_id — an anon viewer can't hold one. The
     // frontend routes a 401 to sign-in.
@@ -161,6 +166,7 @@ export async function POST(
     if (!ent) {
       return NextResponse.json({ error: "not_entitled" }, { status: 402 });
     }
+    attributedCreatorId = ent.creator_id;
     // Active -> arm the 48h clock (DB time, exactly-once, fire-and-proceed), then
     // fall through to the UNCHANGED mint. Stamp AFTER the activeness check above —
     // never before, or the first play would be judged against a value we just wrote.
@@ -240,6 +246,43 @@ export async function POST(
     return NextResponse.json({ error: "token_mint_failed" }, { status: 500 });
   }
 
-  // Tokens only — never the signing key, never logged.
-  return NextResponse.json({ playbackId, playbackToken, drmToken });
+  // Tokens + Mux Data metadata. Never the signing key, never logged.
+  //
+  // ── C4 TELEMETRY (2026-07-14). NO RIGHTS LOGIC, NO MONEY. ────────────────────
+  // The player needs four fields to make a Mux Data view joinable back to our
+  // tables. Every one is resolved HERE rather than threaded through the component
+  // tree, because this route ALREADY holds all of them — it loaded the episode, the
+  // title, the session user, and the entitlement to run the gates above. Threading
+  // them instead would mean widening four component signatures for telemetry and
+  // would still not reach `creator_id` (it lives on the entitlement, which only the
+  // server sees). Server-authoritative, zero prop threading, one JSON field.
+  //
+  // BASELINE (verified in the Mux dashboard, Dan 2026-07-14): Mux Data is ALREADY
+  // receiving beacons — views, watch time, QoE, browser/OS all resolve, with NO
+  // envKey configured anywhere. mux-player omits `env_key` entirely when none is
+  // passed (playback-core: `data:{...n?{env_key:n}:{}}`) and Mux attributes the
+  // view to the environment that OWNS the playback id. So do NOT set
+  // NEXT_PUBLIC_MUX_ENV_KEY — it could misroute beacons to a different environment.
+  // What the baseline LACKS is who watched and any join back to us. Hence exactly
+  // these four fields, and nothing else.
+  //
+  // viewer_user_id is returned SEPARATELY from `metadata` on purpose: it is the
+  // only PII-adjacent field, and the CLIENT decides whether it may be sent, gating
+  // it on useConsent() exactly as GoogleAnalytics.tsx:83-88 does (isLoaded &&
+  // state.analytics; consent-unknown means DO NOT SEND). Keeping it out of the
+  // `metadata` object makes it impossible to forward the whole blob to Mux by
+  // accident. The content fields below are metadata, not personal data, and ship
+  // unconditionally.
+  return NextResponse.json({
+    playbackId,
+    playbackToken,
+    drmToken,
+    metadata: {
+      video_id: episode.id,
+      video_title: episode.title.title,
+      custom_1: attributedCreatorId, // affiliate curator; null on a free play
+      custom_2: episode.title_id,
+    },
+    viewerUserId: user?.id ?? null, // CONSENT-GATED CLIENT-SIDE. Never auto-sent.
+  });
 }

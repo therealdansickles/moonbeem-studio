@@ -383,6 +383,48 @@ additive and inert when unwritten. No settle-path involvement to unwind.
 
 ## C4. Mux Data player metadata (telemetry + one consent decision)
 
+> **STATUS: BUILT 2026-07-14. Three amendments applied — the plan below was written
+> before the clock fix and before anyone looked at the Mux dashboard.**
+>
+> **1. MECHANISM CHANGED — the token route RETURNS the metadata; nothing is
+> threaded.** The plan called for threading title/creator/viewer context down
+> through `EpisodeList → EpisodeModal → EpisodePlayGate → MuxEpisodePlayer`. Don't.
+> The playback-token route **already holds all four fields** — it loaded the
+> episode, the title, the session user, and the entitlement to run its gates — so it
+> returns them alongside the tokens. That means: zero widened component signatures
+> for telemetry, server-authoritative values, and it is the ONLY way to reach
+> `custom_1` at all (`entitlements.creator_id` lives on a row the client never
+> sees). `viewer_user_id` is returned as a SEPARATE top-level field, deliberately
+> outside the `metadata` object, so the blob cannot be forwarded to Mux wholesale by
+> accident.
+>
+> **2. SCOPE CORRECTED — the baseline is BETTER than this plan assumed.** The plan
+> says "Mux Data receives default anonymous beacons; views are not attributable."
+> Half right. Dan's dashboard (2026-07-14) shows **10 views, 2 unique viewers, 0.31h
+> playing time, `video_title` populated, browser/OS/watch-time/QoE all resolving.**
+> Beacons are LIVE. What the baseline lacks is **who watched** and **any join back to
+> our tables**. So C4 is exactly **four fields and nothing else**: `viewer_user_id`
+> (consent-gated), `video_id`, `custom_1` (creator_id), `custom_2` (title_id). Do not
+> expand it.
+>
+> **3. `NEXT_PUBLIC_MUX_ENV_KEY` — DO NOT SET IT. There is no key, and there never
+> was.** I could not verify via the Data API (our `MUX_TOKEN_ID` returns
+> `403 insufficient_scope` — it lacks Data read scope); Dan verified in the
+> dashboard. The mechanism, read from the vendored bundle
+> (`@mux/playback-core`): `data:{ ...n ? {env_key:n} : {}, ... }` — when `envKey` is
+> undefined the SDK **omits `env_key` entirely** and Mux attributes the view to the
+> environment that **owns the playback id**. Setting the var could actively MISROUTE
+> beacons to a different environment. Leave it unset. (`grep`: no `MUX_ENV_KEY` or
+> `envKey` anywhere in the repo or env.)
+>
+> **`custom_1` = `entitlements.creator_id`** (Dan's ruling): the affiliate curator,
+> null when absent. Partner and hosting-owner are both derivable from `title_id`
+> (`custom_2`); the curator is the only otherwise-unrecoverable field, and the
+> attribution chain is the entire point. **Null on free plays, and that is honest.**
+>
+> **`CreatorEpisodePreview` NOT TOUCHED this pass** (Dan's ruling pending — see the
+> tier note at the end of this section).
+
 ### Current state
 Both player mounts pass NO metadata — `MuxEpisodePlayer.tsx:90-98` and
 `me/CreatorEpisodePreview.tsx:73-78` render `<MuxPlayer playbackId tokens
@@ -444,6 +486,47 @@ story — is a separate pass.)
 
 ### Rollback
 Remove the props; zero persistence.
+
+### CreatorEpisodePreview — FREE-TIER. **RULED + SHIPPED in the same commit.**
+
+**Dan's ruling (2026-07-14): mark it, in the C4 commit itself.** The reason is the
+one below — free-tier creators previewing their own uploads were ALREADY generating
+anonymous Mux views in the same pool as real viewers. **C4 is the change that makes
+that pool joinable and readable, so C4 is the change that decides whether a partner
+dashboard counts a filmmaker scrubbing their own file as audience engagement.**
+Shipping the join without the marker would bake a **fabricated statistic into the
+data model** — the standing no-fabricated-numbers rule arriving through a telemetry
+field instead of a deck.
+
+**Shipped:** `metadata={{ custom_3: "preview" }}` on the `CreatorEpisodePreview`
+mount. **ONE field.** No viewer id (the owner is not an audience member, so there is
+no person to identify and therefore **no consent surface** — this component does not
+touch `useConsent()` at all). No join keys (the point is EXCLUSION, not attribution).
+
+**🔴 DOWNSTREAM CONTRACT: `custom_3 = "preview"` must be EXCLUDED BY DEFAULT from
+every query, dashboard, and metric that reports audience.** Owner previews are not
+audience.
+
+The original recon that produced the ruling, kept for the record:
+
+The creator self-preview player is available on **every tier, including free**:
+- Its route (`me/hosting/.../playback-token/route.ts`) gates on **ownership only** —
+  `getUser()` → rate limit → `authorizeCreatorTitleMutation`. There is **no tier
+  check, no quota check, no 402** anywhere in it (grep: zero hits for
+  `getCreatorTier` / `getCreatorHostingStatus` / `tier` / `quota`).
+- Free tier can host: `TIER_ALLOTMENT_MINUTES.free = 120` minutes.
+
+So a free-tier creator previewing their own episode generates Mux Data views today,
+and those views are **anonymous** — no `viewer_user_id`, no join key. The decision
+Dan owns: **do we tag creator previews at all?** Arguments both ways —
+- FOR: it makes preview traffic distinguishable from real viewer traffic in Mux (a
+  free-tier creator re-watching their own upload currently pollutes the same view
+  pool as paying viewers).
+- AGAINST: it is the creator's OWN content and own session; the join key buys us
+  nothing the `creator_titles` table doesn't already have, and it is one more
+  surface that must respect consent.
+A cheap middle path: tag preview views with a `custom_3: "preview"` marker and NO
+viewer id — separating the traffic without adding a person-identifier. Not built.
 
 ### Test evidence for Dan to screenshot
 1. Mux Data dashboard view row showing video_title, viewer_user_id, and both
