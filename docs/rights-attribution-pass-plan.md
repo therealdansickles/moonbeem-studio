@@ -453,6 +453,107 @@ Remove the props; zero persistence.
 
 ---
 
+## C1b. License-duration termination — PROBE DESIGN (not built)
+
+**The problem C1 could not solve.** The playback token gates only the manifest;
+segments are unauthenticated. So a lapsed rental plays to the end of the film and
+no TTL can stop it (see the struck paragraph under C1). The only lever that can
+terminate a session is **license duration** — the `licenseExpiration` /
+`playDuration` claims on the DRM token (`aud: "d"`), i.e. our two-clock rule
+expressed in the license instead of in Postgres.
+
+Mux documents these claims under **offline playback**. Whether they are honored on
+a **non-persistent streaming license is UNKNOWN** and must not be assumed.
+
+### LEG A — headless falsification. **RUN 2026-07-14. SURVIVES.**
+
+`scripts/_one_shot_license_claims_probe.mjs` (gitignored). POST a deliberately
+malformed challenge to `license.mux.com/license/widevine/<id>` with each token
+variant. A token rejected on AUTH returns 403; one that passes auth and fails on
+the challenge returns 400. Results:
+
+| # | drm-token claims | HTTP | body |
+|---|---|---|---|
+| 1 | control, none | **400** | `Invalid Parameters` |
+| 2 | `playDuration: 60` | **400** | `Invalid Parameters` |
+| 3 | `licenseExpiration: +60s` | **400** | `Invalid Parameters` |
+| 4 | `playDuration: 60, offline: true` | **400** | **`licenseExpiration is required for offline playback`** |
+| 5 | `offline + licenseExpiration + playDuration` | **400** | `Invalid Parameters` |
+| 6 | `offline: false, playDuration: 60` | **400** | `Invalid Parameters` |
+
+**Nothing is rejected — the line survives.** And variant 4 is the real find: the
+endpoint **read `offline: true` and demanded `licenseExpiration`**. That is
+claim-aware validation — these fields are **parsed**, not discarded.
+
+⚠️ **Scope note (the week's lesson, again):** "Mux ignores unknown claims" was
+proven on the **video edge** (`aud: "v"`). It does **NOT** hold on the **license
+endpoint** (`aud: "d"`), which demonstrably inspects them. Do not generalize the
+one to the other.
+
+**What Leg A does NOT prove:** that the claims are HONORED. A 400 means the token
+passed auth — nothing more. Acceptance and silent-discard are indistinguishable at
+this layer. Only Leg B can confirm.
+
+### LEG B — real CDM. **The only confirming test. NOT YET BUILT.**
+
+A license handshake needs a real CDM, so this runs in a browser. Standalone, **no
+app-code changes**: `scripts/_one_shot_license_duration_probe/` serves a bare page
+on `localhost:8787` (EME requires a secure context; localhost qualifies) mounting
+`mux-player` with a normal playback token and a DRM token carrying
+**`playDuration: 60`**, logging `currentTime` / `paused` / `readyState` and every
+`error` / `waiting` / `encrypted` event each second.
+
+Then **watch, in both engines** — FairPlay's rental semantics differ from
+Widevine's, so a Chrome pass is **not** evidence about Safari:
+
+- **Chrome / Widevine** — does playback stop at ~60s?
+- **Safari / FairPlay** — same, independently.
+- Repeat with `licenseExpiration` (absolute) instead of `playDuration` (relative):
+  different clocks, possibly honored independently.
+
+**The three outcomes:**
+1. **Stops with an error** → the lever works AND surfaces where `MuxEpisodePlayer`'s
+   `onError` already catches it. C1b is buildable.
+2. **Stops silently** (freeze/stall, no error event) → the lever works but the UX is
+   a hang; we'd need a client watchdog, not just `onError`.
+3. **Doesn't stop** → the claims are ignored on streaming licenses; session
+   termination is **not available via Mux DRM**, and we say so plainly rather than
+   inventing a third theory.
+
+### LEG C — the design consequence, only if B passes
+
+**The license clock restarts on every new session.** A fixed `playDuration: 48h`
+would let a viewer re-acquire a fresh 48h license forever — precisely the bug the
+entitlement window exists to prevent. So the server must mint the license from the
+entitlement's **REMAINING** window at mint time:
+
+```
+started rental   : remaining = (first_played_at + 48h) − now
+unstarted rental : remaining = 48h   (this mint is what stamps first_played_at)
+purchase         : no cap (fall back to TOKEN_TTL)
+```
+clamped `> 0` (a non-positive remaining must never mint — that is a 402), and
+capped by `TOKEN_TTL` so a license can never outlive its own token.
+
+**🔴 HARD PREREQUISITE — `first_played_at` IS CURRENTLY WRONG.** Leg C computes
+durations from `first_played_at`, and that clock is started by *opening a modal*,
+not by playing: `EpisodeList.tsx:27` (row click) → `EpisodeModal.tsx:41,81-83`
+(mounts the player immediately, no play gate) → `MuxEpisodePlayer.tsx:45-51`
+(POSTs on mount) → `playback-token/route.ts:150` (`stampFirstPlay` runs
+unconditionally on every gated POST). The player does **not** autoplay, so a viewer
+can open an episode, see a PAUSED player, close it, and have burned the start of
+their 48-hour window without playing a frame. `HeroPlayer` is correct (mounts on
+the play click); the series-modal path is not. **This is a live bug, independent of
+C1, and it must be fixed BEFORE C1b — otherwise C1b hands out license durations
+computed from a clock a peek started.**
+
+**User-visible consequence of C1b, to be release-noted only AFTER Leg B proves it
+happens:** a viewer with 10 minutes left on a rental gets a 10-minute license and
+is cut off mid-film. That is correct — it is what a 48-hour window means — but it
+is a real behavior change, and this time the CHANGELOG entry waits for evidence.
+
+---
+
 ## Sequencing across the four items
 
 C4 (telemetry; low risk once the consent gate is wired correctly) → C1
