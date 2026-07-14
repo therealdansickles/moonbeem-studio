@@ -23,6 +23,37 @@ Standing constraints that bind this pass:
 
 ## C1. Playback-token binding + TTL reduction
 
+> **STATUS: BUILT 2026-07-13 (one commit). Ruled amendments applied.**
+> Site A TTL 12h→**4h**; Site B TTL 12h→**4h** (NOT 1h — a creator previewing
+> their own episode gains nothing from a tighter expiry, and that mount has no
+> refresh path, so it would only add a second unrecoverable failure surface).
+> Viewer claim **INCLUDED, on `signPlaybackId` only**; the DRM-license leg stays
+> plain. Territory re-fetch folded out (the helper is now pure).
+> **Acceptance criterion 1 amended:** the Mux SDK mints **no `iat` claim** (the
+> payload is `kid`/`sub`/`aud`/`exp`), so TTL is verified as **`exp - now ≈ 4h`**.
+>
+> **PROBE RESULT (2026-07-13) — the gate the viewer claim rode on.** Signed three
+> playback tokens for a real published DRM asset and fetched the HLS manifest for
+> each: control (no extra claims) **200**, `viewer_user_id` claim **200**, pure
+> **gibberish** claim **200**. Mux ignores unrecognized claims wholesale. So the
+> claim cannot break playback — and it enforces NOTHING. It is forensic only: it
+> names the account that minted a leaked token. Enforcement = TTL + the re-mint
+> gate stack.
+>
+> **⚠️ THE ASYMMETRY THAT MAKES THE REFRESH A PREREQUISITE, NOT A COMPANION**
+> — this is why C1 is ONE commit, not two. The two callers mint at different
+> moments:
+> - `HeroPlayer.tsx:28-41` mounts the player **on the play click** — an idle viewer
+>   who presses play hours later mints a FRESH token. Safe at any TTL.
+> - `EpisodeModal.tsx:81-83` mounts it **on modal open** — the token is minted when
+>   the modal opens, *not* when play is pressed. A viewer who opens the modal, walks
+>   away, and presses play 5h later is holding a 5h-old token: fine at 12h,
+>   **EXPIRED at 4h**.
+>
+> On the series-modal path, cutting the TTL *without* the refresh path hands the
+> viewer a dead player and a generic "can't be played right now". The TTL cut and
+> the `onError` re-mint ship together or not at all.
+
 ### Current state (recon, exhaustive)
 
 Every Mux token mint in the repo — exactly three sites:

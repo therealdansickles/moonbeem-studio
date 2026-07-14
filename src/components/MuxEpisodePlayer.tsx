@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { TitleEpisode } from "@/lib/queries/titles";
 import PlayerLoading from "@/components/PlayerLoading";
@@ -21,6 +21,29 @@ const MuxPlayer = dynamic(() => import("@mux/mux-player-react"), {
 // WHEN this mounts (and therefore when the token fetches): the modal mounts it on
 // open; the hero mounts it on the play click (fetch-on-play). FanEditModal and
 // the playback-token route are untouched.
+//
+// ── C1 REFRESH PATH (2026-07-13) ────────────────────────────────────────────
+// Tokens are 4h (was 12h). The TTL cut is only safe BECAUSE of the retry below,
+// and the reason is a mount-timing asymmetry between the two callers:
+//
+//   HeroPlayer  — mounts on the PLAY CLICK. A viewer who idles for hours and then
+//                 presses play mints a FRESH token at that moment. Never strands.
+//   EpisodeModal — mounts on MODAL OPEN. The token is minted when the modal opens,
+//                 NOT when play is pressed. A viewer who opens the modal, walks
+//                 away, and presses play 5h later is holding a 5h-old token: fine
+//                 at 12h, EXPIRED at 4h.
+//
+// So on the modal path a 4h TTL without a refresh would hand the viewer a dead
+// player. onError below re-POSTs the token route ONCE, swaps in the new tokens,
+// and resumes at the same timestamp. That re-POST re-runs the FULL server gate
+// stack (entitlement, territory, rental window) — which is why the refresh is a
+// rights GAIN, not just a UX patch: a rental that lapses mid-watch now stops at
+// the next refresh instead of coasting on a long-lived token.
+//
+// ONE retry, deliberately. A genuinely-expired entitlement must surface as
+// not_entitled, not spin; and misclassifying a transient network blip as expiry
+// costs at most one wasted POST (rate-limited, harmless) — which is why we don't
+// try to parse Mux's error taxonomy to guess WHY playback failed.
 type TokenState =
   | { status: "loading" }
   | {
@@ -42,10 +65,21 @@ export default function MuxEpisodePlayer({
   const [tokenState, setTokenState] = useState<TokenState>({
     status: "loading",
   });
+  // Bumped once by onError to re-run the mint effect. 0 = first mint, 1 = the
+  // single allowed refresh. Never goes higher.
+  const [attempt, setAttempt] = useState(0);
+  // Where playback was when the token died, so the re-minted player resumes there
+  // instead of restarting the film.
+  const resumeAtRef = useRef(0);
+
   useEffect(() => {
     if (episode.source !== "mux" || !episode.mux_playback_id) return;
     const controller = new AbortController();
-    setTokenState({ status: "loading" });
+    // On a REFRESH (attempt > 0) keep the current player mounted with its stale
+    // tokens until the new ones land — flipping to "loading" would tear the
+    // player down mid-watch and flash the placeholder for a swap the viewer
+    // should barely notice.
+    if (attempt === 0) setTokenState({ status: "loading" });
     (async () => {
       try {
         const res = await fetch(`/api/episodes/${episode.id}/playback-token`, {
@@ -56,6 +90,8 @@ export default function MuxEpisodePlayer({
           // Branch on the status code alone — the route returns distinguishable
           // codes (401/402/451), and the error body may not be JSON, so don't
           // await it. Anything else non-2xx is a generic "unavailable".
+          // This is ALSO the refresh outcome that matters: a rental that lapsed
+          // mid-watch re-mints into a 402 here and the player stops.
           let kind: "auth" | "not_entitled" | "territory" | "unavailable";
           if (res.status === 401) kind = "auth";
           else if (res.status === 402) kind = "not_entitled";
@@ -83,7 +119,18 @@ export default function MuxEpisodePlayer({
       }
     })();
     return () => controller.abort();
-  }, [episode]);
+  }, [episode, attempt]);
+
+  // Any fatal player error gets ONE re-mint. We do NOT inspect the error code:
+  // an expired token and a flaky segment fetch both want the same cheap remedy,
+  // and the server is the authority on whether the viewer may keep watching.
+  function handlePlayerError(evt: { target?: unknown }) {
+    if (attempt > 0) return; // already spent the one retry
+    const el = evt?.target as { currentTime?: number } | undefined;
+    resumeAtRef.current =
+      typeof el?.currentTime === "number" ? el.currentTime : 0;
+    setAttempt(1);
+  }
 
   if (tokenState.status === "ready") {
     return (
@@ -94,6 +141,10 @@ export default function MuxEpisodePlayer({
           drm: tokenState.drmToken,
         }}
         streamType="on-demand"
+        // Swapping `tokens` reloads the source; startTime puts the viewer back
+        // where the old token died (0 on a first mint).
+        startTime={resumeAtRef.current}
+        onError={handlePlayerError}
         style={{ width: "100%", maxHeight: "80vh" }}
       />
     );

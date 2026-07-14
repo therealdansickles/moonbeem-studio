@@ -1,49 +1,49 @@
 // Territory (geo) gate for Mux playback.
 //
-// isTerritoryAllowed(country, title) answers: may a viewer in `country` play this
-// `title`? Per-title rights live in two columns on titles (migration
-// 20260624000001_add_title_territory_rights):
+// isTerritoryAllowed(country, rights) answers: may a viewer in `country` play a
+// title carrying these rights? Per-title rights live in two columns on titles
+// (migration 20260624000001_add_title_territory_rights):
 //   - territory_worldwide (boolean): licensed everywhere — skip the geo check.
 //   - allowed_territories (text[]): an ISO 3166-1 alpha-2 ALLOW-list.
 //
 // DEFAULT-DENY: a title with NEITHER set (unset) plays NOWHERE — licensed content
 // must not leak globally before the partner declares rights. The 23 pre-existing
 // public titles were backfilled to worldwide so they keep playing; new titles get
-// a partner-declared territory set (the territory selector + a publish gate land
-// in the next sub-unit).
+// a partner-declared territory set. A NULL rights object (missing / soft-deleted
+// title) is likewise denied — never allow-all on a missing rights row.
 //
-// CONTRACT: the playback-token route calls this and maps a `false` -> HTTP 451.
-// The body is async (one service-role read, mirroring getEpisodeForPlayback); the
-// route's ONLY change is the `await` at the call site — its branches/451 mapping
-// are unchanged. `country` is the ISO-3166-1 alpha-2 code from x-vercel-ip-country
-// (or null when unavailable); null against a territory-restricted title is DENIED
-// (we cannot prove the viewer is in-territory).
+// PURE + SYNCHRONOUS (C1, 2026-07-13). This helper used to run its OWN
+// service-role read of the titles row — a second query for a row the playback
+// route had ALREADY fetched via getEpisodeForPlayback (different columns, same
+// id). C1's refresh path makes this route fire more often, so the caller now
+// passes the rights it already holds and this became a pure predicate: one fewer
+// DB round-trip per mint, and directly unit-testable (territory.test.ts).
+// The DECISION RULE below is byte-for-byte the one it replaced; only the source
+// of the two columns changed.
+//
+// CONTRACT: the playback-token route maps a `false` -> HTTP 451. `country` is the
+// ISO-3166-1 alpha-2 code from x-vercel-ip-country (or null when unavailable);
+// null against a territory-restricted title is DENIED (we cannot prove the viewer
+// is in-territory).
 
-import { createServiceRoleClient } from "@/lib/supabase/service";
+// The two rights columns, as carried on the already-loaded title. `null` = the
+// title is missing or soft-deleted (fail-closed).
+export type TerritoryRights = {
+  allowed_territories: string[] | null;
+  territory_worldwide: boolean | null;
+} | null;
 
-// The id is enough — the helper looks up the title's territory rights itself.
-export type TerritoryTitle = { id: string };
-
-export async function isTerritoryAllowed(
+export function isTerritoryAllowed(
   country: string | null,
-  title: TerritoryTitle,
-): Promise<boolean> {
-  const supabase = createServiceRoleClient();
-  const { data } = await supabase
-    .from("titles")
-    .select("allowed_territories, territory_worldwide")
-    .eq("id", title.id)
-    .is("deleted_at", null)
-    .maybeSingle();
-
-  // Missing / soft-deleted title -> fail-closed (never allow-all on a missing
-  // rights row; the caller already resolved visibility separately).
-  if (!data) return false;
+  rights: TerritoryRights,
+): boolean {
+  // Missing / soft-deleted title -> fail-closed.
+  if (!rights) return false;
 
   // Licensed everywhere -> allow, no geo needed.
-  if (data.territory_worldwide === true) return true;
+  if (rights.territory_worldwide === true) return true;
 
-  const allowed = (data.allowed_territories as string[] | null) ?? [];
+  const allowed = rights.allowed_territories ?? [];
 
   // Unset (no worldwide, no allow-list) -> default-deny: plays nowhere until the
   // partner declares territories.

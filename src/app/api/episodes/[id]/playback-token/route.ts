@@ -21,6 +21,19 @@ import {
 // Token signing uses Node crypto.
 export const runtime = "nodejs";
 
+// TOKEN TTL (C1, 2026-07-13: was 12h). A minted token is a bearer pass — anyone
+// holding it can fetch segments for its whole life, and the rights checks below
+// run at MINT time only. So the TTL *is* the enforcement window: it bounds both
+// the shareable-token exposure and how long a LAPSED rental keeps playing.
+//
+// 4h: the longest currently-playable title runs 91 minutes (prod, 2026-07-13),
+// so 4h is >2.5x the longest watch plus pause slack. It is not shorter because
+// the client refresh path (MuxEpisodePlayer's onError re-mint) is what makes a
+// mid-watch expiry survivable, and a tighter TTL would lean on it harder for no
+// rights gain. Playback and DRM-license tokens MUST stay TTL-synced — they are
+// minted together below and a split would strand one leg.
+const TOKEN_TTL = "4h";
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -71,11 +84,17 @@ export async function POST(
   }
 
   // GEO GATE: read the Vercel edge country header and defer to isTerritoryAllowed,
-  // which reads the title's per-title territory rights (default-deny on unset).
-  // The check lives ENTIRELY in the helper body — this route only reads the header,
-  // awaits the helper, and maps a false result -> 451 (branches unchanged).
+  // which applies the title's per-title territory rights (default-deny on unset).
+  // The decision rule lives ENTIRELY in the helper; this route only reads the
+  // header and maps a false result -> 451 (branches unchanged).
+  //
+  // C1: the helper is now PURE and takes the rights off the title we ALREADY
+  // loaded (getEpisodeForPlayback) instead of re-querying the same titles row for
+  // two more columns. episode.title is non-null here — the canViewTitle gate above
+  // already 403'd a missing/soft-deleted title — so the fail-closed-on-null branch
+  // inside the helper is belt-and-braces, not the live path.
   const country = request.headers.get("x-vercel-ip-country");
-  if (!(await isTerritoryAllowed(country, { id: episode.title_id }))) {
+  if (!isTerritoryAllowed(country, episode.title)) {
     return NextResponse.json({ error: "territory_restricted" }, { status: 451 });
   }
 
@@ -117,18 +136,48 @@ export async function POST(
     // Active -> arm the 48h clock (DB time, exactly-once, fire-and-proceed), then
     // fall through to the UNCHANGED mint. Stamp AFTER the activeness check above —
     // never before, or the first play would be judged against a value we just wrote.
+    //
+    // ⚠️ LOAD-BEARING, and MORE so since C1: this call is UNCONDITIONAL — there is
+    // no `if (!ent.first_played_at)` guard here. Exactly-once is enforced ONLY by
+    // the RPC's own predicate (20260626000001_stamp_first_play.sql:26-29):
+    //     update entitlements set first_played_at = now()
+    //      where id = p_entitlement_id AND first_played_at IS NULL;
+    // C1 added a client REFRESH path, so this route is now re-hit MID-RENTAL, many
+    // times per watch. If that `AND first_played_at IS NULL` is ever dropped, every
+    // token refresh would re-stamp first_played_at = now() and RESTART the 48-hour
+    // clock — an eternal rental, silently, with no error anywhere. Do not "simplify"
+    // that predicate.
     await stampFirstPlay(ent.id);
   }
 
-  // Mint both tokens (12h). Signing is local crypto via the keypair-only signer.
+  // Mint both tokens (TOKEN_TTL). Signing is local crypto via the keypair-only
+  // signer — no network call to Mux.
+  //
+  // ⚠️ viewer_user_id is FORENSIC ONLY. It is NOT access control, and no gate
+  // anywhere reads it. Mux IGNORES claims it does not recognize: a probe on
+  // 2026-07-13 signed a token carrying a pure-gibberish claim and the video edge
+  // served the manifest HTTP 200 all the same (control, viewer_user_id, and
+  // gibberish all 200 against a real DRM asset). So the claim buys exactly one
+  // thing — if a token leaks, its payload names the account that minted it. The
+  // ENFORCEMENT levers are (a) TOKEN_TTL and (b) the gate stack above, which
+  // re-runs in full on every re-mint the client's refresh path triggers. Never
+  // let a future reader mistake this claim for a permission.
+  //
+  // Claim goes on the PLAYBACK token only. The DRM-license leg stays plain: the
+  // probe could not exercise a real license handshake (that needs a CDM), so an
+  // unknown-claim rejection there is untested — and it would break playback
+  // outright, for zero forensic gain the playback token doesn't already provide.
   const playbackId = episode.mux_playback_id;
   let playbackToken: string;
   let drmToken: string;
   try {
     const signer = getMuxSigner();
     [playbackToken, drmToken] = await Promise.all([
-      signer.jwt.signPlaybackId(playbackId, { expiration: "12h" }),
-      signer.jwt.signDrmLicense(playbackId, { expiration: "12h" }),
+      signer.jwt.signPlaybackId(playbackId, {
+        expiration: TOKEN_TTL,
+        params: { viewer_user_id: user?.id ?? "anon" },
+      }),
+      signer.jwt.signDrmLicense(playbackId, { expiration: TOKEN_TTL }),
     ]);
   } catch (err) {
     // Log the message only (no key material in SDK errors), never the tokens.

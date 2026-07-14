@@ -86,16 +86,23 @@ export async function GET(
     return NextResponse.json({ error: "not_playable" }, { status: 400 });
   }
 
-  // Mint both tokens (12h), local crypto via the keypair-only signer — identical
-  // to the partner route's mint, minus everything a viewer needs.
+  // Mint both tokens (TOKEN_TTL), local crypto via the keypair-only signer —
+  // identical to the viewer route's mint, minus everything a viewer needs.
+  //
+  // TTL 4h (C1, 2026-07-13: was 12h) — the SAME value as the viewer route, on
+  // purpose (Dan's ruling). A shorter TTL here would buy nothing: the caller is a
+  // creator previewing their OWN unpublished episode, and this mount has NO client
+  // refresh path (CreatorEpisodePreview is fetch-on-click, one shot), so a tighter
+  // expiry would only add a second, unrecoverable failure surface. No viewer claim
+  // either: ownership already identifies the only person who can mint here.
   const playbackId = ep.mux_playback_id as string;
   let playbackToken: string;
   let drmToken: string;
   try {
     const signer = getMuxSigner();
     [playbackToken, drmToken] = await Promise.all([
-      signer.jwt.signPlaybackId(playbackId, { expiration: "12h" }),
-      signer.jwt.signDrmLicense(playbackId, { expiration: "12h" }),
+      signer.jwt.signPlaybackId(playbackId, { expiration: "4h" }),
+      signer.jwt.signDrmLicense(playbackId, { expiration: "4h" }),
     ]);
   } catch (err) {
     // Message only — no key material in SDK errors, never the tokens.

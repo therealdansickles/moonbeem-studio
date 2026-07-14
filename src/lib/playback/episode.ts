@@ -27,6 +27,10 @@ export type EpisodeForPlayback = {
   // sellability derivation — the gate gates exactly when the charge path would
   // sell (enabled === true && integer price > 0), so it no longer reads the
   // stored monetization_mode marker.
+  // TERRITORY RIGHTS (allowed_territories / territory_worldwide) ride along on
+  // this SAME row read (C1): isTerritoryAllowed used to re-query the identical
+  // titles row for just these two columns. Carrying them here kills that second
+  // round-trip on the hot playback path, which C1's refresh makes hotter.
   title: {
     is_public: boolean;
     partner_id: string | null;
@@ -35,6 +39,8 @@ export type EpisodeForPlayback = {
     purchase_enabled: boolean;
     transact_price_cents: number | null;
     purchase_price_cents: number | null;
+    allowed_territories: string[] | null;
+    territory_worldwide: boolean | null;
   } | null;
 };
 
@@ -58,7 +64,7 @@ export async function getEpisodeForPlayback(
   const { data: title } = await supabase
     .from("titles")
     .select(
-      "is_public, partner_id, default_monetization_mode, transact_enabled, purchase_enabled, transact_price_cents, purchase_price_cents",
+      "is_public, partner_id, default_monetization_mode, transact_enabled, purchase_enabled, transact_price_cents, purchase_price_cents, allowed_territories, territory_worldwide",
     )
     .eq("id", row.title_id)
     .is("deleted_at", null)
@@ -75,6 +81,8 @@ export async function getEpisodeForPlayback(
         purchase_enabled: boolean;
         transact_price_cents: number | null;
         purchase_price_cents: number | null;
+        allowed_territories: string[] | null;
+        territory_worldwide: boolean | null;
       } | null) ?? null,
   };
 }
