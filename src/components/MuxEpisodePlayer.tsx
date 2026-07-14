@@ -156,6 +156,20 @@ export default function MuxEpisodePlayer({
           drm: tokenState.drmToken,
         }}
         streamType="on-demand"
+        // ⚠️ MONEY-ADJACENT (2026-07-14). autoPlay is not a convenience — it is
+        // what makes "the mint is the stamp" honest. This component's ONLY mount
+        // site is EpisodePlayGate, which mounts it only on an explicit play click,
+        // and mounting POSTs the token, which stamps first_played_at and starts the
+        // 48-hour rental clock. Without autoPlay the viewer would be shown a PAUSED
+        // player after clicking play — clock already running, no frame decoded, and
+        // a second click required. The mount IS the user's play gesture, so the
+        // player must honour it. Do not remove this without moving the stamp, and
+        // read EpisodePlayGate.tsx before considering that (spoiler: don't).
+        //
+        // If a browser blocks autoplay anyway (Safari is stricter), the player
+        // falls back to paused-with-controls — the viewer presses play and watches.
+        // The clock is already stamped in that case: the accepted residual gap.
+        autoPlay
         // Swapping `tokens` reloads the source; startTime puts the viewer back
         // where the old token died (0 on a first mint).
         startTime={resumeAtRef.current}

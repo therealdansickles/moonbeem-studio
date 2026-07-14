@@ -165,6 +165,31 @@ export async function POST(
     // fall through to the UNCHANGED mint. Stamp AFTER the activeness check above —
     // never before, or the first play would be judged against a value we just wrote.
     //
+    // ⚠️ WHY THE MINT IS THE STAMP TRIGGER (2026-07-14 ruling — do not "fix" this).
+    // A minted token is a CAPABILITY; a played frame is CONSUMPTION. Only the
+    // second should start a rental clock, so the obvious cleanup is to move this
+    // stamp to a client signal fired on the player's first `playing` event. DO NOT.
+    // THE MINT IS THE ONLY UNSKIPPABLE, SERVER-OBSERVED EVENT IN THE FLOW. A client
+    // signal can simply not be sent — DevTools, an ad-blocker, a dropped request —
+    // and a viewer who never fires it keeps first_played_at NULL. Per
+    // window.ts:20-35, a NULL first_played_at does NOT mean "unwatchable": it means
+    // the rental is active for RENTAL_START_WINDOW_DAYS = 30 DAYS from purchase.
+    // So moving the stamp client-side silently upgrades every 48-hour rental into a
+    // 30-day rental for anyone willing to block one POST.
+    //
+    // The correct fix — shipped 2026-07-14 — was to move the MINT to the moment of
+    // consumption instead. The player now has exactly ONE mount site,
+    // EpisodePlayGate, which holds a still until an explicit play click; both
+    // callers (HeroPlayer for features, EpisodeModal for series episodes) go
+    // through it, and MuxEpisodePlayer passes autoPlay so the mount actually plays.
+    // Before that, opening a series-episode modal minted a token and started the
+    // clock on a viewer who never watched a frame.
+    //
+    // ACCEPTED RESIDUAL GAP: this stamp still precedes the first decoded frame by
+    // seconds, and a DRM license failure right after the mint burns the clock on a
+    // play that never happened. Rare, and strictly better than the 30-day hole
+    // above. Ruled an accepted trade (Dan, 2026-07-14).
+    //
     // ⚠️ LOAD-BEARING, and MORE so since C1: this call is UNCONDITIONAL — there is
     // no `if (!ent.first_played_at)` guard here. Exactly-once is enforced ONLY by
     // the RPC's own predicate (20260626000001_stamp_first_play.sql:26-29):

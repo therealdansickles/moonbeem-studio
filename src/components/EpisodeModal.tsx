@@ -4,15 +4,24 @@ import { useCallback, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { InstagramEmbed } from "react-social-media-embed";
 import type { TitleEpisode } from "@/lib/queries/titles";
-import MuxEpisodePlayer from "@/components/MuxEpisodePlayer";
+import EpisodePlayGate from "@/components/EpisodePlayGate";
 
 // Standalone episode player. Two render paths, branched on episode.source:
 //   - instagram: tokenless public IG embed (unchanged from before).
-//   - mux: DRM playback via the shared <MuxEpisodePlayer> island (fetch-on-open
-//     token -> MuxPlayer). The mux player + token flow were EXTRACTED into
-//     MuxEpisodePlayer so the feature hero reuses the exact same path; the modal
-//     chrome (scroll-lock, Escape, overlay, close) is unchanged. FanEditModal is
-//     left entirely untouched.
+//   - mux: DRM playback behind <EpisodePlayGate> — a still + play button that
+//     mounts the player (and therefore mints the token) ONLY on an explicit play
+//     click. The modal chrome (scroll-lock, Escape, overlay, close) is unchanged.
+//     FanEditModal is left entirely untouched.
+//
+// ⚠️ MONEY-ADJACENT — DO NOT mount <MuxEpisodePlayer> directly here again. Until
+// 2026-07-14 this modal rendered the player the instant it opened, which POSTed
+// the playback-token and STAMPED entitlements.first_played_at — starting the
+// viewer's 48-hour rental clock on a modal open, before a single frame played (the
+// player does not autoplay on its own). The mint is the stamp trigger, and it must
+// therefore fire on consumption, not on curiosity. The full rationale — including
+// why the stamp must NOT be moved to a client signal (a NULL first_played_at
+// leaves a rental active for 30 DAYS, window.ts:20-35) — lives in
+// EpisodePlayGate.tsx. Read it before touching this branch.
 export default function EpisodeModal({
   episode,
   onClose,
@@ -79,8 +88,9 @@ export default function EpisodeModal({
             <div className="flex flex-1 items-start justify-center overflow-y-auto bg-moonbeem-navy/20 p-3">
               <div className="w-full max-w-[540px]">
                 {episode.source === "mux" ? (
-                  // MUX branch: the shared DRM player island (token fetch-on-mount).
-                  <MuxEpisodePlayer episode={episode} />
+                  // MUX branch: still + play button. The player (and the token
+                  // mint, and the rental-clock stamp) arrive only on a play click.
+                  <EpisodePlayGate episode={episode} />
                 ) : episode.embed_url ? (
                   // INSTAGRAM branch — unchanged: tokenless public embed.
                   <InstagramEmbed
