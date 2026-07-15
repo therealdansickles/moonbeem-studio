@@ -47,3 +47,23 @@ export function getMuxSigner(): Mux {
   cachedSigner = new Mux({ jwtSigningKey, jwtPrivateKey });
   return cachedSigner;
 }
+
+let cachedData: Mux | null = null;
+
+// Mux DATA client — the "Moonbeem Partner Data" token, minted with Data:Read
+// scope ONLY. A THIRD, separate credential from getMux()'s Video token: the Video
+// token deliberately lacks Data scope (a videoViews.list on it returns 403
+// insufficient_scope, probed 2026-07-14), and we keep the Data token off getMux()
+// so neither client carries scope it doesn't need — same doctrine as getMux vs
+// getMuxSigner. Reads MUX_DATA_TOKEN_ID / MUX_DATA_TOKEN_SECRET; do NOT reuse
+// MUX_TOKEN_ID / MUX_TOKEN_SECRET (those stay Video-scoped).
+export function getMuxData(): Mux {
+  if (cachedData) return cachedData;
+  const tokenId = process.env.MUX_DATA_TOKEN_ID;
+  const tokenSecret = process.env.MUX_DATA_TOKEN_SECRET;
+  if (!tokenId || !tokenSecret) {
+    throw new Error("MUX_DATA_TOKEN_ID and MUX_DATA_TOKEN_SECRET must be set");
+  }
+  cachedData = new Mux({ tokenId, tokenSecret });
+  return cachedData;
+}

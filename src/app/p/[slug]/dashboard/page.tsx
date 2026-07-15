@@ -38,6 +38,10 @@ import TimeSeriesChart from "@/components/dashboard/TimeSeriesChart";
 import UsStateChoropleth from "@/components/dashboard/UsStateChoropleth";
 import DataTable, { type Column } from "@/components/dashboard/DataTable";
 import {
+  loadMuxViewMetrics,
+  formatWatchHours,
+} from "@/lib/dashboard/mux-view-metrics";
+import {
   TIME_WINDOWS,
   parseWindow,
   windowCutoffIso,
@@ -1353,8 +1357,14 @@ export default async function PartnerDashboardPage({
   const titleIds = titleRows.map((t) => t.id);
   const activeTitleIds = titleRows.filter((t) => t.is_active).map((t) => t.id);
 
-  const [metrics, topPerformers, topCreators, allEdits, requestedTitles] =
-    await Promise.all([
+  const [
+    metrics,
+    topPerformers,
+    topCreators,
+    allEdits,
+    requestedTitles,
+    muxViews,
+  ] = await Promise.all([
       loadHeroMetrics(supabase, titleIds),
       // Asymmetric Top-N: edits=10 (content, curated/selective);
       // editors=12 (people, matches the Moonbeem "Top 12" brand
@@ -1364,6 +1374,12 @@ export default async function PartnerDashboardPage({
       loadTopCreators(supabase, titleIds, 12),
       loadAllEdits(supabase, titleIds),
       loadOpenTitleRequests(supabase, titleIds),
+      // Phase 1 partner analytics: hosted-FILM views + watch time from Mux Data.
+      // Receives the IDENTICAL titleIds array (the one tenant derivation); its own
+      // per-title !custom_3:preview loop is the whole boundary. Returns null when
+      // DEGRADED (Mux down / token unset / any title failed) — it can only resolve,
+      // so it cannot break this Promise.all. See lib/dashboard/mux-view-metrics.ts.
+      loadMuxViewMetrics(titleIds),
     ]);
   const fanEditIdsForTracking = allEdits.map((r) => r.id);
   const [dailyGrowth, trackingStartDay] = await Promise.all([
@@ -1683,6 +1699,37 @@ export default async function PartnerDashboardPage({
               value={metrics.ticket_clicks.toLocaleString()}
               label="Ticket click-throughs"
               sub="outbound to listings"
+            />
+          </div>
+        </div>
+
+        {/* Hosted-film playback (Mux Data). DELIBERATELY its own group, separate
+            from Reach above: "Total platform views" there is FAN-EDIT social views
+            (TikTok/IG, from our DB, lifetime); these are HOSTED-FILM plays on
+            Moonbeem's own player, windowed to Mux's retention. Conflating them
+            would misreport a partner's numbers. Owner previews are excluded
+            (custom_3=preview). muxViews is null when the metric is temporarily
+            unavailable — we show that honestly rather than a zero or a wrong sum. */}
+        <div className="mt-6 md:mt-8 flex flex-col gap-3">
+          <p className="text-caption uppercase tracking-wide text-moonbeem-ink-muted m-0">
+            Hosted film · last 90 days
+          </p>
+          <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
+            <HeroTile
+              value={muxViews ? formatMetric(muxViews.film_views) : "—"}
+              label="Film views"
+              sub={
+                muxViews
+                  ? `plays of ${titleScope} hosted films`
+                  : "temporarily unavailable"
+              }
+            />
+            <HeroTile
+              value={muxViews ? formatWatchHours(muxViews.watch_time_ms) : "—"}
+              label="Watch time"
+              sub={
+                muxViews ? "total hours watched" : "temporarily unavailable"
+              }
             />
           </div>
         </div>
