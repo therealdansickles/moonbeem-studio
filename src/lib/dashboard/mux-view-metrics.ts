@@ -28,6 +28,14 @@
 // is a WRONG number, and on a partner-reporting surface a wrong number is worse
 // than no number. So any per-title failure poisons the whole aggregate to null
 // (the tile renders "temporarily unavailable"), never a silent short sum.
+//
+// Per-title failures ARE reported (console + Sentry: title_id, HTTP status, Mux
+// error type — never token values) so a degraded tile is diagnosable from logs
+// instead of a local replay. Reporting is visibility only; it never changes the
+// degrade rule above. The unset-token degrade (getMuxData throws in local/
+// preview) stays deliberately silent — that path is expected, not a failure.
+
+import * as Sentry from "@sentry/nextjs";
 
 import { getMuxData } from "@/lib/mux";
 
@@ -71,10 +79,44 @@ export function formatWatchHours(ms: number): string {
   return `${hours.toFixed(1)} h`;
 }
 
+// Shape a per-title rejection for reporting. The Mux SDK's APIError carries
+// `status` (HTTP) and `error` (the parsed JSON body, whose Mux shape is
+// {error: {type, messages}}); connection failures have neither. Extracted
+// defensively from `unknown` so a shape drift in the SDK degrades the LABEL
+// ("network"/"unknown"), never throws inside the reporting path.
+function describeMuxFailure(reason: unknown): {
+  status: number | "network";
+  error_type: string;
+} {
+  const r = reason as { status?: unknown; error?: unknown } | null;
+  const status = typeof r?.status === "number" ? r.status : "network";
+  const body = r?.error as { error?: { type?: unknown } } | null | undefined;
+  const error_type =
+    typeof body?.error?.type === "string" ? body.error.type : "unknown";
+  return { status, error_type };
+}
+
+// Report one per-title failure: structured console line + Sentry capture with
+// the same fields. NEVER logs token values — only the title_id, the HTTP
+// status, and Mux's error type string. (captureException sends the error's
+// message/stack; Mux API error messages carry the response body, which holds
+// no credentials — the auth header lives on the request, not the error.)
+function reportMuxFailure(titleId: string, reason: unknown): void {
+  const { status, error_type } = describeMuxFailure(reason);
+  console.error(
+    `[mux-view-metrics] per-title views call failed title_id=${titleId} status=${status} mux_error_type=${error_type}`,
+  );
+  Sentry.captureException(reason, {
+    tags: { surface: "mux-view-metrics" },
+    extra: { title_id: titleId, status, mux_error_type: error_type },
+  });
+}
+
 // IMPURE: the per-title Mux Data loop. Returns the aggregate, or null when
 // DEGRADED (any title failed, OR the Data client is unconfigured, OR Mux is down).
 // Can only RESOLVE — every failure path returns null, so it never rejects and can
 // safely sit inside the dashboard's Promise.all without being able to break it.
+// (Sentry.captureException never throws; a Sentry outage cannot break the loop.)
 export async function loadMuxViewMetrics(
   titleIds: string[],
 ): Promise<MuxViewMetrics | null> {
@@ -100,15 +142,18 @@ export async function loadMuxViewMetrics(
     ),
   );
 
-  const results: PerTitleResult[] = settled.map((s) =>
-    s.status === "fulfilled"
-      ? {
-          ok: true,
-          views: s.value.data.total_views ?? 0,
-          watch_time_ms: s.value.data.total_watch_time ?? 0,
-        }
-      : { ok: false },
-  );
+  const results: PerTitleResult[] = settled.map((s, i) => {
+    if (s.status === "fulfilled") {
+      return {
+        ok: true,
+        views: s.value.data.total_views ?? 0,
+        watch_time_ms: s.value.data.total_watch_time ?? 0,
+      };
+    }
+    // Visibility only — the failure still poisons the aggregate below.
+    reportMuxFailure(titleIds[i], s.reason);
+    return { ok: false };
+  });
 
   return aggregateMuxViewMetrics(results);
 }
