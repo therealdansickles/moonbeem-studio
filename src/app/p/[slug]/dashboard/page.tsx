@@ -40,6 +40,7 @@ import UsStateChoropleth from "@/components/dashboard/UsStateChoropleth";
 import DataTable, { type Column } from "@/components/dashboard/DataTable";
 import {
   loadMuxViewMetrics,
+  muxWindowTimeframe,
   formatWatchHours,
 } from "@/lib/dashboard/mux-view-metrics";
 import {
@@ -58,7 +59,10 @@ type SocialPlatform = "tiktok" | "instagram" | "twitter" | "youtube";
 
 type PageProps = {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ window?: string | string[] }>;
+  searchParams: Promise<{
+    window?: string | string[];
+    title?: string | string[];
+  }>;
 };
 
 export async function generateMetadata({
@@ -1307,6 +1311,7 @@ export default async function PartnerDashboardPage({
   const sp = await searchParams;
   const win = parseWindow(sp.window);
   const cutoff = windowCutoffIso(win);
+  const rawTitle = typeof sp.title === "string" ? sp.title : undefined;
 
   // Auth + membership check at the page level. We deliberately do NOT
   // redirect to /login on missing auth — the dashboard URL is a real
@@ -1390,6 +1395,16 @@ export default async function PartnerDashboardPage({
   const titleIds = titleRows.map((t) => t.id);
   const activeTitleIds = titleRows.filter((t) => t.is_active).map((t) => t.id);
 
+  // Phase 2 Mux tile filter: validate the optional ?title against the GATED
+  // titleRows set — never a raw client id. An unknown id falls back to all (no
+  // error, no query for it). The result is still a SUBSET of the one derivation,
+  // so the tenant boundary + Phase 1 not-fetching ruling both hold.
+  const selectedTitleId =
+    rawTitle && titleRows.some((t) => t.id === rawTitle) ? rawTitle : null;
+  const muxTitleIds = selectedTitleId ? [selectedTitleId] : titleIds;
+  const selectedTitleName =
+    titleRows.find((t) => t.id === selectedTitleId)?.title ?? null;
+
   const [
     metrics,
     topPerformers,
@@ -1412,8 +1427,35 @@ export default async function PartnerDashboardPage({
       // per-title !custom_3:preview loop is the whole boundary. Returns null when
       // DEGRADED (Mux down / token unset / any title failed) — it can only resolve,
       // so it cannot break this Promise.all. See lib/dashboard/mux-view-metrics.ts.
-      loadMuxViewMetrics(titleIds),
+      loadMuxViewMetrics(muxTitleIds, win),
     ]);
+  // Epoch-honest Mux since-date for the tile label. Computed in the PAGE (via the
+  // same pure helper the loader uses) so the label shows even when muxViews
+  // degrades to null ("temporarily unavailable"). Today: 7d/30d/all → Jul 14
+  // (the tagging epoch), 24h → Jul 15 (its start is after the epoch).
+  const muxSinceIso =
+    muxViews?.since_iso ?? muxWindowTimeframe(win, Date.now()).sinceIso;
+  const muxSinceLabel = new Date(
+    muxSinceIso + "T00:00:00Z",
+  ).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  // One href builder for both selectors, so each preserves the other's param.
+  const dashHref = (next: {
+    window?: TimeWindow;
+    title?: string | null;
+  }): string => {
+    const w = next.window ?? win;
+    const t = next.title !== undefined ? next.title : selectedTitleId;
+    const q = new URLSearchParams();
+    if (w && w !== "7d") q.set("window", w);
+    if (t) q.set("title", t);
+    const qs = q.toString();
+    return `/p/${partner.slug}/dashboard${qs ? `?${qs}` : ""}`;
+  };
   const fanEditIdsForTracking = allEdits.map((r) => r.id);
   const [dailyGrowth, trackingStartDay] = await Promise.all([
     loadDailyGrowth(analyticsClient, fanEditIdsForTracking, titleIds),
@@ -1748,21 +1790,64 @@ export default async function PartnerDashboardPage({
         {/* Hosted-film playback (Mux Data). DELIBERATELY its own group, separate
             from Reach above: "Total platform views" there is FAN-EDIT social views
             (TikTok/IG, from our DB, lifetime); these are HOSTED-FILM plays on
-            Moonbeem's own player, windowed to Mux's retention. Conflating them
-            would misreport a partner's numbers. Owner previews are excluded
-            (custom_3=preview). muxViews is null when the metric is temporarily
-            unavailable — we show that honestly rather than a zero or a wrong sum. */}
+            Moonbeem's own player. Owner previews are excluded (custom_3=preview).
+            PHASE 2: adjustable by the Window selector below AND by the Title filter
+            here (a subset of the gated titleIds). The header carries an EPOCH-HONEST
+            since-date ("since Jul 14, 2026") — Mux has no data before C4 tagging, so
+            these tiles NEVER say "last 30 days"; "all" means since the epoch, capped
+            by Mux's ~100d retention. muxViews is null when temporarily unavailable —
+            shown honestly rather than a zero or a wrong sum. */}
         <div className="mt-6 md:mt-8 flex flex-col gap-3">
-          <p className="text-caption uppercase tracking-wide text-moonbeem-ink-muted m-0">
-            Hosted film · last 90 days
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <p className="text-caption uppercase tracking-wide text-moonbeem-ink-muted m-0">
+              Hosted film · since {muxSinceLabel}
+            </p>
+            {titleRows.length > 1 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-caption text-moonbeem-ink-subtle mr-0.5">
+                  Title:
+                </span>
+                <Link
+                  href={dashHref({ title: null })}
+                  scroll={false}
+                  className={`rounded-md border px-2.5 py-1 text-caption transition-colors ${
+                    !selectedTitleId
+                      ? "border-moonbeem-pink bg-moonbeem-pink/10 text-moonbeem-pink"
+                      : "border-white/10 text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
+                  }`}
+                >
+                  All titles
+                </Link>
+                {titleRows.map((t) => {
+                  const active = t.id === selectedTitleId;
+                  return (
+                    <Link
+                      key={t.id}
+                      href={dashHref({ title: t.id })}
+                      scroll={false}
+                      title={t.title}
+                      className={`max-w-[9rem] truncate rounded-md border px-2.5 py-1 text-caption transition-colors ${
+                        active
+                          ? "border-moonbeem-pink bg-moonbeem-pink/10 text-moonbeem-pink"
+                          : "border-white/10 text-moonbeem-ink-muted hover:border-moonbeem-pink hover:text-moonbeem-pink"
+                      }`}
+                    >
+                      {t.title}
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
             <HeroTile
               value={muxViews ? formatMetric(muxViews.film_views) : "—"}
               label="Film views"
               sub={
                 muxViews
-                  ? `plays of ${titleScope} hosted films`
+                  ? selectedTitleName
+                    ? `plays of ${selectedTitleName}`
+                    : "plays across all hosted films"
                   : "temporarily unavailable"
               }
             />
@@ -1802,7 +1887,9 @@ export default async function PartnerDashboardPage({
         {/* Window-scoped analytical section — Visx primitives layered
             on top of the existing presentation aesthetic. Controls the
             engagement tiles, time-series, geography, and per-title
-            rollup below. Lifetime hero tiles above are not affected. */}
+            rollup below — AND the Mux hosted-film tiles above (Phase 2,
+            via muxWindowTimeframe). The FAN-EDIT lifetime hero tiles
+            (Reach, Likes/Comments/Shares) are still not affected. */}
         <div className="mt-12 flex flex-wrap items-center gap-2">
           <span className="text-body-sm text-moonbeem-ink-muted mr-1">
             Window:
@@ -1812,11 +1899,7 @@ export default async function PartnerDashboardPage({
             return (
               <Link
                 key={w}
-                href={
-                  w === "7d"
-                    ? `/p/${partner.slug}/dashboard`
-                    : `/p/${partner.slug}/dashboard?window=${w}`
-                }
+                href={dashHref({ window: w })}
                 scroll={false}
                 className={`rounded-md border px-3 py-1.5 text-body-sm transition-colors tabular-nums ${
                   active

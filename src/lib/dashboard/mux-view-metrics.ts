@@ -38,29 +38,65 @@
 import * as Sentry from "@sentry/nextjs";
 
 import { getMuxData } from "@/lib/mux";
+import type { TimeWindow } from "./queries";
 
-// Retention-bounded window. ⚠️ NOT "lifetime": Mux Data is not a lifetime store,
-// so this is explicitly a windowed number and the tiles must say so — unlike the
-// fan-edit tiles, which sum our own DB and are genuinely lifetime.
-export const MUX_VIEW_WINDOW = "90:days";
+// ── RETENTION + EPOCH (Phase 2) ──────────────────────────────────────────────
+// Mux Data is NOT a lifetime store — it has a ROLLING retention ceiling (~100d
+// on this account; probed 2026-07-16, Mux 400s `invalid_timeframe` beyond it and
+// echoes the exact valid start). We floor every request at MUX_MAX_LOOKBACK_DAYS,
+// conservatively INSIDE that ceiling, so we never knowingly exceed it. Separately,
+// custom_2 tagging only began at MUX_TAGGING_EPOCH (commit 537cd72, 2026-07-14):
+// there is NO tagged film-view datum before it, so the since-date label is floored
+// at the epoch and a Mux "all" window means "since the epoch", never lifetime.
+export const MUX_TAGGING_EPOCH = "2026-07-14T00:00:00Z";
+export const MUX_MAX_LOOKBACK_DAYS = 90;
 
-export type MuxViewMetrics = {
-  film_views: number;
-  // Milliseconds, as Mux Data reports total_watch_time. ⚠️ The ms unit is a
-  // vendor assumption VERIFIED AT ACCEPTANCE against the Mux dashboard's hours
-  // figure (formatWatchHours below), not asserted blind.
-  watch_time_ms: number;
-};
+const DAY_SEC = 86_400;
+
+// Aggregate shape (pure, unit-tested). Milliseconds for watch time, as Mux
+// reports total_watch_time — ⚠️ a vendor assumption VERIFIED AT ACCEPTANCE
+// against the Mux dashboard's hours figure (formatWatchHours), not asserted blind.
+type MuxViewAggregate = { film_views: number; watch_time_ms: number };
+// What loadMuxViewMetrics returns: the aggregate plus the epoch-honest since-date
+// (YYYY-MM-DD) the tile labels itself with.
+export type MuxViewMetrics = MuxViewAggregate & { since_iso: string };
 
 type PerTitleResult =
   | { ok: true; views: number; watch_time_ms: number }
   | { ok: false };
 
+// PURE: map a dashboard window to an ABSOLUTE Mux timeframe [start,end] (epoch-
+// second STRINGS — the SDK request type is Array<string>; Mux accepts epoch
+// strings) plus the epoch-honest since-date. queryStart is floored at retention
+// (so we never request past the ceiling); sinceIso is additionally floored at the
+// tagging epoch (no custom_2 datum exists before it). "all" maps to the epoch,
+// NOT lifetime. Note: a 24h window whose start is AFTER the epoch honestly shows
+// its own start (e.g. "since Jul 15"), not the epoch — max(queryStart, epoch).
+export function muxWindowTimeframe(
+  window: TimeWindow,
+  nowMs: number,
+): { timeframe: [string, string]; sinceIso: string } {
+  const nowSec = Math.floor(nowMs / 1000);
+  const epochSec = Math.floor(Date.parse(MUX_TAGGING_EPOCH) / 1000);
+  const retentionStartSec = nowSec - MUX_MAX_LOOKBACK_DAYS * DAY_SEC;
+  const desiredStartSec =
+    window === "24h" ? nowSec - 1 * DAY_SEC
+    : window === "7d" ? nowSec - 7 * DAY_SEC
+    : window === "30d" ? nowSec - 30 * DAY_SEC
+    : epochSec; // "all" → the epoch (Mux is retention-bounded, not lifetime)
+  const queryStartSec = Math.max(desiredStartSec, retentionStartSec);
+  const sinceSec = Math.max(queryStartSec, epochSec);
+  return {
+    timeframe: [String(queryStartSec), String(nowSec)],
+    sinceIso: new Date(sinceSec * 1000).toISOString().slice(0, 10),
+  };
+}
+
 // PURE: fold per-title results into one aggregate, or null if ANY failed. Pure so
 // the degrade-not-undercount rule is directly unit-testable without hitting Mux.
 export function aggregateMuxViewMetrics(
   results: PerTitleResult[],
-): MuxViewMetrics | null {
+): MuxViewAggregate | null {
   let film_views = 0;
   let watch_time_ms = 0;
   for (const r of results) {
@@ -112,17 +148,91 @@ function reportMuxFailure(titleId: string, reason: unknown): void {
   });
 }
 
-// IMPURE: the per-title Mux Data loop. Returns the aggregate, or null when
-// DEGRADED (any title failed, OR the Data client is unconfigured, OR Mux is down).
-// Can only RESOLVE — every failure path returns null, so it never rejects and can
-// safely sit inside the dashboard's Promise.all without being able to break it.
-// (Sentry.captureException never throws; a Sentry outage cannot break the loop.)
+// Parse Mux's echoed valid window from an `invalid_timeframe` error (the only
+// error we self-heal). The SDK APIError carries `.error` = the parsed body
+// `{ error: { type, valid_timeframe, messages } }`; valid_timeframe is [start,end]
+// epoch NUMBERS (response shape), stringified for the retry request. Any other
+// error, or a shape mismatch, returns null → no retry.
+function invalidTimeframeValidWindow(
+  reason: unknown,
+): [string, string] | null {
+  const r = reason as
+    | { error?: { error?: { type?: unknown; valid_timeframe?: unknown } } }
+    | null;
+  const inner = r?.error?.error;
+  if (inner?.type !== "invalid_timeframe") return null;
+  const vt = inner.valid_timeframe;
+  if (
+    Array.isArray(vt) &&
+    vt.length === 2 &&
+    typeof vt[0] === "number" &&
+    typeof vt[1] === "number"
+  ) {
+    return [String(vt[0]), String(vt[1])];
+  }
+  return null;
+}
+
+// One per-title Mux call over the absolute timeframe. RETENTION SELF-HEAL: if the
+// call rejects SPECIFICALLY with `invalid_timeframe` (we requested past the
+// ceiling), retry that ONE call ONCE clamped to the valid window Mux echoed. Any
+// other rejection, or a failed retry, degrades this title (reported + ok:false).
+// Never throws.
+async function fetchTitleViews(
+  mux: ReturnType<typeof getMuxData>,
+  id: string,
+  timeframe: [string, string],
+): Promise<PerTitleResult> {
+  const call = (tf: [string, string]) =>
+    mux.data.metrics.getOverallValues("views", {
+      timeframe: tf,
+      // custom_2 = title_id (the C4 join key); ONE value per call (option B).
+      // !custom_3:preview excludes owner previews (mandatory).
+      filters: [`custom_2:${id}`, "!custom_3:preview"],
+    });
+  try {
+    const v = await call(timeframe);
+    return {
+      ok: true,
+      views: v.data.total_views ?? 0,
+      watch_time_ms: v.data.total_watch_time ?? 0,
+    };
+  } catch (err) {
+    const valid = invalidTimeframeValidWindow(err);
+    if (valid) {
+      try {
+        const v = await call(valid);
+        return {
+          ok: true,
+          views: v.data.total_views ?? 0,
+          watch_time_ms: v.data.total_watch_time ?? 0,
+        };
+      } catch (retryErr) {
+        reportMuxFailure(id, retryErr);
+        return { ok: false };
+      }
+    }
+    reportMuxFailure(id, err);
+    return { ok: false };
+  }
+}
+
+// IMPURE: the per-title Mux Data loop over an ABSOLUTE, retention-floored window.
+// Returns the aggregate + since-date, or null when DEGRADED (any title failed,
+// OR the Data client is unconfigured, OR Mux is down). Can only RESOLVE — every
+// failure path returns null, so it never rejects inside the dashboard's
+// Promise.all. (Sentry.captureException never throws; a Sentry outage can't break
+// the loop.) titleIds is a SUBSET of the one gated derivation (all, or a single
+// selected title) — the tenant boundary is unchanged.
 export async function loadMuxViewMetrics(
   titleIds: string[],
+  window: TimeWindow,
 ): Promise<MuxViewMetrics | null> {
-  // Empty catalog: a real zero, not a Mux call (mirrors the sibling helpers'
-  // titleIds.length === 0 guard).
-  if (titleIds.length === 0) return { film_views: 0, watch_time_ms: 0 };
+  const { timeframe, sinceIso } = muxWindowTimeframe(window, Date.now());
+  // Empty selection/catalog: a real zero, not a Mux call.
+  if (titleIds.length === 0) {
+    return { film_views: 0, watch_time_ms: 0, since_iso: sinceIso };
+  }
 
   let mux: ReturnType<typeof getMuxData>;
   try {
@@ -131,29 +241,9 @@ export async function loadMuxViewMetrics(
     return null;
   }
 
-  const settled = await Promise.allSettled(
-    titleIds.map((id) =>
-      mux.data.metrics.getOverallValues("views", {
-        timeframe: [MUX_VIEW_WINDOW],
-        // custom_2 = title_id (the join key from C4); ONE value per call (option
-        // B). !custom_3:preview excludes owner previews (mandatory).
-        filters: [`custom_2:${id}`, "!custom_3:preview"],
-      }),
-    ),
+  const results = await Promise.all(
+    titleIds.map((id) => fetchTitleViews(mux, id, timeframe)),
   );
-
-  const results: PerTitleResult[] = settled.map((s, i) => {
-    if (s.status === "fulfilled") {
-      return {
-        ok: true,
-        views: s.value.data.total_views ?? 0,
-        watch_time_ms: s.value.data.total_watch_time ?? 0,
-      };
-    }
-    // Visibility only — the failure still poisons the aggregate below.
-    reportMuxFailure(titleIds[i], s.reason);
-    return { ok: false };
-  });
-
-  return aggregateMuxViewMetrics(results);
+  const agg = aggregateMuxViewMetrics(results);
+  return agg ? { ...agg, since_iso: sinceIso } : null;
 }
