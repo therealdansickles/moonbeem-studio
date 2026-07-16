@@ -17,6 +17,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getCurrentProfile, getUser } from "@/lib/dal";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { createClient } from "@/lib/supabase/server";
 import { chunkedIn } from "@/lib/queries/chunked-in";
 import GrowthChart from "@/components/p/GrowthChart";
 import AllEditsTable from "@/components/p/AllEditsTable";
@@ -1361,6 +1362,19 @@ export default async function PartnerDashboardPage({
   }
   const isPartnerAdmin = isSuperAdmin || membershipRole === "admin";
 
+  // ── 3B MEMBER FLIP ──────────────────────────────────────────────────────────
+  // Tenant-analytics reads run under the VIEWER's RLS for a partner member: a
+  // member gets a cookie-bound session client (auth.uid() = them), so the
+  // partner_member_read policies (Stage 3A) become the database floor UNDER the
+  // app-level titleIds scoping. A super admin KEEPS the service-role client —
+  // they hold no partner_users membership on other partners, so the member
+  // policies would return EMPTY for them (a super admin viewing any partner is
+  // the whole reason the gate above lets a non-member through). Non-members are
+  // already 404'd at the gate, so a member client is only ever built for a
+  // CONFIRMED member. The five SERVICE-ROLE-PINNED reads keep `supabase` (see
+  // their pins); the Mux tile takes titleIds, not a client.
+  const analyticsClient = isSuperAdmin ? supabase : await createClient();
+
   const { data: titles } = await supabase
     .from("titles")
     .select("id, slug, title, poster_url, is_active")
@@ -1384,15 +1398,15 @@ export default async function PartnerDashboardPage({
     requestedTitles,
     muxViews,
   ] = await Promise.all([
-      loadHeroMetrics(supabase, titleIds),
+      loadHeroMetrics(analyticsClient, titleIds),
       // Asymmetric Top-N: edits=10 (content, curated/selective);
       // editors=12 (people, matches the Moonbeem "Top 12" brand
       // staple used profile-side). The split preserves the
       // two-column dashboard's vertical balance.
-      loadTopPerformers(supabase, titleIds, 10),
-      loadTopCreators(supabase, titleIds, 12),
-      loadAllEdits(supabase, titleIds),
-      loadOpenTitleRequests(supabase, titleIds),
+      loadTopPerformers(analyticsClient, titleIds, 10),
+      loadTopCreators(analyticsClient, titleIds, 12),
+      loadAllEdits(analyticsClient, titleIds),
+      loadOpenTitleRequests(analyticsClient, titleIds),
       // Phase 1 partner analytics: hosted-FILM views + watch time from Mux Data.
       // Receives the IDENTICAL titleIds array (the one tenant derivation); its own
       // per-title !custom_3:preview loop is the whole boundary. Returns null when
@@ -1402,8 +1416,8 @@ export default async function PartnerDashboardPage({
     ]);
   const fanEditIdsForTracking = allEdits.map((r) => r.id);
   const [dailyGrowth, trackingStartDay] = await Promise.all([
-    loadDailyGrowth(supabase, fanEditIdsForTracking, titleIds),
-    loadTrackingStartDay(supabase, fanEditIdsForTracking),
+    loadDailyGrowth(analyticsClient, fanEditIdsForTracking, titleIds),
+    loadTrackingStartDay(analyticsClient, fanEditIdsForTracking),
   ]);
 
   // Window-scoped analytical layer — Visx time-series, US choropleth,
@@ -1411,7 +1425,7 @@ export default async function PartnerDashboardPage({
   // /admin/partners/[slug]/dashboard. Scope is the partner's active
   // titles only; soft-deleted titles drop out naturally above.
   const analytics = await loadPartnerAnalytics(
-    supabase,
+    analyticsClient,
     activeTitleIds,
     win,
     cutoff,
