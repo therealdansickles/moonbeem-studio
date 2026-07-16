@@ -64,6 +64,10 @@ export async function generateMetadata({
   params,
 }: PageProps): Promise<Metadata> {
   const { slug } = await params;
+  // SERVICE-ROLE-PINNED. Do NOT swap this for a member client at the 3B member
+  // flip: generateMetadata runs with no request auth context (it holds only the
+  // slug, no signed-in user) and reads one partner row to build the <title>. It
+  // must resolve for any partner regardless of who is — or isn't — signed in.
   const supabase = createServiceRoleClient();
   const { data: partner } = await supabase
     .from("partners")
@@ -1310,8 +1314,18 @@ export default async function PartnerDashboardPage({
   const user = await getUser();
   if (!user) notFound();
 
+  // SERVICE-ROLE-PINNED — the page gate's client. At the 3B member flip the
+  // ANALYTICS helpers (loadHeroMetrics, loadTopPerformers, … loadPartnerAnalytics)
+  // receive a member session client; this `supabase` and the gate/money reads
+  // that use it below STAY service-role. Do NOT rewire this construction to a
+  // member client — construct a SEPARATE analytics client for the helpers.
   const supabase = createServiceRoleClient();
 
+  // SERVICE-ROLE-PINNED (gate read). This resolves the partner by slug and, with
+  // the partner_users read below, decides who may see this dashboard — including
+  // a super_admin viewing ANY partner and the "404-hides-existence" rule. A member
+  // client would 404 a super-admin on a partner they don't belong to and cannot be
+  // trusted to gate its own access. Do NOT pass the member client here at the 3B flip.
   const { data: partner, error: partnerErr } = await supabase
     .from("partners")
     .select("id, slug, name, logo_url")
@@ -1330,6 +1344,11 @@ export default async function PartnerDashboardPage({
   const isSuperAdmin = profile?.role === "super_admin";
   let membershipRole: string | null = null;
   if (!isSuperAdmin) {
+    // SERVICE-ROLE-PINNED (gate read). The membership check is what AUTHORIZES the
+    // viewer; it must be authoritative and cannot run under the member client it is
+    // deciding about (circular — using the thing being authorized to authorize it).
+    // partner_member_read would show a member only their own row, but the gate also
+    // needs the super_admin bypass path. Do NOT pass the member client here at the 3B flip.
     const { data: membership } = await supabase
       .from("partner_users")
       .select("role")
@@ -1454,6 +1473,11 @@ export default async function PartnerDashboardPage({
   const monthStart = new Date();
   monthStart.setUTCDate(1);
   monthStart.setUTCHours(0, 0, 0, 0);
+  // SERVICE-ROLE-PINNED (money read). creator_earnings is a deny-all money table
+  // (RLS on, NO member SELECT policy — deliberately excluded from Stage 3A). At the
+  // 3B member flip a member client would return ZERO rows here and the "paid this
+  // month" card would silently read $0. This read STAYS service-role — do NOT pass
+  // the member client.
   const { data: monthEarnings } = await supabase
     .from("creator_earnings")
     .select("earnings_cents, creator_id")
@@ -1501,6 +1525,10 @@ export default async function PartnerDashboardPage({
             .select("campaign_id")
             .in("campaign_id", chunk),
       ),
+      // SERVICE-ROLE-PINNED (money read). partner_credits is a deny-all money table
+      // (RLS on, NO member SELECT policy — excluded from Stage 3A). A member client
+      // would return zero rows and blank the "Rolled over $X.XX" pill. STAYS
+      // service-role — do NOT pass the member client at the 3B flip.
       chunkedIn<{ source_campaign_id: string; amount_cents: number | null }>(
         campaignIds,
         "dashboard.rolloverCredits",
