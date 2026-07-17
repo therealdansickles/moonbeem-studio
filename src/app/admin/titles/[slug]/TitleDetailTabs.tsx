@@ -102,6 +102,16 @@ export type AnalyticsData = {
   cityBreakdown: CityCount[];
   totalGeoEvents: number;
   fanEditsComparison: AnalyticsFanEditRow[];
+  /** Phase 1.5 hosted-film block. hosted = ≥1 published mux episode
+   *  (server-side classifier — NEVER derivable from `mux` below, which is
+   *  null both when not hosted and when Mux degrades). */
+  muxHosted: boolean;
+  /** Display-ready Mux Data numbers, formatted on the SERVER (the formatter
+   *  module pulls in the Mux SDK — not client-bundle-safe). null while
+   *  muxHosted = "temporarily unavailable". */
+  mux: { filmViews: string; watchHours: string } | null;
+  /** Epoch-honest since-date label; rendered only when muxHosted. */
+  muxSinceLabel: string;
 };
 
 export type TitleMetadata = {
@@ -1923,6 +1933,46 @@ function AnalyticsTab({
           value={data.openRequests.toLocaleString()}
           label="Open title requests"
         />
+      </section>
+
+      {/* Hosted-film playback (Mux Data) — Phase 1.5, the partner-dash
+          three-state block (Phase 2B) on the admin single-title page:
+          hosted + data → numbers; hosted + degraded → "temporarily
+          unavailable"; not hosted → explicit line, NO since-date. The branch
+          keys off muxHosted (the server classifier), never off data.mux —
+          null there cannot distinguish "not hosted" from "Mux degraded". */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-display-sm m-0">
+          {data.muxHosted
+            ? `Hosted film · since ${data.muxSinceLabel}`
+            : "Hosted film"}
+        </h2>
+        {data.muxHosted ? (
+          <div className="grid grid-cols-2 gap-3 md:gap-4">
+            <HeroNumber
+              value={data.mux ? data.mux.filmViews : "—"}
+              label="Film views"
+              description={
+                data.mux
+                  ? "plays on Moonbeem's player"
+                  : "temporarily unavailable"
+              }
+            />
+            <HeroNumber
+              value={data.mux ? data.mux.watchHours : "—"}
+              label="Watch time"
+              description={
+                data.mux ? "total hours watched" : "temporarily unavailable"
+              }
+            />
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+            <p className="text-body-sm text-moonbeem-ink-muted text-center py-12 m-0">
+              Not hosted. No published Mux episode.
+            </p>
+          </div>
+        )}
       </section>
 
       <section className="flex flex-col gap-3">

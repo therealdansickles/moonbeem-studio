@@ -21,6 +21,11 @@ import {
   countByState,
   countByCity,
 } from "@/lib/dashboard/queries";
+import {
+  loadMuxViewMetrics,
+  muxWindowTimeframe,
+  formatWatchHours,
+} from "@/lib/dashboard/mux-view-metrics";
 import TitleDetailTabs, {
   type AnalyticsData,
   type ClipRow,
@@ -309,11 +314,21 @@ async function buildAnalyticsData(
     return q;
   })();
 
-  const [fanEditsRes, openRequestsRes, clicksRes] = await Promise.all([
-    fanEditsForTitleQ,
-    openRequestsCountQ,
-    clicksQ,
-  ]);
+  // Phase 1.5 hosted classifier (single title). Same predicate as the partner
+  // dash (Phase 2B): hosted = ≥1 published mux episode — source='mux'
+  // CHECK-guarantees mux_playback_id (title_episodes_source_shape_check).
+  // title_episodes is deny-all under RLS (enabled, no policies); this page's
+  // client is already service-role, which is what makes the read possible.
+  const hostedEpQ = supabase
+    .from("title_episodes")
+    .select("id")
+    .eq("title_id", titleId)
+    .eq("source", "mux")
+    .eq("is_published", true)
+    .limit(1);
+
+  const [fanEditsRes, openRequestsRes, clicksRes, hostedEpRes] =
+    await Promise.all([fanEditsForTitleQ, openRequestsCountQ, clicksQ, hostedEpQ]);
 
   const fanEdits = (fanEditsRes.data ?? []) as Array<{
     id: string;
@@ -444,6 +459,27 @@ async function buildAnalyticsData(
       "anon",
   }));
 
+  // Phase 1.5 hosted-film Mux tiles (three-state, mirrors partner-dash Phase
+  // 2B). Mux Data is queried ONLY when hosted: a non-hosted title can carry no
+  // tagged plays (custom_2 is stamped at token mint, which requires
+  // source='mux'), so the call would be vacuous. Keep the two nulls distinct:
+  // muxHosted=false means "no published mux episode" (skip, empty state);
+  // mux=null WITH muxHosted=true means the loader degraded ("temporarily
+  // unavailable") — it can only resolve, never reject.
+  const muxHosted = (hostedEpRes.data ?? []).length > 0;
+  const muxMetrics = muxHosted
+    ? await loadMuxViewMetrics([titleId], win)
+    : null;
+  // Epoch-honest since label, same derivation as the partner dash: prefer the
+  // loader's echoed since_iso, fall back to the pure helper so the label still
+  // exists when the loader degrades to null.
+  const muxSinceIso =
+    muxMetrics?.since_iso ?? muxWindowTimeframe(win, Date.now()).sinceIso;
+  const muxSinceLabel = new Date(muxSinceIso + "T00:00:00Z").toLocaleDateString(
+    "en-US",
+    { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" },
+  );
+
   // Plain-object form for stateData so it serializes across the
   // server/client boundary (Map is not JSON-friendly).
   const stateDataRecord: Record<string, number> = {};
@@ -461,5 +497,17 @@ async function buildAnalyticsData(
     cityBreakdown,
     totalGeoEvents,
     fanEditsComparison,
+    muxHosted,
+    // Display-ready strings, formatted HERE on the server: formatWatchHours
+    // lives in mux-view-metrics.ts, whose module graph pulls in the Mux SDK
+    // (@/lib/mux) — importing it from the "use client" tabs file would drag
+    // that into the client bundle. Numbers cross the boundary pre-formatted.
+    mux: muxMetrics
+      ? {
+          filmViews: muxMetrics.film_views.toLocaleString("en-US"),
+          watchHours: formatWatchHours(muxMetrics.watch_time_ms),
+        }
+      : null,
+    muxSinceLabel,
   };
 }
