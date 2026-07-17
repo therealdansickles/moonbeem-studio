@@ -12,6 +12,11 @@
 // codebase's create -> reveal-once -> copy -> list -> manage precedent): the raw
 // secret is shown exactly once in a <code className="select-all font-mono"> box
 // with a Copy button, lives in component state only, and is gone on refresh.
+// DIVERGENCE from that precedent (mint-reveal hardening, post-v1.0.1): this
+// card's <code> renders the token as ONE unwrappable line (whitespace-nowrap +
+// overflow-x-auto scroll, NOT break-all) with a character-count line under it —
+// a wrapped render is how the Adobe reviewer-notes token fragment happened.
+// Copy still reads from state, so display never affects the copied string.
 
 import { useEffect, useState } from "react";
 
@@ -166,7 +171,7 @@ export default function ApiTokensCard() {
       {rawToken && (
         <div className="mt-4 flex flex-col gap-3 rounded-lg border border-moonbeem-pink/40 bg-moonbeem-pink/5 p-4">
           <div className="flex items-center gap-2 rounded-md border border-white/10 bg-black/40 px-3 py-2">
-            <code className="flex-1 select-all break-all font-mono text-body-sm text-moonbeem-ink">
+            <code className="min-w-0 flex-1 select-all overflow-x-auto whitespace-nowrap font-mono text-body-sm text-moonbeem-ink">
               {rawToken}
             </code>
             <button
@@ -177,6 +182,9 @@ export default function ApiTokensCard() {
               {copied ? "Copied" : "Copy"}
             </button>
           </div>
+          <p className="text-caption text-moonbeem-ink-subtle">
+            {rawToken.length} characters. Copy with the button.
+          </p>
           <p className="text-body-sm text-moonbeem-ink">
             Copy this token now and store it somewhere safe, like a password
             manager. You won&apos;t be able to see it again. If you lose it,
