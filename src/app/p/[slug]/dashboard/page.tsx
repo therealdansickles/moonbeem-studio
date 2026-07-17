@@ -1395,15 +1395,49 @@ export default async function PartnerDashboardPage({
   const titleIds = titleRows.map((t) => t.id);
   const activeTitleIds = titleRows.filter((t) => t.is_active).map((t) => t.id);
 
-  // Phase 2 Mux tile filter: validate the optional ?title against the GATED
-  // titleRows set — never a raw client id. An unknown id falls back to all (no
-  // error, no query for it). The result is still a SUBSET of the one derivation,
+  // SERVICE-ROLE-PINNED (hosted classifier, Phase 2B). title_episodes is
+  // deny-all under RLS (enabled, no policies) — a member client would read zero
+  // rows and misclassify EVERY partner as not hosting. Reads a strict subset of
+  // the gated titleIds above (keyed .in() on the one derivation), never
+  // re-derives from partner.id. Hosted = ≥1 published mux episode: source='mux'
+  // CHECK-guarantees mux_playback_id (title_episodes_source_shape_check), and
+  // is_published is what makes an episode viewer-reachable (the listing and
+  // rent gates both filter on it).
+  const { data: hostedEpisodeRows } = await supabase
+    .from("title_episodes")
+    .select("title_id")
+    .in("title_id", titleIds)
+    .eq("source", "mux")
+    .eq("is_published", true);
+  const hostedTitleIds = new Set(
+    ((hostedEpisodeRows ?? []) as Array<{ title_id: string }>).map(
+      (r) => r.title_id,
+    ),
+  );
+  const partnerHosts = hostedTitleIds.size > 0;
+  // The hosted subset of the SAME gated derivation. All three coupled sites —
+  // the pill map, the pills visibility gate, and the ?title validation /
+  // muxTitleIds fallback below — read THIS one array; if they ever diverge, the
+  // accepted ?title set and the rendered pill set drift apart.
+  const hostedTitleRows = titleRows.filter((t) => hostedTitleIds.has(t.id));
+
+  // Phase 2 Mux tile filter: validate the optional ?title against the HOSTED
+  // subset of the gated titleRows set — never a raw client id. A non-hosted,
+  // unknown, or foreign id falls back to all hosted (no error, no query for
+  // it). muxTitleIds is hosted-only (Phase 2B): a title with no published mux
+  // episode can carry no tagged plays (custom_2 is stamped at token mint, which
+  // requires source='mux'), so dropping non-hosted titles cuts per-title Mux
+  // calls without changing the aggregate. Still a SUBSET of the one derivation,
   // so the tenant boundary + Phase 1 not-fetching ruling both hold.
   const selectedTitleId =
-    rawTitle && titleRows.some((t) => t.id === rawTitle) ? rawTitle : null;
-  const muxTitleIds = selectedTitleId ? [selectedTitleId] : titleIds;
+    rawTitle && hostedTitleRows.some((t) => t.id === rawTitle)
+      ? rawTitle
+      : null;
+  const muxTitleIds = selectedTitleId
+    ? [selectedTitleId]
+    : hostedTitleRows.map((t) => t.id);
   const selectedTitleName =
-    titleRows.find((t) => t.id === selectedTitleId)?.title ?? null;
+    hostedTitleRows.find((t) => t.id === selectedTitleId)?.title ?? null;
 
   const [
     metrics,
@@ -1423,7 +1457,8 @@ export default async function PartnerDashboardPage({
       loadAllEdits(analyticsClient, titleIds),
       loadOpenTitleRequests(analyticsClient, titleIds),
       // Phase 1 partner analytics: hosted-FILM views + watch time from Mux Data.
-      // Receives the IDENTICAL titleIds array (the one tenant derivation); its own
+      // Receives muxTitleIds — the hosted-only subset of the one tenant
+      // derivation (all hosted titles, or a single selected hosted one); its own
       // per-title !custom_3:preview loop is the whole boundary. Returns null when
       // DEGRADED (Mux down / token unset / any title failed) — it can only resolve,
       // so it cannot break this Promise.all. See lib/dashboard/mux-view-metrics.ts.
@@ -1796,13 +1831,22 @@ export default async function PartnerDashboardPage({
             since-date ("since Jul 14, 2026") — Mux has no data before C4 tagging, so
             these tiles NEVER say "last 30 days"; "all" means since the epoch, capped
             by Mux's ~100d retention. muxViews is null when temporarily unavailable —
-            shown honestly rather than a zero or a wrong sum. */}
+            shown honestly rather than a zero or a wrong sum.
+            PHASE 2B: pills + Mux calls scope to the HOSTED subset, and a partner
+            with NO hosted titles gets an explicit empty state (header without a
+            since-date, no pills, no tiles) keyed off hostedTitleIds — NEVER off
+            muxViews, which returns REAL ZEROS for an empty catalog and would
+            render indistinguishable from a hosted partner with no plays. */}
         <div className="mt-6 md:mt-8 flex flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <p className="text-caption uppercase tracking-wide text-moonbeem-ink-muted m-0">
-              Hosted film · since {muxSinceLabel}
+              {partnerHosts ? (
+                <>Hosted film · since {muxSinceLabel}</>
+              ) : (
+                <>Hosted film</>
+              )}
             </p>
-            {titleRows.length > 1 && (
+            {hostedTitleRows.length > 1 && (
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-caption text-moonbeem-ink-subtle mr-0.5">
                   Title:
@@ -1818,7 +1862,7 @@ export default async function PartnerDashboardPage({
                 >
                   All titles
                 </Link>
-                {titleRows.map((t) => {
+                {hostedTitleRows.map((t) => {
                   const active = t.id === selectedTitleId;
                   return (
                     <Link
@@ -1839,26 +1883,47 @@ export default async function PartnerDashboardPage({
               </div>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
-            <HeroTile
-              value={muxViews ? formatMetric(muxViews.film_views) : "—"}
-              label="Film views"
-              sub={
-                muxViews
-                  ? selectedTitleName
-                    ? `plays of ${selectedTitleName}`
-                    : "plays across all hosted films"
-                  : "temporarily unavailable"
-              }
-            />
-            <HeroTile
-              value={muxViews ? formatWatchHours(muxViews.watch_time_ms) : "—"}
-              label="Watch time"
-              sub={
-                muxViews ? "total hours watched" : "temporarily unavailable"
-              }
-            />
-          </div>
+          {partnerHosts ? (
+            <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
+              <HeroTile
+                value={muxViews ? formatMetric(muxViews.film_views) : "—"}
+                label="Film views"
+                sub={
+                  muxViews
+                    ? selectedTitleName
+                      ? `plays of ${selectedTitleName}`
+                      : "plays across all hosted films"
+                    : "temporarily unavailable"
+                }
+              />
+              <HeroTile
+                value={muxViews ? formatWatchHours(muxViews.watch_time_ms) : "—"}
+                label="Watch time"
+                sub={
+                  muxViews ? "total hours watched" : "temporarily unavailable"
+                }
+              />
+            </div>
+          ) : (
+            <div
+              className="rounded-2xl border border-white/10 p-4 md:p-5"
+              // Same card shell + gradient as HeroTile (one design language,
+              // nothing new) — just no metric number: there is nothing to count.
+              style={{
+                background:
+                  "linear-gradient(135deg, rgba(46,16,101,0.85) 0%, rgba(219,39,119,0.7) 100%), #0a0014",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
+              }}
+            >
+              <div className="text-body font-medium text-moonbeem-ink">
+                No titles hosted yet.
+              </div>
+              <div className="mt-1 text-caption text-moonbeem-ink-subtle">
+                Host a title on Moonbeem and per-title film views and watch time
+                appear here, tracked from first play.
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-6 flex flex-col gap-3">
